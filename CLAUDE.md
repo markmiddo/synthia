@@ -42,13 +42,13 @@ See `docs/LINUXVOICE-HANDOVER.md` in eventflo repo for full migration plan.
 ```
 
 ## Configuration
-- `~/.config/linuxvoice/config.yaml` - User settings
-- `~/.config/linuxvoice/google-credentials.json` - Google Cloud creds
-- `~/.config/linuxvoice/anthropic-key.txt` - Anthropic API key
+- `~/.config/synthia/config.yaml` - User settings
+- `~/.config/synthia/google-credentials.json` - Google Cloud creds
+- `~/.config/synthia/anthropic-key.txt` - Anthropic API key
 
 ## Autostart
-- `~/.config/autostart/linuxvoice.desktop` - Main app (5sec delay)
-- `~/.config/autostart/linuxvoice-daemon.desktop` - Voice daemon
+- `~/.config/autostart/synthia.desktop` - Main app (5sec delay)
+- `~/.config/autostart/synthia-daemon.desktop` - Voice daemon
 
 ## Flatpak Apps Supported
 Wezterm, Zed, Chrome, Zen, Notes, Krita, Telegram, WhatsApp (ZapZap)
@@ -79,7 +79,7 @@ use_local_tts: false   # Piper
 
 ### Running Locally
 ```bash
-cd /home/markmiddo/Misc/linuxvoice
+cd /home/markmiddo/Misc/synthia
 source venv/bin/activate
 python main.py          # Voice assistant
 python voice-daemon.py  # Claude Code dictation
@@ -94,7 +94,7 @@ pkill -f "python.*voice-daemon"
 
 ### Checking Logs
 ```bash
-tail -f /tmp/linuxvoice.log      # Main app
+tail -f /tmp/synthia.log      # Main app
 tail -f /tmp/voice-daemon.log    # Daemon
 tail -f /tmp/stop-hook-debug.log # Claude hook
 ```

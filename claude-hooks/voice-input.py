@@ -13,8 +13,8 @@ import sys
 import os
 import argparse
 
-# Add linuxvoice to path
-sys.path.insert(0, '/home/markmiddo/Misc/linuxvoice')
+# Add synthia to path
+sys.path.insert(0, '/home/markmiddo/Misc/synthia')
 
 from audio import AudioRecorder
 from transcribe import Transcriber
@@ -82,7 +82,7 @@ def main():
     parser.add_argument("--push-to-talk", "-p", action="store_true", help="Use push-to-talk mode")
     args = parser.parse_args()
 
-    # Suppress linuxvoice prints
+    # Suppress synthia prints
     old_stdout = sys.stdout
     sys.stdout = sys.stderr
 

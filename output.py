@@ -1,4 +1,4 @@
-"""Text output via xdotool for LinuxVoice."""
+"""Text output via xdotool for Synthia."""
 
 import subprocess
 import shlex

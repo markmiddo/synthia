@@ -1,4 +1,4 @@
-"""Command execution for LinuxVoice assistant."""
+"""Command execution for Synthia assistant."""
 
 import subprocess
 import os
@@ -361,6 +361,41 @@ def take_screenshot(region: str = "full") -> str:
         return ""
 
 
+# ============== REMOTE MODE ==============
+
+REMOTE_MODE_FILE = '/tmp/synthia-remote-mode'
+DEFAULT_CHAT_ID = 537808338  # Mark's Telegram ID
+
+
+def enable_remote_mode() -> bool:
+    """Enable remote mode - send updates to Telegram."""
+    try:
+        with open(REMOTE_MODE_FILE, 'w') as f:
+            f.write(str(DEFAULT_CHAT_ID))
+        print("✅ Remote mode enabled")
+        return True
+    except Exception as e:
+        print(f"❌ Remote mode error: {e}")
+        return False
+
+
+def disable_remote_mode() -> bool:
+    """Disable remote mode - back to voice."""
+    try:
+        if os.path.exists(REMOTE_MODE_FILE):
+            os.remove(REMOTE_MODE_FILE)
+        print("✅ Remote mode disabled")
+        return True
+    except Exception as e:
+        print(f"❌ Remote mode error: {e}")
+        return False
+
+
+def is_remote_mode() -> bool:
+    """Check if remote mode is enabled."""
+    return os.path.exists(REMOTE_MODE_FILE)
+
+
 # ============== SYSTEM CONTROL ==============
 
 def lock_screen() -> bool:
@@ -481,6 +516,13 @@ def execute_actions(actions: List[Dict[str, Any]]) -> tuple[list[bool], str | No
 
         elif action_type == "suspend":
             results.append(suspend_system())
+
+        # Remote mode
+        elif action_type == "enable_remote":
+            results.append(enable_remote_mode())
+
+        elif action_type == "disable_remote":
+            results.append(disable_remote_mode())
 
         else:
             print(f"⚠️  Unknown action type: {action_type}")

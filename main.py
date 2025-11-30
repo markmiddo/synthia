@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LinuxVoice - Voice Dictation + AI Assistant for Linux.
+"""Synthia - Voice Dictation + AI Assistant for Linux.
 
 Usage:
     Hold Right Ctrl - Dictation mode (speech to text)
@@ -24,11 +24,11 @@ from sounds import SoundEffects
 from notifications import notify_ready, notify_dictation, notify_assistant, notify_error
 
 
-class LinuxVoice:
-    """Main LinuxVoice application."""
+class Synthia:
+    """Main Synthia application."""
 
     def __init__(self):
-        print("🚀 Starting LinuxVoice...")
+        print("🚀 Starting Synthia...")
 
         # Load configuration
         self.config = load_config()
@@ -98,7 +98,7 @@ class LinuxVoice:
 
         print(f"\n📌 Dictation key: {self.config['dictation_key']} (hold to dictate)")
         print(f"📌 Assistant key: {self.config['assistant_key']} (hold to ask AI)")
-        print("\n✨ LinuxVoice ready!\n")
+        print("\n✨ Synthia ready!\n")
 
         # Show notification
         if self.config.get("show_notifications", True):
@@ -215,7 +215,7 @@ class LinuxVoice:
 
             # Escape to quit
             elif key == Key.esc:
-                print("\n👋 Exiting LinuxVoice...")
+                print("\n👋 Exiting Synthia...")
                 self.running = False
                 return False
 
@@ -260,7 +260,7 @@ def main():
         return
 
     try:
-        app = LinuxVoice()
+        app = Synthia()
         app.run()
     except KeyboardInterrupt:
         print("\n👋 Interrupted, exiting...")

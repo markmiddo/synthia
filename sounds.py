@@ -1,4 +1,4 @@
-"""Sound effects for LinuxVoice."""
+"""Sound effects for Synthia."""
 
 import subprocess
 import os
@@ -49,7 +49,7 @@ def _generate_beep(frequency: int, duration_ms: int, volume: float = 0.5) -> byt
 
 
 class SoundEffects:
-    """Play sound effects for LinuxVoice events."""
+    """Play sound effects for Synthia events."""
 
     def __init__(self, enabled: bool = True):
         self.enabled = enabled

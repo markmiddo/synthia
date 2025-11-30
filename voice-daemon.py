@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LinuxVoice Daemon for Claude Code
+Synthia Daemon for Claude Code
 ---------------------------------
 Runs in background and listens for hotkey to capture voice input.
 When you press the hotkey, it records, transcribes, and auto-types into Claude Code.
@@ -28,7 +28,7 @@ from output import type_text
 
 class VoiceDaemon:
     def __init__(self):
-        print("🎙️  LinuxVoice Daemon for Claude Code")
+        print("🎙️  Synthia Daemon for Claude Code")
         print("=" * 40)
 
         self.config = load_config()

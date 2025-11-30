@@ -1,4 +1,4 @@
-"""Configuration loading for LinuxVoice."""
+"""Configuration loading for Synthia."""
 
 import os
 import yaml
@@ -14,8 +14,8 @@ DEFAULT_CONFIG = {
     "assistant_model": "claude-sonnet-4-20250514",
     "conversation_memory": 10,
     "assistant_personality": "You are a helpful Linux assistant. Keep responses brief and friendly.",
-    "google_credentials": "~/.config/linuxvoice/google-creds.json",
-    "anthropic_api_key": "~/.config/linuxvoice/anthropic-key.txt",
+    "google_credentials": "~/.config/synthia/google-creds.json",
+    "anthropic_api_key": "~/.config/synthia/anthropic-key.txt",
     "show_notifications": True,
     "play_sound_on_record": True,
     # Local model options
@@ -28,7 +28,7 @@ DEFAULT_CONFIG = {
     "ollama_url": "http://localhost:11434",
 }
 
-CONFIG_PATH = Path.home() / ".config" / "linuxvoice" / "config.yaml"
+CONFIG_PATH = Path.home() / ".config" / "synthia" / "config.yaml"
 
 
 def load_config() -> dict:

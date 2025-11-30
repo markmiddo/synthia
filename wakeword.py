@@ -1,4 +1,4 @@
-"""Wake word detection for LinuxVoice.
+"""Wake word detection for Synthia.
 
 Uses a simple approach: continuously listen and check transcription for wake word.
 For production, you'd want something like Porcupine or Snowboy for offline detection.

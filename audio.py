@@ -1,4 +1,4 @@
-"""Audio capture for LinuxVoice."""
+"""Audio capture for Synthia."""
 
 import numpy as np
 import sounddevice as sd

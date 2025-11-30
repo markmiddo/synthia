@@ -8,8 +8,8 @@ import sys
 import os
 import json
 
-# Add linuxvoice to path
-sys.path.insert(0, '/home/markmiddo/Misc/linuxvoice')
+# Add synthia to path
+sys.path.insert(0, '/home/markmiddo/dev/misc/synthia')
 
 
 def get_last_assistant_message(transcript_path: str) -> str:
@@ -105,32 +105,83 @@ def main():
     if message.startswith('```') or len(message) < 10:
         sys.exit(0)
 
-    # Skip if message is too long (likely code-heavy)
-    if len(message) > 5000:
-        # Just speak the first part
-        message = message[:1500] + "... I've written more in the response."
+    # Limit message length - speak first ~500 chars (2-3 sentences)
+    full_message = message  # Keep full for Telegram
+    if len(message) > 500:
+        # Find a good cutoff point (end of sentence)
+        cutoff = 500
+        for end in ['. ', '! ', '? ']:
+            pos = message[:600].rfind(end)
+            if pos > 300:
+                cutoff = pos + 1
+                break
+        message = message[:cutoff] + " Check the full response for more."
 
-    # Import TTS and speak using local Piper
-    try:
-        with open('/tmp/stop-hook-debug.log', 'a') as f:
-            f.write(f"About to speak: {message[:100]}...\n")
+    # Check if we're in remote mode
+    remote_mode = os.path.exists('/tmp/synthia-remote-mode')
 
-        from tts import TextToSpeech
-        from config import load_config
+    with open('/tmp/stop-hook-debug.log', 'a') as f:
+        f.write(f"Remote mode: {remote_mode}\n")
 
-        config = load_config()
-        tts = TextToSpeech(
-            use_local=True,
-            local_voice=config.get('local_tts_voice', '~/.local/share/piper-voices/en_US-lessac-high.onnx')
-        )
+    if remote_mode:
+        # Send to Telegram instead of speaking
+        try:
+            from remote.send_telegram import send_telegram
 
-        tts.speak(message)
+            # Detect if this is a plan (contains numbered steps or "plan" keywords)
+            is_plan = False
+            plan_indicators = [
+                '1.', '1)', 'step 1', 'first,', 'here\'s my plan', 'here is my plan',
+                'i\'ll need to', 'i will need to', 'the plan is', 'my plan:',
+                'approach:', 'steps:', 'to do this', 'implementation plan'
+            ]
+            lower_msg = full_message.lower()
+            if any(indicator in lower_msg for indicator in plan_indicators):
+                # Check if it looks like a plan (has multiple numbered items)
+                if re.search(r'\d\.\s+\w', full_message) or re.search(r'(?:first|then|next|finally)', lower_msg):
+                    is_plan = True
 
-        with open('/tmp/stop-hook-debug.log', 'a') as f:
-            f.write(f"Spoke successfully\n")
-    except Exception as e:
-        with open('/tmp/stop-hook-debug.log', 'a') as f:
-            f.write(f"TTS Error: {e}\n")
+            # Send longer message to Telegram (up to 1000 chars)
+            telegram_message = full_message[:1000]
+            if len(full_message) > 1000:
+                telegram_message += "...\n\n_(truncated - check Claude Code for full response)_"
+
+            if is_plan:
+                # This is a plan - ask for approval
+                with open('/tmp/synthia-waiting-approval', 'w') as f:
+                    f.write('waiting')
+                send_telegram(f"📋 *Plan:*\n\n{telegram_message}\n\n---\n✋ *Reply 'yes' or 'go' to approve*", "Markdown")
+                with open('/tmp/stop-hook-debug.log', 'a') as f:
+                    f.write(f"Sent plan to Telegram, waiting for approval\n")
+            else:
+                send_telegram(f"🤖 *Claude:*\n\n{telegram_message}", "Markdown")
+                with open('/tmp/stop-hook-debug.log', 'a') as f:
+                    f.write(f"Sent to Telegram\n")
+        except Exception as e:
+            with open('/tmp/stop-hook-debug.log', 'a') as f:
+                f.write(f"Telegram Error: {e}\n")
+    else:
+        # Speak using local Piper
+        try:
+            with open('/tmp/stop-hook-debug.log', 'a') as f:
+                f.write(f"About to speak: {message[:100]}...\n")
+
+            from tts import TextToSpeech
+            from config import load_config
+
+            config = load_config()
+            tts = TextToSpeech(
+                use_local=True,
+                local_voice=config.get('local_tts_voice', '~/.local/share/piper-voices/en_US-lessac-high.onnx')
+            )
+
+            tts.speak(message)
+
+            with open('/tmp/stop-hook-debug.log', 'a') as f:
+                f.write(f"Spoke successfully\n")
+        except Exception as e:
+            with open('/tmp/stop-hook-debug.log', 'a') as f:
+                f.write(f"TTS Error: {e}\n")
 
 
 if __name__ == "__main__":

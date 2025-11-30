@@ -1,4 +1,4 @@
-"""System tray indicator for LinuxVoice."""
+"""System tray indicator for Synthia."""
 
 import os
 import threading
@@ -26,7 +26,7 @@ STATUS_ICONS = {
 
 
 class TrayIndicator:
-    """System tray indicator showing LinuxVoice status."""
+    """System tray indicator showing Synthia status."""
 
     def __init__(self, on_quit=None):
         self.on_quit = on_quit
@@ -70,7 +70,7 @@ class TrayIndicator:
     def _create_menu(self):
         """Create the tray icon menu."""
         return pystray.Menu(
-            Item("LinuxVoice", None, enabled=False),
+            Item("Synthia", None, enabled=False),
             Item("─────────", None, enabled=False),
             Item("Right Ctrl: Dictation", None, enabled=False),
             Item("Right Alt: Assistant", None, enabled=False),
@@ -94,9 +94,9 @@ class TrayIndicator:
         """Start the tray indicator in a background thread."""
         def run():
             self.icon = pystray.Icon(
-                "linuxvoice",
+                "synthia",
                 self._get_icon(),
-                "LinuxVoice",
+                "Synthia",
                 menu=self._create_menu()
             )
             self.icon.run()

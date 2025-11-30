@@ -1,4 +1,4 @@
-"""Desktop notifications for LinuxVoice."""
+"""Desktop notifications for Synthia."""
 
 import subprocess
 
@@ -16,7 +16,7 @@ def notify(title: str, message: str, icon: str = "audio-input-microphone", timeo
         subprocess.run(
             [
                 "notify-send",
-                "--app-name=LinuxVoice",
+                "--app-name=Synthia",
                 f"--icon={icon}",
                 f"--expire-time={timeout}",
                 title,
@@ -34,8 +34,8 @@ def notify(title: str, message: str, icon: str = "audio-input-microphone", timeo
 
 
 def notify_ready():
-    """Notify that LinuxVoice is ready."""
-    notify("LinuxVoice", "Ready! Hold Right Ctrl to dictate, Right Alt for assistant.", "audio-input-microphone")
+    """Notify that Synthia is ready."""
+    notify("Synthia", "Ready! Hold Right Ctrl to dictate, Right Alt for assistant.", "audio-input-microphone")
 
 
 def notify_dictation(text: str):
@@ -53,4 +53,4 @@ def notify_assistant(response: str):
 
 def notify_error(message: str):
     """Notify of an error."""
-    notify("LinuxVoice Error", message, "dialog-error", timeout=5000)
+    notify("Synthia Error", message, "dialog-error", timeout=5000)

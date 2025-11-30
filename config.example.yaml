@@ -1,4 +1,4 @@
-# LinuxVoice Configuration
+# Synthia Configuration
 
 # Hotkeys
 dictation_key: "Key.ctrl_r"      # Hold for dictation mode
@@ -21,8 +21,8 @@ assistant_personality: |
   Be conversational but efficient.
 
 # Credentials (paths)
-google_credentials: "~/.config/linuxvoice/google-creds.json"
-anthropic_api_key: "~/.config/linuxvoice/anthropic-key.txt"
+google_credentials: "~/.config/synthia/google-creds.json"
+anthropic_api_key: "~/.config/synthia/anthropic-key.txt"
 
 # UI
 show_notifications: true

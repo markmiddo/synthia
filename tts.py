@@ -98,8 +98,9 @@ class TextToSpeech:
             safe_text = text.replace('"', '').replace("'", "")
 
             # Use full path to piper in venv
-            piper_bin = "/home/markmiddo/Misc/linuxvoice/venv/bin/piper"
-            cmd = f'echo "{safe_text}" | {piper_bin} --model "{self.local_voice}" --output-raw | aplay -r 22050 -f S16_LE -t raw -q'
+            piper_bin = "/home/markmiddo/Misc/synthia/venv/bin/piper"
+            # length-scale 0.7 = ~1.4x speed
+            cmd = f'echo "{safe_text}" | {piper_bin} --model "{self.local_voice}" --length-scale 0.7 --output-raw | aplay -r 22050 -f S16_LE -t raw -q'
 
             subprocess.run(cmd, shell=True, check=True)
             return True

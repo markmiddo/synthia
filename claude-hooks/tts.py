@@ -13,8 +13,8 @@ import sys
 import os
 import argparse
 
-# Add linuxvoice to path
-sys.path.insert(0, '/home/markmiddo/Misc/linuxvoice')
+# Add synthia to path
+sys.path.insert(0, '/home/markmiddo/Misc/synthia')
 
 from tts import TextToSpeech
 from config import load_config, get_google_credentials_path
