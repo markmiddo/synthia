@@ -1,8 +1,14 @@
 """Speech-to-Text integration with Google Cloud and local Whisper options."""
 
 import os
+import sys
 import tempfile
 import numpy as np
+
+# Add cuDNN libraries to path for GPU support
+_cudnn_path = os.path.join(os.path.dirname(__file__), "venv/lib/python3.10/site-packages/nvidia/cudnn/lib")
+if os.path.exists(_cudnn_path):
+    os.environ["LD_LIBRARY_PATH"] = _cudnn_path + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
 
 class Transcriber:
@@ -49,16 +55,26 @@ class Transcriber:
         """Initialize local Whisper model using faster-whisper."""
         from faster_whisper import WhisperModel
 
-        # Use tiny model on CPU for fastest response
-        model_name = "tiny"  # tiny is fastest, ~1s transcription
+        model_name = "tiny"
         print(f"Loading faster-whisper model: {model_name}...")
-        self.whisper_model = WhisperModel(
-            model_name,
-            device="cpu",
-            compute_type="int8",
-            cpu_threads=4
-        )
-        print(f"Faster-whisper {model_name} loaded (CPU int8)")
+
+        # Try GPU first, fall back to CPU
+        try:
+            self.whisper_model = WhisperModel(
+                model_name,
+                device="cuda",
+                compute_type="float16",
+            )
+            print(f"Faster-whisper {model_name} loaded (GPU float16)")
+        except Exception as e:
+            print(f"GPU failed ({e}), falling back to CPU...")
+            self.whisper_model = WhisperModel(
+                model_name,
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=4
+            )
+            print(f"Faster-whisper {model_name} loaded (CPU int8)")
 
     def transcribe(self, audio_data: bytes) -> str:
         """Transcribe audio bytes to text."""
