@@ -17,8 +17,8 @@ import tempfile
 import logging
 from datetime import datetime
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add src to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from telegram import Update
 from telegram.ext import (
@@ -29,9 +29,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from config import load_config
-from assistant import Assistant
-from transcribe import Transcriber
+from synthia.config import load_config
+from synthia.assistant import Assistant
+from synthia.transcribe import Transcriber
 
 # Set up logging
 logging.basicConfig(

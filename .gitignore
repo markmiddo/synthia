@@ -1,14 +1,25 @@
 # Virtual environment
 venv/
-__pycache__/
-*.pyc
+.venv/
 
-# Config with secrets (user creates their own)
-# Keep config.yaml template but ignore user's actual config
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Config with secrets
+config.yaml
 
 # Temp files
 *.mp3
 *.wav
+*.ogg
 /tmp/
 
 # Logs
@@ -17,3 +28,13 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+.mypy_cache/

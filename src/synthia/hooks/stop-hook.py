@@ -9,7 +9,7 @@ import os
 import json
 
 # Add synthia to path
-sys.path.insert(0, '/home/markmiddo/dev/misc/synthia')
+sys.path.insert(0, '/home/markmiddo/dev/misc/synthia/src')
 
 
 def get_last_assistant_message(transcript_path: str) -> str:
@@ -126,7 +126,7 @@ def main():
     if remote_mode:
         # Send to Telegram instead of speaking
         try:
-            from remote.send_telegram import send_telegram
+            from synthia.remote.send_telegram import send_telegram
 
             # Detect if this is a plan (contains numbered steps or "plan" keywords)
             is_plan = False
@@ -166,8 +166,8 @@ def main():
             with open('/tmp/stop-hook-debug.log', 'a') as f:
                 f.write(f"About to speak: {message[:100]}...\n")
 
-            from tts import TextToSpeech
-            from config import load_config
+            from synthia.tts import TextToSpeech
+            from synthia.config import load_config
 
             config = load_config()
             tts = TextToSpeech(

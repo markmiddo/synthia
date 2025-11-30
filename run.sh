@@ -9,4 +9,4 @@ export LD_LIBRARY_PATH="$CUDNN_LIB:$CUBLAS_LIB:$LD_LIBRARY_PATH"
 
 cd "$SCRIPT_DIR"
 source venv/bin/activate
-./venv/bin/python main.py "$@"
+./venv/bin/python -m synthia.main "$@"
