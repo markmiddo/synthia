@@ -44,3 +44,7 @@ sounddevice==0.5.3
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.5.0
+
+# Local mode dependencies (optional)
+faster-whisper>=1.0.0
+piper-tts>=1.0.0

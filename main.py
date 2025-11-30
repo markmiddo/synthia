@@ -53,29 +53,39 @@ class LinuxVoice:
         )
         print("✅ Audio recorder initialized")
 
-        # Initialize transcriber
+        # Initialize transcriber (local Whisper or Google Cloud)
+        use_local_stt = self.config.get("use_local_stt", False)
         self.transcriber = Transcriber(
-            credentials_path=credentials_path,
+            credentials_path=credentials_path if not use_local_stt else None,
             language=self.config["language"],
             sample_rate=self.config["sample_rate"],
+            use_local=use_local_stt,
+            local_model=self.config.get("local_stt_model", "small"),
         )
-        print("✅ Transcriber initialized")
+        print(f"✅ Transcriber initialized ({'local Whisper' if use_local_stt else 'Google Cloud'})")
 
-        # Initialize TTS
+        # Initialize TTS (local Piper or Google Cloud)
+        use_local_tts = self.config.get("use_local_tts", False)
         self.tts = TextToSpeech(
-            credentials_path=credentials_path,
+            credentials_path=credentials_path if not use_local_tts else None,
             voice_name=self.config["tts_voice"],
             speed=self.config["tts_speed"],
+            use_local=use_local_tts,
+            local_voice=self.config.get("local_tts_voice", "~/.local/share/piper-voices/en_US-amy-medium.onnx"),
         )
-        print("✅ TTS initialized")
+        print(f"✅ TTS initialized ({'local Piper' if use_local_tts else 'Google Cloud'})")
 
-        # Initialize Assistant
+        # Initialize Assistant (local Ollama or Claude API)
+        use_local_llm = self.config.get("use_local_llm", False)
         self.assistant = Assistant(
-            api_key=anthropic_key,
+            api_key=anthropic_key if not use_local_llm else None,
             model=self.config["assistant_model"],
             memory_size=self.config["conversation_memory"],
+            use_local=use_local_llm,
+            local_model=self.config.get("local_llm_model", "qwen2.5:7b-instruct-q4_0"),
+            ollama_url=self.config.get("ollama_url", "http://localhost:11434"),
         )
-        print("✅ Assistant initialized")
+        print(f"✅ Assistant initialized ({'local Ollama' if use_local_llm else 'Claude API'})")
 
         # State tracking
         self.dictation_active = False

@@ -89,6 +89,18 @@ def main():
     # Clean and truncate for TTS
     message = message.strip()
 
+    # Strip markdown formatting for cleaner speech
+    import re
+    message = re.sub(r'\*\*([^*]+)\*\*', r'\1', message)  # **bold**
+    message = re.sub(r'\*([^*]+)\*', r'\1', message)      # *italic*
+    message = re.sub(r'`([^`]+)`', r'\1', message)        # `code`
+    message = re.sub(r'^\s*[-*]\s+', '', message, flags=re.MULTILINE)  # bullet points
+    message = re.sub(r'^\s*\d+\.\s+', '', message, flags=re.MULTILINE)  # numbered lists
+    message = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', message)  # [links](url)
+    message = re.sub(r'(?<=[a-zA-Z])/(?=[a-zA-Z])', ' or ', message)  # word/word -> word or word
+    message = re.sub(r'(?<!\w)/|/(?!\w)', ' ', message)  # standalone slashes
+    message = message.replace('\\', '')  # remove backslashes
+
     # Skip if it's just code or too short
     if message.startswith('```') or len(message) < 10:
         sys.exit(0)
@@ -98,19 +110,18 @@ def main():
         # Just speak the first part
         message = message[:1500] + "... I've written more in the response."
 
-    # Import TTS and speak
+    # Import TTS and speak using local Piper
     try:
         with open('/tmp/stop-hook-debug.log', 'a') as f:
             f.write(f"About to speak: {message[:100]}...\n")
 
         from tts import TextToSpeech
-        from config import load_config, get_google_credentials_path
+        from config import load_config
 
         config = load_config()
         tts = TextToSpeech(
-            get_google_credentials_path(config),
-            config['tts_voice'],
-            config['tts_speed']
+            use_local=True,
+            local_voice=config.get('local_tts_voice', '~/.local/share/piper-voices/en_US-lessac-high.onnx')
         )
 
         tts.speak(message)

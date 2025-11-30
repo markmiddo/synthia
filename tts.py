@@ -1,27 +1,36 @@
-"""Google Cloud Text-to-Speech integration with streaming."""
+"""Text-to-Speech integration with Google Cloud and local Piper options."""
 
 import os
 import subprocess
 import tempfile
-import threading
-from google.cloud import texttospeech
 
 
 class TextToSpeech:
-    """Converts text to speech using Google Cloud TTS with streaming playback."""
+    """Converts text to speech using Google Cloud TTS or local Piper."""
 
-    def __init__(self, credentials_path: str, voice_name: str = "en-US-Neural2-J", speed: float = 1.0):
-        # Set credentials environment variable
+    def __init__(self, credentials_path: str = None, voice_name: str = "en-US-Neural2-J",
+                 speed: float = 1.0, use_local: bool = False,
+                 local_voice: str = "~/.local/share/piper-voices/en_US-amy-medium.onnx"):
+        self.use_local = use_local
+        self.speed = speed
+        self.voice_name = voice_name
+        self.local_voice = os.path.expanduser(local_voice)
+        self.client = None
+
+        if use_local:
+            print(f"Piper TTS initialized with voice: {os.path.basename(self.local_voice)}")
+        else:
+            self._init_google(credentials_path, voice_name)
+
+    def _init_google(self, credentials_path: str, voice_name: str):
+        """Initialize Google Cloud TTS."""
+        from google.cloud import texttospeech
+
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-
         self.client = texttospeech.TextToSpeechClient()
         self.voice_name = voice_name
-        self.speed = speed
-
-        # Extract language code from voice name (e.g., "en-US" from "en-US-Neural2-J")
         self.language_code = "-".join(voice_name.split("-")[:2])
-
-        print(f"🔊 TTS initialized with voice: {voice_name}")
+        print(f"Google TTS initialized with voice: {voice_name}")
 
     def _split_into_chunks(self, text: str, max_chars: int = 200) -> list:
         """Split text into smaller chunks for streaming effect."""
@@ -38,7 +47,6 @@ class TextToSpeech:
         if current.strip():
             sentences.append(current.strip())
 
-        # If we got sentences, return them
         if sentences:
             return sentences
 
@@ -59,54 +67,64 @@ class TextToSpeech:
         return chunks if chunks else [text]
 
     def speak(self, text: str) -> bool:
-        """Convert text to speech and play it with streaming for faster response."""
+        """Convert text to speech and play it."""
         if not text:
             return False
 
         try:
-            print(f"🗣️  Speaking: {text[:50]}{'...' if len(text) > 50 else ''}")
+            print(f"Speaking: {text[:50]}{'...' if len(text) > 50 else ''}")
 
-            # For short text, just speak directly
+            if self.use_local:
+                return self._speak_piper(text)
+
+            # For Google TTS, use chunking for longer text
             if len(text) < 150:
-                return self._speak_chunk(text)
+                return self._speak_google_chunk(text)
 
-            # For longer text, split into chunks and stream
             chunks = self._split_into_chunks(text)
-
-            # Start generating first chunk immediately
-            for i, chunk in enumerate(chunks):
-                if not chunk.strip():
-                    continue
-
-                # Generate and play each chunk
-                if not self._speak_chunk(chunk):
+            for chunk in chunks:
+                if chunk.strip() and not self._speak_google_chunk(chunk):
                     return False
-
             return True
 
         except Exception as e:
-            print(f"❌ TTS error: {e}")
+            print(f"TTS error: {e}")
             return False
 
-    def _speak_chunk(self, text: str) -> bool:
-        """Speak a single chunk of text."""
+    def _speak_piper(self, text: str) -> bool:
+        """Speak using local Piper TTS."""
         try:
-            # Set up the voice parameters
+            # Remove quotes instead of escaping to avoid backslash issues
+            safe_text = text.replace('"', '').replace("'", "")
+
+            # Use full path to piper in venv
+            piper_bin = "/home/markmiddo/Misc/linuxvoice/venv/bin/piper"
+            cmd = f'echo "{safe_text}" | {piper_bin} --model "{self.local_voice}" --output-raw | aplay -r 22050 -f S16_LE -t raw -q'
+
+            subprocess.run(cmd, shell=True, check=True)
+            return True
+
+        except Exception as e:
+            print(f"Piper TTS error: {e}")
+            return False
+
+    def _speak_google_chunk(self, text: str) -> bool:
+        """Speak a single chunk using Google Cloud TTS."""
+        from google.cloud import texttospeech
+
+        try:
             voice = texttospeech.VoiceSelectionParams(
                 language_code=self.language_code,
                 name=self.voice_name,
             )
 
-            # Set up the audio config
             audio_config = texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.MP3,
                 speaking_rate=self.speed,
             )
 
-            # Build the synthesis input
             synthesis_input = texttospeech.SynthesisInput(text=text)
 
-            # Perform the text-to-speech request
             response = self.client.synthesize_speech(
                 input=synthesis_input,
                 voice=voice,
@@ -118,21 +136,19 @@ class TextToSpeech:
                 f.write(response.audio_content)
                 temp_path = f.name
 
-            # Play with mpv (quiet mode, no video)
             subprocess.run(
                 ["mpv", "--no-video", "--really-quiet", temp_path],
                 check=True,
             )
 
-            # Clean up temp file
             os.unlink(temp_path)
-
             return True
 
         except Exception as e:
-            print(f"❌ TTS chunk error: {e}")
+            print(f"Google TTS error: {e}")
             return False
 
     def stop(self):
         """Stop any currently playing audio."""
         subprocess.run(["pkill", "-f", "mpv"], check=False)
+        subprocess.run(["pkill", "-f", "aplay"], check=False)

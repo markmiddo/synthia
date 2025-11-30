@@ -18,6 +18,14 @@ DEFAULT_CONFIG = {
     "anthropic_api_key": "~/.config/linuxvoice/anthropic-key.txt",
     "show_notifications": True,
     "play_sound_on_record": True,
+    # Local model options
+    "use_local_stt": False,
+    "use_local_llm": False,
+    "use_local_tts": False,
+    "local_stt_model": "small",  # tiny, base, small, medium, large
+    "local_llm_model": "qwen2.5:7b-instruct-q4_0",
+    "local_tts_voice": "~/.local/share/piper-voices/en_US-amy-medium.onnx",
+    "ollama_url": "http://localhost:11434",
 }
 
 CONFIG_PATH = Path.home() / ".config" / "linuxvoice" / "config.yaml"
