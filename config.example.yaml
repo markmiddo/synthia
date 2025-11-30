@@ -1,0 +1,29 @@
+# LinuxVoice Configuration
+
+# Hotkeys
+dictation_key: "Key.ctrl_r"      # Hold for dictation mode
+assistant_key: "Key.alt_r"       # Hold for assistant mode
+
+# Speech Recognition
+language: "en-US"
+sample_rate: 16000
+
+# Text-to-Speech
+tts_voice: "en-US-Neural2-J"     # Google TTS voice
+tts_speed: 1.0                   # Speech rate multiplier
+
+# Assistant
+assistant_model: "claude-sonnet-4-20250514"
+conversation_memory: 10          # Number of exchanges to remember
+assistant_personality: |
+  You are a helpful Linux assistant. Keep responses brief and friendly.
+  When executing commands, confirm what you're doing.
+  Be conversational but efficient.
+
+# Credentials (paths)
+google_credentials: "~/.config/linuxvoice/google-creds.json"
+anthropic_api_key: "~/.config/linuxvoice/anthropic-key.txt"
+
+# UI
+show_notifications: true
+play_sound_on_record: true

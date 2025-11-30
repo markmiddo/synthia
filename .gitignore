@@ -1,0 +1,19 @@
+# Virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Config with secrets (user creates their own)
+# Keep config.yaml template but ignore user's actual config
+
+# Temp files
+*.mp3
+*.wav
+/tmp/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/

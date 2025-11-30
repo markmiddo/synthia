@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""
+Claude Code Stop hook - speaks Claude's response when it finishes.
+Reads hook JSON from stdin and extracts the response to speak.
+"""
+
+import sys
+import os
+import json
+
+# Add linuxvoice to path
+sys.path.insert(0, '/home/markmiddo/Misc/linuxvoice')
+
+
+def get_last_assistant_message(transcript_path: str) -> str:
+    """Extract the last assistant message from the transcript (JSONL format)."""
+    try:
+        # Read JSONL file (one JSON object per line)
+        entries = []
+        with open(transcript_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+
+        # Find the last assistant message with text content
+        for entry in reversed(entries):
+            if entry.get('type') == 'assistant':
+                message = entry.get('message', {})
+
+                # Message is a dict with 'content' key
+                if isinstance(message, dict):
+                    content = message.get('content', [])
+                    if isinstance(content, list):
+                        texts = []
+                        for block in content:
+                            if isinstance(block, dict) and block.get('type') == 'text':
+                                texts.append(block.get('text', ''))
+                        if texts:
+                            return ' '.join(texts)
+
+        return ""
+    except Exception as e:
+        with open('/tmp/stop-hook-debug.log', 'a') as f:
+            f.write(f"Error reading transcript: {e}\n")
+        return ""
+
+
+def main():
+    # Log that hook was called
+    with open('/tmp/stop-hook-debug.log', 'a') as f:
+        f.write(f"Hook called at {__import__('datetime').datetime.now()}\n")
+
+    # Read hook input from stdin
+    try:
+        raw_input = sys.stdin.read()
+        with open('/tmp/stop-hook-debug.log', 'a') as f:
+            f.write(f"Raw input: {raw_input}\n")
+        hook_input = json.loads(raw_input)
+    except json.JSONDecodeError as e:
+        with open('/tmp/stop-hook-debug.log', 'a') as f:
+            f.write(f"JSON decode error: {e}\n")
+        sys.exit(0)
+
+    with open('/tmp/stop-hook-debug.log', 'a') as f:
+        f.write(f"Parsed input keys: {hook_input.keys()}\n")
+
+    transcript_path = hook_input.get('transcript_path', '')
+
+    with open('/tmp/stop-hook-debug.log', 'a') as f:
+        f.write(f"Transcript path: {transcript_path}\n")
+        f.write(f"Exists: {os.path.exists(transcript_path)}\n")
+
+    if not transcript_path or not os.path.exists(transcript_path):
+        sys.exit(0)
+
+    # Get the last assistant message
+    message = get_last_assistant_message(transcript_path)
+
+    with open('/tmp/stop-hook-debug.log', 'a') as f:
+        f.write(f"Extracted message: {message[:200] if message else 'NONE'}...\n")
+
+    if not message:
+        sys.exit(0)
+
+    # Clean and truncate for TTS
+    message = message.strip()
+
+    # Skip if it's just code or too short
+    if message.startswith('```') or len(message) < 10:
+        sys.exit(0)
+
+    # Skip if message is too long (likely code-heavy)
+    if len(message) > 5000:
+        # Just speak the first part
+        message = message[:1500] + "... I've written more in the response."
+
+    # Import TTS and speak
+    try:
+        with open('/tmp/stop-hook-debug.log', 'a') as f:
+            f.write(f"About to speak: {message[:100]}...\n")
+
+        from tts import TextToSpeech
+        from config import load_config, get_google_credentials_path
+
+        config = load_config()
+        tts = TextToSpeech(
+            get_google_credentials_path(config),
+            config['tts_voice'],
+            config['tts_speed']
+        )
+
+        tts.speak(message)
+
+        with open('/tmp/stop-hook-debug.log', 'a') as f:
+            f.write(f"Spoke successfully\n")
+    except Exception as e:
+        with open('/tmp/stop-hook-debug.log', 'a') as f:
+            f.write(f"TTS Error: {e}\n")
+
+
+if __name__ == "__main__":
+    main()
