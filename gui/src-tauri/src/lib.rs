@@ -130,6 +130,10 @@ fn start_remote_mode() -> Result<String, String> {
         return Ok("Remote mode already running".to_string());
     }
 
+    // Create the remote mode flag file with chat ID (enables response forwarding to Telegram)
+    // Chat ID is needed by send_telegram.py to know where to send messages
+    let _ = fs::write("/tmp/synthia-remote-mode", "537808338");
+
     // Start the telegram bot with CUDA disabled
     Command::new("/home/markmiddo/dev/misc/synthia/venv/bin/python")
         .args(["/home/markmiddo/dev/misc/synthia/src/synthia/remote/telegram_bot.py"])
@@ -138,7 +142,7 @@ fn start_remote_mode() -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Failed to start remote mode: {}", e))?;
 
-    // Send notification to Telegram
+    // Send notification in background (don't block UI)
     let _ = Command::new("/home/markmiddo/dev/misc/synthia/venv/bin/python")
         .args([
             "/home/markmiddo/dev/misc/synthia/src/synthia/remote/telegram_bot.py",
@@ -153,7 +157,15 @@ fn start_remote_mode() -> Result<String, String> {
 
 #[tauri::command]
 fn stop_remote_mode() -> Result<String, String> {
-    // Send notification before stopping
+    // Remove the remote mode flag file (stops response forwarding to Telegram)
+    let _ = fs::remove_file("/tmp/synthia-remote-mode");
+
+    // Kill the bot immediately for instant UI response
+    let _ = Command::new("pkill")
+        .args(["-f", "telegram_bot.py"])
+        .output();
+
+    // Send notification in background (after bot is killed, uses --notify which is standalone)
     let _ = Command::new("/home/markmiddo/dev/misc/synthia/venv/bin/python")
         .args([
             "/home/markmiddo/dev/misc/synthia/src/synthia/remote/telegram_bot.py",
@@ -161,14 +173,7 @@ fn stop_remote_mode() -> Result<String, String> {
             "🔴 *Remote Mode DISABLED*\n\nTelegram bot stopped."
         ])
         .current_dir("/home/markmiddo/dev/misc/synthia")
-        .output();
-
-    // Give notification time to send
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
-    let _ = Command::new("pkill")
-        .args(["-f", "telegram_bot.py"])
-        .output();
+        .spawn();
 
     Ok("Remote mode stopped".to_string())
 }
