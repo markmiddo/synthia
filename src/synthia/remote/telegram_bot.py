@@ -15,10 +15,47 @@ import asyncio
 import subprocess
 import tempfile
 import logging
+import re
 from datetime import datetime
 
 # Add src to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+# Security: Input sanitization for text sent to terminal
+MAX_MESSAGE_LENGTH = 2000  # Limit message length
+DANGEROUS_SEQUENCES = [
+    '\x1b',  # Escape sequences
+    '\x00',  # Null bytes
+    '\x07',  # Bell
+    '\x08',  # Backspace
+    '\x7f',  # Delete
+]
+
+
+def sanitize_terminal_input(text: str) -> str:
+    """Sanitize text before sending to terminal via xdotool.
+
+    Removes control characters and escape sequences that could be used
+    to manipulate the terminal.
+    """
+    if not text:
+        return ""
+
+    # Truncate to max length
+    text = text[:MAX_MESSAGE_LENGTH]
+
+    # Remove dangerous control characters
+    for seq in DANGEROUS_SEQUENCES:
+        text = text.replace(seq, '')
+
+    # Remove ANSI escape sequences
+    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+
+    # Remove other control characters (except newline, tab)
+    text = ''.join(char for char in text if char == '\n' or char == '\t' or ord(char) >= 32)
+
+    return text.strip()
 
 from telegram import Update
 from telegram.ext import (
@@ -285,7 +322,16 @@ class SynthiaBot:
         return os.environ.get('DISPLAY', ':0')
 
     def _send_to_claude_code(self, message: str) -> bool:
-        """Send a message to the active Claude Code terminal using xdotool."""
+        """Send a message to the active Claude Code terminal using xdotool.
+
+        SECURITY: Input is sanitized to prevent terminal escape sequence injection.
+        """
+        # Sanitize input before sending to terminal
+        message = sanitize_terminal_input(message)
+        if not message:
+            logger.warning("Message was empty after sanitization")
+            return False
+
         try:
             display = self._get_display()
             # Find terminal window - look for "Remote" tab in WezTerm

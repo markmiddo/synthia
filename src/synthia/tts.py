@@ -92,19 +92,48 @@ class TextToSpeech:
             return False
 
     def _speak_piper(self, text: str) -> bool:
-        """Speak using local Piper TTS."""
+        """Speak using local Piper TTS.
+
+        SECURITY: Uses subprocess pipes instead of shell=True to prevent injection.
+        """
         try:
-            # Remove quotes instead of escaping to avoid backslash issues
-            safe_text = text.replace('"', '').replace("'", "")
+            # Find piper binary - check venv first, then system PATH
+            script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            piper_bin = os.path.join(script_dir, "venv", "bin", "piper")
+            if not os.path.exists(piper_bin):
+                # Fallback to system piper
+                piper_bin = "piper"
 
-            # Use full path to piper in venv
-            piper_bin = "/home/markmiddo/dev/misc/synthia/venv/bin/piper"
-            # length-scale 0.7 = ~1.4x speed
-            cmd = f'echo "{safe_text}" | {piper_bin} --model "{self.local_voice}" --length-scale 0.7 --output-raw | aplay -r 22050 -f S16_LE -t raw -q'
+            # SECURITY: Use subprocess pipes instead of shell=True
+            # This prevents command injection via $(cmd), `cmd`, ; cmd, etc.
+            piper_proc = subprocess.Popen(
+                [piper_bin, "--model", self.local_voice, "--length-scale", "0.7", "--output-raw"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
 
-            subprocess.run(cmd, shell=True, check=True)
+            aplay_proc = subprocess.Popen(
+                ["aplay", "-r", "22050", "-f", "S16_LE", "-t", "raw", "-q"],
+                stdin=piper_proc.stdout,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Send text directly to piper's stdin (no shell escaping needed)
+            piper_proc.stdin.write(text.encode('utf-8'))
+            piper_proc.stdin.close()
+
+            # Wait for both processes to complete
+            piper_proc.stdout.close()
+            aplay_proc.wait()
+            piper_proc.wait()
+
             return True
 
+        except FileNotFoundError as e:
+            print(f"Piper TTS error: piper or aplay not found - {e}")
+            return False
         except Exception as e:
             print(f"Piper TTS error: {e}")
             return False

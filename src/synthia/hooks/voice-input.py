@@ -13,8 +13,10 @@ import sys
 import os
 import argparse
 
-# Add synthia to path
-sys.path.insert(0, '/home/markmiddo/dev/misc/synthia/src')
+# Add synthia src to path dynamically (no hardcoded paths)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SYNTHIA_SRC = os.path.dirname(SCRIPT_DIR)  # Go up from hooks/ to synthia/
+sys.path.insert(0, SYNTHIA_SRC)
 
 from audio import AudioRecorder
 from transcribe import Transcriber

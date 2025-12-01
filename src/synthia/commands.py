@@ -152,12 +152,68 @@ def close_app(app: str) -> bool:
         return False
 
 
+# Allowlist of safe commands that can be executed
+SAFE_COMMANDS = {
+    # System info (read-only)
+    "date", "uptime", "whoami", "hostname", "uname",
+    "free", "df", "top", "htop", "ps",
+    # Network info (read-only)
+    "ip", "ifconfig", "ping", "curl", "wget",
+    # File listing (read-only)
+    "ls", "pwd", "cat", "head", "tail", "wc", "find", "which",
+    # System utilities
+    "echo", "cal", "bc",
+}
+
+# Dangerous patterns that should never be allowed
+DANGEROUS_PATTERNS = [
+    "rm ", "rm\t", "rmdir", "mkfs", "dd ", "dd\t",
+    "> /", ">/", ">> /", ">>/",  # Redirecting to system paths
+    "sudo", "su ", "su\t",
+    "chmod", "chown", "chgrp",
+    "|sh", "| sh", "|bash", "| bash", "|zsh", "| zsh",
+    "$(", "`",  # Command substitution
+    "eval ", "exec ",
+    "/etc/", "/usr/", "/bin/", "/sbin/", "/var/", "/root/",
+    "passwd", "shadow",
+    "curl|", "wget|", "curl |", "wget |",  # Piping downloads to shell
+]
+
+
 def run_command(command: str) -> str:
-    """Run a shell command and return output."""
+    """Run a shell command and return output.
+
+    SECURITY: Only allows commands from SAFE_COMMANDS allowlist.
+    Blocks dangerous patterns to prevent command injection.
+    """
+    if not command or not command.strip():
+        return "No command provided"
+
+    command = command.strip()
+
+    # Check for dangerous patterns
+    command_lower = command.lower()
+    for pattern in DANGEROUS_PATTERNS:
+        if pattern.lower() in command_lower:
+            print(f"❌ Blocked dangerous command pattern: {pattern}")
+            return f"Command blocked for security: contains '{pattern}'"
+
+    # Extract the base command (first word)
+    base_cmd = command.split()[0].split("/")[-1]  # Handle full paths
+
+    # Check if base command is in allowlist
+    if base_cmd not in SAFE_COMMANDS:
+        print(f"❌ Command not in allowlist: {base_cmd}")
+        return f"Command '{base_cmd}' is not allowed. Allowed commands: {', '.join(sorted(SAFE_COMMANDS))}"
+
     try:
+        # Use shell=False with shlex for safer execution
+        import shlex
+        args = shlex.split(command)
+
         result = subprocess.run(
-            command,
-            shell=True,
+            args,
+            shell=False,  # SECURITY: Never use shell=True
             capture_output=True,
             text=True,
             timeout=30,
@@ -399,15 +455,35 @@ def take_screenshot(region: str = "full") -> str:
 
 # ============== REMOTE MODE ==============
 
-REMOTE_MODE_FILE = '/tmp/synthia-remote-mode'
-DEFAULT_CHAT_ID = 537808338  # Mark's Telegram ID
+# Use XDG_RUNTIME_DIR for secure temp file (user-only access)
+REMOTE_MODE_FILE = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
+    "synthia-remote-mode"
+)
+
+
+def _get_telegram_chat_id() -> int:
+    """Get Telegram chat ID from config file."""
+    from synthia.config import load_config
+    config = load_config()
+    allowed_users = config.get("telegram_allowed_users", [])
+    if allowed_users:
+        return allowed_users[0]  # Use first allowed user as default
+    return 0
 
 
 def enable_remote_mode() -> bool:
     """Enable remote mode - send updates to Telegram."""
+    chat_id = _get_telegram_chat_id()
+    if not chat_id:
+        print("❌ Remote mode error: No telegram_allowed_users configured in config.yaml")
+        return False
+
     try:
         with open(REMOTE_MODE_FILE, 'w') as f:
-            f.write(str(DEFAULT_CHAT_ID))
+            f.write(str(chat_id))
+        # Set restrictive permissions (owner read/write only)
+        os.chmod(REMOTE_MODE_FILE, 0o600)
         print("✅ Remote mode enabled")
         return True
     except Exception as e:

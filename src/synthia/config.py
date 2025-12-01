@@ -26,6 +26,9 @@ DEFAULT_CONFIG = {
     "local_llm_model": "qwen2.5:7b-instruct-q4_0",
     "local_tts_voice": "~/.local/share/piper-voices/en_US-amy-medium.onnx",
     "ollama_url": "http://localhost:11434",
+    # Telegram remote access (must be configured by user)
+    "telegram_bot_token": "",  # Get from @BotFather
+    "telegram_allowed_users": [],  # List of Telegram user IDs
 }
 
 CONFIG_PATH = Path.home() / ".config" / "synthia" / "config.yaml"
