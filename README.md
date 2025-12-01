@@ -1,42 +1,73 @@
 # Synthia
 
-**Your AI-powered voice assistant that actually respects your privacy.**
+**Talk to your code. From anywhere.**
 
-Talk to your computer. Launch apps. Control your dev environment. All running locally on your machine - no cloud required, no data leaving your system, no monthly fees.
+Free open-source voice assistant for Linux. Local speech-to-text, hands-free coding with Claude Code, and remote control via Telegram. Your data stays home — even when you can't.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Linux](https://img.shields.io/badge/platform-Linux-blue.svg)](https://www.linux.org/)
+
+🌐 **Website**: [synthia-ai.com](https://synthia-ai.com)
 
 ---
 
 ## Why Synthia?
 
-**Tired of cloud assistants listening to everything?** Synthia runs entirely on your hardware. Your voice never leaves your machine.
+Your voice never leaves your machine. No cloud. No creepy. No "we updated our privacy policy" emails.
 
-**Want an assistant that works with your workflow?** Synthia integrates directly with Claude Code, letting you control AI coding sessions with your voice - even remotely from your phone.
-
-**Hate subscription fatigue?** Synthia is free, open source, and always will be.
+- **100% Local** — Whisper runs on your hardware. No servers. No logs. Pinky promise.
+- **Free Forever** — MIT licensed. No paywalls. No "premium tier" upsell.
+- **Claude Code Integration** — Voice-control your AI coding sessions. Ship features from the couch.
 
 ---
 
-## What Can It Do?
+## Three Modes, Infinite Possibilities
 
-### Quick Mode - Your Local Assistant
-Hold a key, speak, get things done:
+### ⚡ Quick Mode — Your Desktop Butler
+> **Hotkey: Right Alt (hold)**
 
-- **"Open Chrome"** - Launch any application
-- **"Set volume to 50"** - Control system audio
-- **"What time is it?"** - Quick information
-- **"Take a screenshot"** - Capture your screen
-- **"Lock the screen"** - Security in one command
+Instant responses. No internet required. No excuses.
 
-### Dev Mode - Remote AI Coding Control
-Connect Synthia to Claude Code (or other AI coding tools) and:
+- "Open Chrome" "Play Spotify" "Lock screen" — done.
+- Control volume, grab screenshots, launch anything
+- Works offline. Like, actually offline.
 
-- **Voice-control your coding sessions** - Speak commands, Claude executes
-- **Work remotely via your phone** - Send voice notes, get responses back
-- **Plan approval workflow** - Review AI plans before execution
-- **Never touch the keyboard** - Perfect for when you're away from your desk
+### 💻 Dev Mode — Talk to Your Code
+> **Hotkey: Right Ctrl (hold)**
+
+Speak commands. Claude executes. You sip coffee.
+
+- Full voice control of Claude Code sessions
+- Claude talks back (in a good way)
+- Perfect for when typing feels like effort
+
+### 📱 Remote Mode — Code From the Couch
+> **Enable: Say "Remote mode" or type `/remote`**
+
+Control Claude Code from your phone via Telegram.
+
+- Send voice notes. Get code back. Magic.
+- Approve plans before anything runs (you're still the boss)
+- Ship features from the beach. We won't judge.
+
+---
+
+## Quick Start
+
+```bash
+# Grab the goods
+git clone https://github.com/markmiddo/synthia.git
+cd synthia
+
+# Let it cook
+./install.sh
+
+# Wake her up
+./run.sh
+```
+
+Hold **Right Alt**, say something, and watch the magic happen.
 
 ---
 
@@ -48,36 +79,9 @@ Synthia is built on best-in-class open source AI:
 |-----------|------------|----------------|
 | Speech Recognition | [Faster-Whisper](https://github.com/guillaumekln/faster-whisper) | OpenAI's Whisper, but 4x faster |
 | AI Brain | [Ollama](https://ollama.ai) + Qwen 2.5 | Local LLM, no API keys needed |
-| Voice Output | [Piper](https://github.com/rhasspy/piper) | Natural-sounding, runs locally |
+| Voice Output | [Piper](https://github.com/rhasspy/piper) | Sounds like a human, not a GPS from 2008 |
 
-**GPU acceleration supported** - NVIDIA GPUs make everything snappier, but CPU-only works too.
-
----
-
-## Quick Start
-
-```bash
-# Clone it
-git clone https://github.com/markmiddo/synthia.git
-cd synthia
-
-# Set it up
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Install system dependencies
-sudo apt install xdotool portaudio19-dev mpv xclip wmctrl alsa-utils
-
-# Get the AI brain
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen2.5:1.5b-instruct-q4_0
-
-# Run it
-python main.py
-```
-
-That's it. Hold **Right Alt**, speak, and watch the magic happen.
+**NVIDIA GPU?** Whisper goes brrr. **No GPU?** Still works. Just vibes a little slower.
 
 ---
 
@@ -85,40 +89,23 @@ That's it. Hold **Right Alt**, speak, and watch the magic happen.
 
 | Key | Mode | What It Does |
 |-----|------|--------------|
-| **Right Alt** (hold) | Quick Mode | Voice assistant - runs commands, launches apps |
-| **Right Ctrl** (hold) | Dictation | Speech-to-text - types what you say |
-| **Esc** | - | Quit Synthia |
-
----
-
-## Remote Control (Dev Mode)
-
-Control your AI coding sessions from anywhere:
-
-1. **Enable Dev Mode** via Telegram bot
-2. **Send voice notes or text** from your phone
-3. **Synthia sends it to Claude Code** on your PC
-4. **Get responses back** on your phone
-
-Perfect for:
-- Monitoring long-running AI tasks
-- Quick fixes while away from your desk
-- Approving AI plans before execution
+| **Right Alt** (hold) | Quick Mode | Voice assistant — runs commands, launches apps |
+| **Right Ctrl** (hold) | Dev Mode | Voice to Claude Code — hands-free coding |
+| **Esc** | — | Quit Synthia |
 
 ---
 
 ## Claude Code Integration
 
-Make Claude Code talk back to you:
+Make Claude Code talk back to you. Add to `~/.claude/settings.json`:
 
 ```json
-// Add to ~/.claude/settings.json
 {
   "hooks": {
     "Stop": [{
       "hooks": [{
         "type": "command",
-        "command": "/path/to/synthia/venv/bin/python /path/to/synthia/claude-hooks/stop-hook.py",
+        "command": "/path/to/synthia/venv/bin/python /path/to/synthia/src/synthia/hooks/stop-hook.py",
         "timeout": 30
       }]
     }]
@@ -126,7 +113,7 @@ Make Claude Code talk back to you:
 }
 ```
 
-Now every Claude response is spoken aloud - or sent to your phone in Dev Mode.
+Now every Claude response is spoken aloud — or sent to your phone in Remote Mode.
 
 ---
 
@@ -155,7 +142,9 @@ local_tts_voice: "~/.local/share/piper-voices/en_US-amy-medium.onnx"
 
 ## Voice Options
 
-Customize how Synthia sounds. Download from [Piper Voices](https://huggingface.co/rhasspy/piper-voices):
+Open `config.yaml` and swap in a different Piper voice. Amy's friendly. Ryan's chill. Lessac sounds like your cool coworker. Pick your fighter.
+
+Download from [Piper Voices](https://huggingface.co/rhasspy/piper-voices):
 
 | Voice | Style |
 |-------|-------|
@@ -166,15 +155,25 @@ Customize how Synthia sounds. Download from [Piper Voices](https://huggingface.c
 
 ---
 
+## Requirements
+
+- **OS**: Linux (macOS/Windows coming in v0.3)
+- **Python**: 3.10+
+- **RAM**: 4GB minimum and a pulse. 8GB recommended.
+- **GPU**: Optional (NVIDIA for that buttery-smooth transcription)
+- **Disk**: ~2GB for models
+
+---
+
 ## Roadmap
 
-We're just getting started. Here's what's coming:
+We're just getting started:
 
-- **Cross-platform** - macOS and Windows support
-- **Native GUI** - Beautiful floating bar built in Rust
-- **Mobile apps** - Android and iOS (replacing Telegram)
-- **More AI platforms** - Gemini, Codex, Copilot support
-- **Plugin system** - Extend Synthia with custom commands
+- **v0.2** — CPU support improvements, enhanced voice commands
+- **v0.3** — macOS and Windows support
+- **v0.4** — Native GUI (Rust-powered floating bar)
+- **v0.5** — Mobile apps (bye-bye Telegram dependency)
+- **v1.0** — Plugin system, multi-AI support
 
 See the full [ROADMAP.md](ROADMAP.md) for details.
 
@@ -182,37 +181,44 @@ See the full [ROADMAP.md](ROADMAP.md) for details.
 
 ## Contributing
 
-We'd love your help! Whether it's:
+Bug reports, feature requests, and questionable memes — we've got it all.
 
-- Reporting bugs
-- Suggesting features
-- Writing code
-- Improving docs
+Whether you want to:
+- Report bugs
+- Suggest features
+- Write code
+- Improve docs
 
 Check out [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 ---
 
-## Requirements
+## FAQ
 
-- **OS**: Linux (macOS/Windows coming soon)
-- **Python**: 3.10+
-- **RAM**: 4GB minimum, 8GB recommended
-- **GPU**: Optional (NVIDIA for acceleration)
-- **Disk**: ~2GB for models
+**Is it really free?**
+Yep. Free as in beer, free as in speech, free as in "wait, what's the catch?" There is no catch.
+
+**Does my voice leave my computer?**
+Absolutely not. Your voice stays on your machine like it's under house arrest.
+
+**Does it work without a GPU?**
+Totally. Like a Honda Civic. Reliable. Gets the job done. Won't win races but never lets you down.
 
 ---
 
 ## License
 
-MIT - Use it however you want.
+MIT — Fork it. Break it. Fix it. Make it weird. It's yours now.
 
 ---
 
-## Star History
+## Support the Project
 
-If Synthia helps you, consider giving it a star! It helps others discover the project.
+Synthia runs on open source spirit and actual coffee. If it saves you time, consider:
+
+- ⭐ **Starring on GitHub** — free and helps others find us
+- ☕ **Buying us a coffee** — [synthia-ai.com/#donate](https://synthia-ai.com/#donate)
 
 ---
 
-**Built with love for developers who value privacy and productivity.**
+**Built for developers who value privacy and hate typing (sometimes).**

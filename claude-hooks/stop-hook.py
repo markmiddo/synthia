@@ -1,0 +1,1 @@
+/home/markmiddo/dev/misc/synthia/src/synthia/hooks/stop-hook.py

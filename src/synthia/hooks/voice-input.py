@@ -14,7 +14,7 @@ import os
 import argparse
 
 # Add synthia to path
-sys.path.insert(0, '/home/markmiddo/Misc/synthia')
+sys.path.insert(0, '/home/markmiddo/dev/misc/synthia/src')
 
 from audio import AudioRecorder
 from transcribe import Transcriber

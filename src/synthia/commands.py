@@ -3,7 +3,7 @@
 import subprocess
 import os
 from typing import Dict, Any, List
-from output import type_text
+from synthia.output import type_text
 
 
 # Common app name mappings
