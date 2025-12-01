@@ -1,4 +1,4 @@
-# Synthia
+# SYNTHIA
 
 **Talk to your code. From anywhere.**
 
@@ -6,13 +6,14 @@ Free open-source voice assistant for Linux. Local speech-to-text, hands-free cod
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
 [![Linux](https://img.shields.io/badge/platform-Linux-blue.svg)](https://www.linux.org/)
 
 🌐 **Website**: [synthia-ai.com](https://synthia-ai.com)
 
 ---
 
-## Why Synthia?
+## Why SYNTHIA?
 
 Your voice never leaves your machine. No cloud. No creepy. No "we updated our privacy policy" emails.
 
@@ -73,15 +74,36 @@ Hold **Right Alt**, say something, and watch the magic happen.
 
 ## The Tech Stack
 
-Synthia is built on best-in-class open source AI:
+SYNTHIA is built on best-in-class open source AI and modern system tooling:
 
 | Component | Technology | Why It's Great |
 |-----------|------------|----------------|
 | Speech Recognition | [Faster-Whisper](https://github.com/guillaumekln/faster-whisper) | OpenAI's Whisper, but 4x faster |
 | AI Brain | [Ollama](https://ollama.ai) + Qwen 2.5 | Local LLM, no API keys needed |
 | Voice Output | [Piper](https://github.com/rhasspy/piper) | Sounds like a human, not a GPS from 2008 |
+| Desktop GUI | [Tauri](https://tauri.app) + Rust | Native performance, tiny footprint |
+| Frontend | React + TypeScript | Modern, type-safe UI |
 
 **NVIDIA GPU?** Whisper goes brrr. **No GPU?** Still works. Just vibes a little slower.
+
+---
+
+## Desktop GUI
+
+SYNTHIA includes a native desktop application built with Tauri (Rust + React):
+
+- **System tray integration** — Lives in your taskbar, always accessible
+- **One-click start/stop** — No terminal required
+- **Remote mode toggle** — Enable Telegram control instantly
+- **Voice history** — Browse, copy, and re-send past transcriptions
+- **Recording indicator** — Tray icon changes when recording
+
+Build the GUI:
+```bash
+cd gui
+npm install
+npm run tauri build
+```
 
 ---
 
@@ -91,7 +113,7 @@ Synthia is built on best-in-class open source AI:
 |-----|------|--------------|
 | **Right Alt** (hold) | Quick Mode | Voice assistant — runs commands, launches apps |
 | **Right Ctrl** (hold) | Dev Mode | Voice to Claude Code — hands-free coding |
-| **Esc** | — | Quit Synthia |
+| **Esc** | — | Quit SYNTHIA |
 
 ---
 
@@ -159,6 +181,7 @@ Download from [Piper Voices](https://huggingface.co/rhasspy/piper-voices):
 
 - **OS**: Linux (macOS/Windows coming in v0.3)
 - **Python**: 3.10+
+- **Rust**: 1.70+ (for GUI)
 - **RAM**: 4GB minimum and a pulse. 8GB recommended.
 - **GPU**: Optional (NVIDIA for that buttery-smooth transcription)
 - **Disk**: ~2GB for models
@@ -171,7 +194,7 @@ We're just getting started:
 
 - **v0.2** — CPU support improvements, enhanced voice commands
 - **v0.3** — macOS and Windows support
-- **v0.4** — Native GUI (Rust-powered floating bar)
+- ~~**v0.4** — Native GUI (Rust-powered floating bar)~~ ✅ Done!
 - **v0.5** — Mobile apps (bye-bye Telegram dependency)
 - **v1.0** — Plugin system, multi-AI support
 
@@ -214,7 +237,7 @@ MIT — Fork it. Break it. Fix it. Make it weird. It's yours now.
 
 ## Support the Project
 
-Synthia runs on open source spirit and actual coffee. If it saves you time, consider:
+SYNTHIA runs on open source spirit and actual coffee. If it saves you time, consider:
 
 - ⭐ **Starring on GitHub** — free and helps others find us
 - ☕ **Buying us a coffee** — [synthia-ai.com/#donate](https://synthia-ai.com/#donate)
