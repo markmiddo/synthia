@@ -19,11 +19,11 @@ from pynput import keyboard
 from pynput.keyboard import Key
 
 from synthia.audio import AudioRecorder
-from synthia.transcribe import Transcriber
-from synthia.config import load_config, get_google_credentials_path
-from synthia.sounds import SoundEffects
+from synthia.config import get_google_credentials_path, load_config
 from synthia.notifications import notify
 from synthia.output import type_text
+from synthia.sounds import SoundEffects
+from synthia.transcribe import Transcriber
 
 
 class VoiceDaemon:
@@ -77,10 +77,7 @@ class VoiceDaemon:
                     print("⚠️ No speech detected\n")
 
     def run(self):
-        with keyboard.Listener(
-            on_press=self.on_press,
-            on_release=self.on_release
-        ) as listener:
+        with keyboard.Listener(on_press=self.on_press, on_release=self.on_release) as listener:
             listener.join()
 
 

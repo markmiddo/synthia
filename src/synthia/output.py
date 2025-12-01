@@ -1,8 +1,13 @@
 """Text output for Synthia with Wayland and X11 support."""
 
+from __future__ import annotations
+
 import subprocess
 
 from .display import is_wayland
+
+# Timeout for typing operations (seconds)
+_TYPING_TIMEOUT = 10
 
 
 def type_text(text: str) -> bool:
@@ -28,11 +33,7 @@ def type_text(text: str) -> bool:
 def _type_with_wtype(text: str) -> bool:
     """Type text using wtype (Wayland-native)."""
     try:
-        subprocess.run(
-            ["wtype", "--", text],
-            check=True,
-            timeout=10,
-        )
+        subprocess.run(["wtype", "--", text], check=True, timeout=_TYPING_TIMEOUT)
         print(f"⌨️  Typed (wtype): {text[:50]}{'...' if len(text) > 50 else ''}")
         return True
     except FileNotFoundError:
@@ -48,11 +49,7 @@ def _type_with_wtype(text: str) -> bool:
 def _type_with_ydotool(text: str) -> bool:
     """Type text using ydotool (works on both Wayland and X11)."""
     try:
-        subprocess.run(
-            ["ydotool", "type", "--", text],
-            check=True,
-            timeout=10,
-        )
+        subprocess.run(["ydotool", "type", "--", text], check=True, timeout=_TYPING_TIMEOUT)
         print(f"⌨️  Typed (ydotool): {text[:50]}{'...' if len(text) > 50 else ''}")
         return True
     except FileNotFoundError:
@@ -71,7 +68,7 @@ def _type_with_xdotool(text: str) -> bool:
         subprocess.run(
             ["xdotool", "type", "--clearmodifiers", "--", text],
             check=True,
-            timeout=10,
+            timeout=_TYPING_TIMEOUT,
         )
         print(f"⌨️  Typed (xdotool): {text[:50]}{'...' if len(text) > 50 else ''}")
         return True

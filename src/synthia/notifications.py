@@ -20,11 +20,11 @@ def notify(title: str, message: str, icon: str = "audio-input-microphone", timeo
                 f"--icon={icon}",
                 f"--expire-time={timeout}",
                 title,
-                message
+                message,
             ],
             check=False,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
     except FileNotFoundError:
         # notify-send not installed
@@ -35,7 +35,11 @@ def notify(title: str, message: str, icon: str = "audio-input-microphone", timeo
 
 def notify_ready():
     """Notify that Synthia is ready."""
-    notify("Synthia", "Ready! Hold Right Ctrl to dictate, Right Alt for assistant.", "audio-input-microphone")
+    notify(
+        "Synthia",
+        "Ready! Hold Right Ctrl to dictate, Right Alt for assistant.",
+        "audio-input-microphone",
+    )
 
 
 def notify_dictation(text: str):

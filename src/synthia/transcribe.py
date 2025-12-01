@@ -3,10 +3,13 @@
 import os
 import sys
 import tempfile
+
 import numpy as np
 
 # Add cuDNN libraries to path for GPU support
-_cudnn_path = os.path.join(os.path.dirname(__file__), "venv/lib/python3.10/site-packages/nvidia/cudnn/lib")
+_cudnn_path = os.path.join(
+    os.path.dirname(__file__), "venv/lib/python3.10/site-packages/nvidia/cudnn/lib"
+)
 if os.path.exists(_cudnn_path):
     os.environ["LD_LIBRARY_PATH"] = _cudnn_path + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
@@ -14,9 +17,14 @@ if os.path.exists(_cudnn_path):
 class Transcriber:
     """Transcribes audio using Google Cloud Speech-to-Text or local Whisper."""
 
-    def __init__(self, credentials_path: str = None, language: str = "en-US",
-                 sample_rate: int = 16000, use_local: bool = False,
-                 local_model: str = "small"):
+    def __init__(
+        self,
+        credentials_path: str = None,
+        language: str = "en-US",
+        sample_rate: int = 16000,
+        use_local: bool = False,
+        local_model: str = "small",
+    ):
         self.language = language
         self.sample_rate = sample_rate
         self.use_local = use_local
@@ -25,7 +33,7 @@ class Transcriber:
         self.client = None
 
         # Post-process to remove filler words
-        self.filler_words = {'uh', 'um', 'ah', 'er', 'hmm', 'uh,', 'um,', 'ah,', 'er,'}
+        self.filler_words = {"uh", "um", "ah", "er", "hmm", "uh,", "um,", "ah,", "er,"}
 
         if use_local:
             self._init_whisper()
@@ -55,6 +63,7 @@ class Transcriber:
         """Initialize local Whisper model using faster-whisper."""
         # Force CPU mode to avoid CUDA library issues
         import os
+
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
         from faster_whisper import WhisperModel
@@ -64,10 +73,7 @@ class Transcriber:
 
         # Always use CPU - CUDA has library issues on this system
         self.whisper_model = WhisperModel(
-            model_name,
-            device="cpu",
-            compute_type="int8",
-            cpu_threads=4
+            model_name, device="cpu", compute_type="int8", cpu_threads=4
         )
         print(f"Faster-whisper {model_name} loaded (CPU int8)")
 
@@ -101,9 +107,7 @@ class Transcriber:
 
         # Concatenate all transcription results
         transcript = " ".join(
-            result.alternatives[0].transcript
-            for result in response.results
-            if result.alternatives
+            result.alternatives[0].transcript for result in response.results if result.alternatives
         )
 
         # Remove filler words
@@ -135,5 +139,5 @@ class Transcriber:
     def _clean_transcript(self, transcript: str) -> str:
         """Remove filler words from transcript."""
         words = transcript.split()
-        cleaned = ' '.join(w for w in words if w.lower().rstrip('.,!?') not in self.filler_words)
+        cleaned = " ".join(w for w in words if w.lower().rstrip(".,!?") not in self.filler_words)
         return cleaned

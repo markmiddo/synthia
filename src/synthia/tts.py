@@ -8,9 +8,14 @@ import tempfile
 class TextToSpeech:
     """Converts text to speech using Google Cloud TTS or local Piper."""
 
-    def __init__(self, credentials_path: str = None, voice_name: str = "en-US-Neural2-J",
-                 speed: float = 1.0, use_local: bool = False,
-                 local_voice: str = "~/.local/share/piper-voices/en_US-amy-medium.onnx"):
+    def __init__(
+        self,
+        credentials_path: str = None,
+        voice_name: str = "en-US-Neural2-J",
+        speed: float = 1.0,
+        use_local: bool = False,
+        local_voice: str = "~/.local/share/piper-voices/en_US-amy-medium.onnx",
+    ):
         self.use_local = use_local
         self.speed = speed
         self.voice_name = voice_name
@@ -40,7 +45,7 @@ class TextToSpeech:
         # Split by sentence endings
         for char in text:
             current += char
-            if char in '.!?' and len(current) >= 20:
+            if char in ".!?" and len(current) >= 20:
                 sentences.append(current.strip())
                 current = ""
 
@@ -98,7 +103,9 @@ class TextToSpeech:
         """
         try:
             # Find piper binary - check venv first, then system PATH
-            script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            script_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
             piper_bin = os.path.join(script_dir, "venv", "bin", "piper")
             if not os.path.exists(piper_bin):
                 # Fallback to system piper
@@ -121,7 +128,7 @@ class TextToSpeech:
             )
 
             # Send text directly to piper's stdin (no shell escaping needed)
-            piper_proc.stdin.write(text.encode('utf-8'))
+            piper_proc.stdin.write(text.encode("utf-8"))
             piper_proc.stdin.close()
 
             # Wait for both processes to complete

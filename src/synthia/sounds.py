@@ -1,17 +1,18 @@
 """Sound effects for Synthia."""
 
-import subprocess
-import os
-import tempfile
 import base64
+import os
+import subprocess
+import tempfile
 
 # Simple beep sounds encoded as base64 WAV
 # These are tiny sine wave beeps generated programmatically
 
+
 def _generate_beep(frequency: int, duration_ms: int, volume: float = 0.5) -> bytes:
     """Generate a simple beep as WAV bytes."""
-    import struct
     import math
+    import struct
 
     sample_rate = 44100
     num_samples = int(sample_rate * duration_ms / 1000)
@@ -23,26 +24,26 @@ def _generate_beep(frequency: int, duration_ms: int, volume: float = 0.5) -> byt
         # Apply envelope to avoid clicks
         envelope = min(1.0, min(i, num_samples - i) / (sample_rate * 0.01))
         value = int(32767 * volume * envelope * math.sin(2 * math.pi * frequency * t))
-        samples.append(struct.pack('<h', value))
+        samples.append(struct.pack("<h", value))
 
-    audio_data = b''.join(samples)
+    audio_data = b"".join(samples)
 
     # Create WAV header
     wav_header = struct.pack(
-        '<4sI4s4sIHHIIHH4sI',
-        b'RIFF',
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
         36 + len(audio_data),
-        b'WAVE',
-        b'fmt ',
+        b"WAVE",
+        b"fmt ",
         16,  # PCM header size
-        1,   # PCM format
-        1,   # Mono
+        1,  # PCM format
+        1,  # Mono
         sample_rate,
         sample_rate * 2,  # Byte rate
-        2,   # Block align
+        2,  # Block align
         16,  # Bits per sample
-        b'data',
-        len(audio_data)
+        b"data",
+        len(audio_data),
     )
 
     return wav_header + audio_data
@@ -56,9 +57,9 @@ class SoundEffects:
         self._temp_files = []
 
         # Pre-generate sounds
-        self._start_sound = _generate_beep(880, 100, 0.3)   # High beep
-        self._stop_sound = _generate_beep(440, 100, 0.3)    # Low beep
-        self._error_sound = _generate_beep(220, 200, 0.3)   # Very low beep
+        self._start_sound = _generate_beep(880, 100, 0.3)  # High beep
+        self._stop_sound = _generate_beep(440, 100, 0.3)  # Low beep
+        self._error_sound = _generate_beep(220, 200, 0.3)  # Very low beep
 
     def _play_wav(self, wav_data: bytes):
         """Play WAV data using paplay."""
@@ -67,14 +68,12 @@ class SoundEffects:
 
         try:
             # Write to temp file and play
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 f.write(wav_data)
                 temp_path = f.name
 
             subprocess.Popen(
-                ['paplay', temp_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                ["paplay", temp_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
 
             # Clean up after a delay (let it play first)

@@ -1,11 +1,14 @@
 """Command execution for Synthia assistant."""
 
-import subprocess
-import os
-from typing import Dict, Any, List
-from synthia.output import type_text
-from synthia.display import is_wayland
+from __future__ import annotations
 
+import os
+import shlex
+import subprocess
+from typing import Any
+
+from synthia.display import is_wayland
+from synthia.output import type_text
 
 # Common app name mappings
 APP_ALIASES = {
@@ -118,27 +121,6 @@ def open_url(url: str, browser: str = "google-chrome") -> bool:
         return False
 
 
-def _open_url_old(url: str, browser: str = "google-chrome") -> bool:
-    """Old open_url - unused."""
-    browser_cmd = "google-chrome"
-
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-
-    try:
-        subprocess.Popen(
-            [browser_cmd, url],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        print(f"✅ Opened URL: {url}")
-        return True
-    except Exception as e:
-        print(f"❌ Error opening URL: {e}")
-        return False
-
-
 def close_app(app: str) -> bool:
     """Close an application by name."""
     app_cmd = _resolve_app_name(app)
@@ -155,28 +137,77 @@ def close_app(app: str) -> bool:
 # Allowlist of safe commands that can be executed
 SAFE_COMMANDS = {
     # System info (read-only)
-    "date", "uptime", "whoami", "hostname", "uname",
-    "free", "df", "top", "htop", "ps",
+    "date",
+    "uptime",
+    "whoami",
+    "hostname",
+    "uname",
+    "free",
+    "df",
+    "top",
+    "htop",
+    "ps",
     # Network info (read-only)
-    "ip", "ifconfig", "ping", "curl", "wget",
+    "ip",
+    "ifconfig",
+    "ping",
+    "curl",
+    "wget",
     # File listing (read-only)
-    "ls", "pwd", "cat", "head", "tail", "wc", "find", "which",
+    "ls",
+    "pwd",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "find",
+    "which",
     # System utilities
-    "echo", "cal", "bc",
+    "echo",
+    "cal",
+    "bc",
 }
 
 # Dangerous patterns that should never be allowed
 DANGEROUS_PATTERNS = [
-    "rm ", "rm\t", "rmdir", "mkfs", "dd ", "dd\t",
-    "> /", ">/", ">> /", ">>/",  # Redirecting to system paths
-    "sudo", "su ", "su\t",
-    "chmod", "chown", "chgrp",
-    "|sh", "| sh", "|bash", "| bash", "|zsh", "| zsh",
-    "$(", "`",  # Command substitution
-    "eval ", "exec ",
-    "/etc/", "/usr/", "/bin/", "/sbin/", "/var/", "/root/",
-    "passwd", "shadow",
-    "curl|", "wget|", "curl |", "wget |",  # Piping downloads to shell
+    "rm ",
+    "rm\t",
+    "rmdir",
+    "mkfs",
+    "dd ",
+    "dd\t",
+    "> /",
+    ">/",
+    ">> /",
+    ">>/",  # Redirecting to system paths
+    "sudo",
+    "su ",
+    "su\t",
+    "chmod",
+    "chown",
+    "chgrp",
+    "|sh",
+    "| sh",
+    "|bash",
+    "| bash",
+    "|zsh",
+    "| zsh",
+    "$(",
+    "`",  # Command substitution
+    "eval ",
+    "exec ",
+    "/etc/",
+    "/usr/",
+    "/bin/",
+    "/sbin/",
+    "/var/",
+    "/root/",
+    "passwd",
+    "shadow",
+    "curl|",
+    "wget|",
+    "curl |",
+    "wget |",  # Piping downloads to shell
 ]
 
 
@@ -208,7 +239,6 @@ def run_command(command: str) -> str:
 
     try:
         # Use shell=False with shlex for safer execution
-        import shlex
         args = shlex.split(command)
 
         result = subprocess.run(
@@ -231,6 +261,7 @@ def run_command(command: str) -> str:
 
 # ============== VOLUME CONTROL ==============
 
+
 def set_volume(level: int) -> bool:
     """Set system volume to a percentage (0-100)."""
     level = max(0, min(100, level))
@@ -247,7 +278,9 @@ def change_volume(delta: int) -> bool:
     """Change volume by delta percentage (positive or negative)."""
     sign = "+" if delta >= 0 else ""
     try:
-        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{sign}{delta}%"], check=True)
+        subprocess.run(
+            ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{sign}{delta}%"], check=True
+        )
         print(f"✅ Volume changed by {sign}{delta}%")
         return True
     except Exception as e:
@@ -280,10 +313,13 @@ def toggle_mute() -> bool:
 
 # ============== WINDOW MANAGEMENT ==============
 
+
 def maximize_window() -> bool:
     """Maximize the active window."""
     try:
-        subprocess.run(["wmctrl", "-r", ":ACTIVE:", "-b", "add,maximized_vert,maximized_horz"], check=True)
+        subprocess.run(
+            ["wmctrl", "-r", ":ACTIVE:", "-b", "add,maximized_vert,maximized_horz"], check=True
+        )
         print("✅ Window maximized")
         return True
     except FileNotFoundError:
@@ -343,6 +379,7 @@ def move_to_workspace(number: int) -> bool:
 
 # ============== CLIPBOARD ==============
 
+
 def copy_to_clipboard(text: str) -> bool:
     """Copy text to clipboard. Uses wl-copy on Wayland, xclip on X11."""
     # Try wl-copy first on Wayland
@@ -383,7 +420,9 @@ def get_clipboard() -> str:
 
     # Fallback to xclip (X11 or XWayland)
     try:
-        result = subprocess.run(["xclip", "-selection", "clipboard", "-o"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["xclip", "-selection", "clipboard", "-o"], capture_output=True, text=True
+        )
         content = result.stdout.strip()
         print(f"✅ Clipboard content (xclip): {content[:50]}...")
         return content
@@ -419,9 +458,12 @@ def paste_clipboard() -> bool:
 
 # ============== SCREENSHOT ==============
 
+
 def take_screenshot(region: str = "full") -> str:
     """Take a screenshot. Region can be 'full', 'window', or 'selection'."""
-    timestamp = subprocess.run(["date", "+%Y%m%d_%H%M%S"], capture_output=True, text=True).stdout.strip()
+    timestamp = subprocess.run(
+        ["date", "+%Y%m%d_%H%M%S"], capture_output=True, text=True
+    ).stdout.strip()
     filename = os.path.expanduser(f"~/Pictures/screenshot_{timestamp}.png")
 
     try:
@@ -445,10 +487,10 @@ def take_screenshot(region: str = "full") -> str:
                 subprocess.run(["scrot", filename], check=True)
             print(f"✅ Screenshot saved: {filename}")
             return filename
-        except:
+        except (FileNotFoundError, subprocess.CalledProcessError):
             print("❌ No screenshot tool found")
             return ""
-    except Exception as e:
+    except subprocess.CalledProcessError as e:
         print(f"❌ Screenshot error: {e}")
         return ""
 
@@ -456,15 +498,13 @@ def take_screenshot(region: str = "full") -> str:
 # ============== REMOTE MODE ==============
 
 # Use XDG_RUNTIME_DIR for secure temp file (user-only access)
-REMOTE_MODE_FILE = os.path.join(
-    os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
-    "synthia-remote-mode"
-)
+REMOTE_MODE_FILE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "synthia-remote-mode")
 
 
 def _get_telegram_chat_id() -> int:
     """Get Telegram chat ID from config file."""
     from synthia.config import load_config
+
     config = load_config()
     allowed_users = config.get("telegram_allowed_users", [])
     if allowed_users:
@@ -480,7 +520,7 @@ def enable_remote_mode() -> bool:
         return False
 
     try:
-        with open(REMOTE_MODE_FILE, 'w') as f:
+        with open(REMOTE_MODE_FILE, "w") as f:
             f.write(str(chat_id))
         # Set restrictive permissions (owner read/write only)
         os.chmod(REMOTE_MODE_FILE, 0o600)
@@ -509,6 +549,7 @@ def is_remote_mode() -> bool:
 
 
 # ============== SYSTEM CONTROL ==============
+
 
 def lock_screen() -> bool:
     """Lock the screen."""
@@ -545,96 +586,65 @@ def suspend_system() -> bool:
 
 # ============== ACTION EXECUTOR ==============
 
-def execute_actions(actions: List[Dict[str, Any]]) -> tuple[list[bool], str | None]:
+# Action dispatch table - maps action types to handler functions
+_ACTION_HANDLERS: dict[str, callable] = {
+    # App control
+    "open_app": lambda a: open_app(a.get("app", "")),
+    "open_url": lambda a: open_url(a.get("url", ""), a.get("browser", "firefox")),
+    "close_app": lambda a: close_app(a.get("app", "")),
+    "type_text": lambda a: type_text(a.get("text", "")),
+    # Volume control
+    "set_volume": lambda a: set_volume(a.get("level", 50)),
+    "change_volume": lambda a: change_volume(a.get("delta", 10)),
+    "mute": lambda a: mute(a.get("state", True)),
+    "unmute": lambda a: mute(False),
+    "toggle_mute": lambda a: toggle_mute(),
+    # Window management
+    "maximize_window": lambda a: maximize_window(),
+    "minimize_window": lambda a: minimize_window(),
+    "close_window": lambda a: close_window(),
+    "switch_workspace": lambda a: switch_workspace(a.get("number", 1)),
+    "move_to_workspace": lambda a: move_to_workspace(a.get("number", 1)),
+    # Clipboard
+    "copy_to_clipboard": lambda a: copy_to_clipboard(a.get("text", "")),
+    "paste": lambda a: paste_clipboard(),
+    # System control
+    "lock_screen": lambda a: lock_screen(),
+    "suspend": lambda a: suspend_system(),
+    # Remote mode
+    "enable_remote": lambda a: enable_remote_mode(),
+    "disable_remote": lambda a: disable_remote_mode(),
+}
+
+
+def execute_actions(actions: list[dict[str, Any]]) -> tuple[list[bool], str | None]:
     """Execute a list of actions and return (success status list, command output if any)."""
-    results = []
-    command_output = None
+    results: list[bool] = []
+    command_output: str | None = None
 
     for action in actions:
         action_type = action.get("type", "")
 
-        # App control
-        if action_type == "open_app":
-            results.append(open_app(action.get("app", "")))
-
-        elif action_type == "open_url":
-            results.append(open_url(action.get("url", ""), action.get("browser", "firefox")))
-
-        elif action_type == "close_app":
-            results.append(close_app(action.get("app", "")))
-
-        elif action_type == "run_command":
+        # Special handlers that return output
+        if action_type == "run_command":
             output = run_command(action.get("command", ""))
             command_output = output
             results.append(bool(output))
-
-        elif action_type == "type_text":
-            results.append(type_text(action.get("text", "")))
-
-        # Volume control
-        elif action_type == "set_volume":
-            results.append(set_volume(action.get("level", 50)))
-
-        elif action_type == "change_volume":
-            results.append(change_volume(action.get("delta", 10)))
-
-        elif action_type == "mute":
-            results.append(mute(action.get("state", True)))
-
-        elif action_type == "unmute":
-            results.append(mute(False))
-
-        elif action_type == "toggle_mute":
-            results.append(toggle_mute())
-
-        # Window management
-        elif action_type == "maximize_window":
-            results.append(maximize_window())
-
-        elif action_type == "minimize_window":
-            results.append(minimize_window())
-
-        elif action_type == "close_window":
-            results.append(close_window())
-
-        elif action_type == "switch_workspace":
-            results.append(switch_workspace(action.get("number", 1)))
-
-        elif action_type == "move_to_workspace":
-            results.append(move_to_workspace(action.get("number", 1)))
-
-        # Clipboard
-        elif action_type == "copy_to_clipboard":
-            results.append(copy_to_clipboard(action.get("text", "")))
 
         elif action_type == "get_clipboard":
             content = get_clipboard()
             command_output = content
             results.append(bool(content))
 
-        elif action_type == "paste":
-            results.append(paste_clipboard())
-
-        # Screenshot
         elif action_type == "screenshot":
             path = take_screenshot(action.get("region", "full"))
             if path:
                 command_output = f"Screenshot saved to {path}"
             results.append(bool(path))
 
-        # System control
-        elif action_type == "lock_screen":
-            results.append(lock_screen())
-
-        elif action_type == "suspend":
-            results.append(suspend_system())
-
-        # Remote mode
-        elif action_type == "enable_remote":
-            results.append(enable_remote_mode())
-
-        elif action_type == "disable_remote":
-            results.append(disable_remote_mode())
+        # Standard handlers from dispatch table
+        elif action_type in _ACTION_HANDLERS:
+            results.append(_ACTION_HANDLERS[action_type](action))
 
         else:
             print(f"⚠️  Unknown action type: {action_type}")

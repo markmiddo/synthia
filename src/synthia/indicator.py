@@ -3,13 +3,15 @@
 import os
 import threading
 from enum import Enum
-from PIL import Image
+
 import pystray
+from PIL import Image
 from pystray import MenuItem as Item
 
 
 class Status(Enum):
     """Status states for the indicator."""
+
     READY = "ready"
     RECORDING = "recording"
     THINKING = "thinking"
@@ -61,8 +63,9 @@ class TrayIndicator:
         }
         color = colors.get(color_hint, "#AAAAAA")
 
-        img = Image.new('RGBA', (22, 22), (0, 0, 0, 0))
+        img = Image.new("RGBA", (22, 22), (0, 0, 0, 0))
         from PIL import ImageDraw
+
         draw = ImageDraw.Draw(img)
         draw.ellipse([2, 2, 20, 20], fill=color)
         return img
@@ -92,12 +95,10 @@ class TrayIndicator:
 
     def start(self):
         """Start the tray indicator in a background thread."""
+
         def run():
             self.icon = pystray.Icon(
-                "synthia",
-                self._get_icon(),
-                "Synthia",
-                menu=self._create_menu()
+                "synthia", self._get_icon(), "Synthia", menu=self._create_menu()
             )
             self.icon.run()
 

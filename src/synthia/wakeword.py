@@ -6,9 +6,10 @@ For production, you'd want something like Porcupine or Snowboy for offline detec
 
 import threading
 import time
+from typing import Callable, Optional
+
 import numpy as np
 import sounddevice as sd
-from typing import Callable, Optional
 
 
 class WakeWordDetector:
@@ -54,7 +55,7 @@ class WakeWordDetector:
                     samplerate=self.sample_rate,
                     channels=1,
                     dtype=np.int16,
-                    device=self.device
+                    device=self.device,
                 )
                 sd.wait()
 

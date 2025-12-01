@@ -1,10 +1,10 @@
 """AI Assistant integration for Synthia - supports Claude API and local Ollama."""
 
 import json
-import requests
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
+import requests
 
 SYSTEM_PROMPT = """You are Synthia, a friendly voice assistant on a Linux system. Today is {date}.
 
@@ -74,10 +74,15 @@ Be brief, friendly, conversational. One sentence is usually enough."""
 class Assistant:
     """Voice assistant supporting Claude API and local Ollama."""
 
-    def __init__(self, api_key: str = None, model: str = "claude-haiku-4-20250514",
-                 memory_size: int = 10, use_local: bool = False,
-                 local_model: str = "qwen2.5:7b-instruct-q4_0",
-                 ollama_url: str = "http://localhost:11434"):
+    def __init__(
+        self,
+        api_key: str = None,
+        model: str = "claude-haiku-4-20250514",
+        memory_size: int = 10,
+        use_local: bool = False,
+        local_model: str = "qwen2.5:7b-instruct-q4_0",
+        ollama_url: str = "http://localhost:11434",
+    ):
         self.use_local = use_local
         self.model = model if not use_local else local_model
         self.memory_size = memory_size
@@ -89,6 +94,7 @@ class Assistant:
             print(f"Assistant initialized with local model: {self.model}")
         else:
             import anthropic
+
             self.client = anthropic.Anthropic(api_key=api_key)
             print(f"Assistant initialized with Claude: {model}")
 
@@ -153,9 +159,9 @@ class Assistant:
                 "options": {
                     "temperature": 0.7,
                     "num_predict": 500,
-                }
+                },
             },
-            timeout=30
+            timeout=30,
         )
 
         if response.status_code != 200:
@@ -187,24 +193,26 @@ class Assistant:
 
             # Fix common JSON errors from local models
             # 1. Fix unquoted keys like: actions: -> "actions":
-            response_text = re.sub(r'(\s)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)', r'\1"\2"\3', response_text)
+            response_text = re.sub(
+                r"(\s)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)", r'\1"\2"\3', response_text
+            )
             # 2. Fix trailing commas before }
-            response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
+            response_text = re.sub(r",(\s*[}\]])", r"\1", response_text)
 
             # Try to find valid JSON by bracket matching
             result = None
-            start_idx = response_text.find('{')
+            start_idx = response_text.find("{")
             if start_idx != -1:
                 # Count brackets to find the matching closing brace
                 depth = 0
                 for i, char in enumerate(response_text[start_idx:], start_idx):
-                    if char == '{':
+                    if char == "{":
                         depth += 1
-                    elif char == '}':
+                    elif char == "}":
                         depth -= 1
                         if depth == 0:
                             # Found matching brace, try to parse
-                            json_str = response_text[start_idx:i+1]
+                            json_str = response_text[start_idx : i + 1]
                             try:
                                 result = json.loads(json_str)
                                 break
@@ -230,7 +238,7 @@ class Assistant:
         self._add_to_history("assistant", json.dumps(result))
 
         print(f"Response: {result['speech']}")
-        if result['actions']:
+        if result["actions"]:
             print(f"Actions: {result['actions']}")
 
         return result

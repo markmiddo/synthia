@@ -1,16 +1,19 @@
 """Audio capture for Synthia."""
 
+import queue
+from typing import Optional, Tuple
+
 import numpy as np
 import sounddevice as sd
-from typing import Optional, Tuple
-import queue
 from scipy import signal
 
 
 class AudioRecorder:
     """Records audio from the microphone while a key is held."""
 
-    def __init__(self, target_sample_rate: int = 16000, channels: int = 1, device: Optional[int] = None):
+    def __init__(
+        self, target_sample_rate: int = 16000, channels: int = 1, device: Optional[int] = None
+    ):
         self.target_sample_rate = target_sample_rate  # What Google expects
         self.channels = channels
         self.device = device
@@ -24,21 +27,23 @@ class AudioRecorder:
 
         # Get the device's native sample rate
         self.device_sample_rate = self._get_device_sample_rate()
-        print(f"📊 Device sample rate: {self.device_sample_rate}Hz, target: {self.target_sample_rate}Hz")
+        print(
+            f"📊 Device sample rate: {self.device_sample_rate}Hz, target: {self.target_sample_rate}Hz"
+        )
 
     def _find_usb_mic(self) -> Optional[int]:
         """Find a USB microphone device."""
         devices = sd.query_devices()
         for i, device in enumerate(devices):
-            name = device['name'].lower()
-            if device['max_input_channels'] > 0:
+            name = device["name"].lower()
+            if device["max_input_channels"] > 0:
                 # Prefer USB microphone
-                if 'usb' in name and 'microphone' in name:
+                if "usb" in name and "microphone" in name:
                     print(f"🎙️  Found USB Microphone: {device['name']} (device {i})")
                     return i
         # Fallback to pulse
         for i, device in enumerate(devices):
-            if device['name'] == 'pulse' and device['max_input_channels'] > 0:
+            if device["name"] == "pulse" and device["max_input_channels"] > 0:
                 print(f"🎙️  Using PulseAudio: {device['name']} (device {i})")
                 return i
         return None
@@ -47,7 +52,7 @@ class AudioRecorder:
         """Get the native sample rate of the selected device."""
         if self.device is not None:
             device_info = sd.query_devices(self.device)
-            return int(device_info['default_samplerate'])
+            return int(device_info["default_samplerate"])
         return 44100  # Default fallback
 
     def _resample(self, audio_data: np.ndarray, orig_rate: int, target_rate: int) -> np.ndarray:
@@ -124,7 +129,9 @@ class AudioRecorder:
         # Resample to target rate for Google STT
         if self.device_sample_rate != self.target_sample_rate:
             print(f"🔄 Resampling {self.device_sample_rate}Hz → {self.target_sample_rate}Hz...")
-            audio_data = self._resample(audio_data, self.device_sample_rate, self.target_sample_rate)
+            audio_data = self._resample(
+                audio_data, self.device_sample_rate, self.target_sample_rate
+            )
 
         return audio_data.tobytes()
 
@@ -135,7 +142,7 @@ def list_audio_devices():
     print("-" * 40)
     devices = sd.query_devices()
     for i, device in enumerate(devices):
-        if device['max_input_channels'] > 0:
+        if device["max_input_channels"] > 0:
             default = " (default)" if i == sd.default.device[0] else ""
             print(f"  [{i}] {device['name']} @ {device['default_samplerate']}Hz{default}")
     print()

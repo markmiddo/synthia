@@ -6,8 +6,8 @@ On X11: Uses pynput for global keyboard hooks.
 
 import os
 import threading
-from typing import Callable, Optional
 from abc import ABC, abstractmethod
+from typing import Callable, Optional
 
 from .display import is_wayland
 
@@ -62,7 +62,7 @@ class EvdevHotkeyListener(HotkeyListener):
     def _find_keyboard_devices(self) -> list:
         """Find all keyboard input devices."""
         try:
-            from evdev import InputDevice, list_devices, ecodes
+            from evdev import InputDevice, ecodes, list_devices
 
             keyboards = []
             for path in list_devices():
@@ -87,8 +87,9 @@ class EvdevHotkeyListener(HotkeyListener):
     def _listen(self):
         """Main listening loop for evdev."""
         try:
+            from selectors import EVENT_READ, DefaultSelector
+
             from evdev import ecodes
-            from selectors import DefaultSelector, EVENT_READ
 
             selector = DefaultSelector()
             for device in self.devices:
@@ -173,10 +174,18 @@ class PynputHotkeyListener(HotkeyListener):
     def _on_press(self, key):
         """Handle key press."""
         try:
-            if key == self.dictation_key and not self.dictation_active and not self.assistant_active:
+            if (
+                key == self.dictation_key
+                and not self.dictation_active
+                and not self.assistant_active
+            ):
                 self.dictation_active = True
                 self.on_dictation_press()
-            elif key == self.assistant_key and not self.assistant_active and not self.dictation_active:
+            elif (
+                key == self.assistant_key
+                and not self.assistant_active
+                and not self.dictation_active
+            ):
                 self.assistant_active = True
                 self.on_assistant_press()
         except AttributeError:
@@ -198,10 +207,7 @@ class PynputHotkeyListener(HotkeyListener):
         """Start the pynput listener."""
         from pynput import keyboard
 
-        self.listener = keyboard.Listener(
-            on_press=self._on_press,
-            on_release=self._on_release
-        )
+        self.listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self.listener.start()
 
     def stop(self):

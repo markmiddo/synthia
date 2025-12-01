@@ -7,23 +7,23 @@ Usage:
     Say "Hey Linux" - Wake word (when enabled)
 """
 
-import sys
-import signal
 import json
 import os
+import signal
+import sys
 
-from synthia.config import load_config, get_google_credentials_path, get_anthropic_api_key
-from synthia.audio import AudioRecorder, list_audio_devices
-from synthia.transcribe import Transcriber
-from synthia.output import type_text
-from synthia.tts import TextToSpeech
 from synthia.assistant import Assistant
+from synthia.audio import AudioRecorder, list_audio_devices
 from synthia.commands import execute_actions
-from synthia.indicator import TrayIndicator, Status
-from synthia.sounds import SoundEffects
-from synthia.notifications import notify_ready, notify_dictation, notify_assistant, notify_error
+from synthia.config import get_anthropic_api_key, get_google_credentials_path, load_config
+from synthia.display import get_display_server, is_wayland
 from synthia.hotkeys import create_hotkey_listener
-from synthia.display import is_wayland, get_display_server
+from synthia.indicator import Status, TrayIndicator
+from synthia.notifications import notify_assistant, notify_dictation, notify_error, notify_ready
+from synthia.output import type_text
+from synthia.sounds import SoundEffects
+from synthia.transcribe import Transcriber
+from synthia.tts import TextToSpeech
 
 
 class Synthia:
@@ -50,9 +50,7 @@ class Synthia:
         # print("✅ System tray indicator started")
 
         # Initialize audio recorder
-        self.recorder = AudioRecorder(
-            target_sample_rate=self.config["sample_rate"]
-        )
+        self.recorder = AudioRecorder(target_sample_rate=self.config["sample_rate"])
         print("✅ Audio recorder initialized")
 
         # Initialize transcriber (local Whisper or Google Cloud)
@@ -64,7 +62,9 @@ class Synthia:
             use_local=use_local_stt,
             local_model=self.config.get("local_stt_model", "small"),
         )
-        print(f"✅ Transcriber initialized ({'local Whisper' if use_local_stt else 'Google Cloud'})")
+        print(
+            f"✅ Transcriber initialized ({'local Whisper' if use_local_stt else 'Google Cloud'})"
+        )
 
         # Initialize TTS (local Piper or Google Cloud)
         use_local_tts = self.config.get("use_local_tts", False)
@@ -73,7 +73,9 @@ class Synthia:
             voice_name=self.config["tts_voice"],
             speed=self.config["tts_speed"],
             use_local=use_local_tts,
-            local_voice=self.config.get("local_tts_voice", "~/.local/share/piper-voices/en_US-amy-medium.onnx"),
+            local_voice=self.config.get(
+                "local_tts_voice", "~/.local/share/piper-voices/en_US-amy-medium.onnx"
+            ),
         )
         print(f"✅ TTS initialized ({'local Piper' if use_local_tts else 'Google Cloud'})")
 
@@ -96,13 +98,11 @@ class Synthia:
 
         # State file for GUI overlay communication
         self.state_file = os.path.join(
-            os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
-            "synthia-state.json"
+            os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "synthia-state.json"
         )
         # History file for voice transcription history
         self.history_file = os.path.join(
-            os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
-            "synthia-history.json"
+            os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "synthia-history.json"
         )
         self._update_state("ready")
 
@@ -132,6 +132,7 @@ class Synthia:
     def _parse_key(self, key_string: str):
         """Parse a key string like 'Key.ctrl_r' to a pynput Key."""
         from pynput.keyboard import Key
+
         if key_string.startswith("Key."):
             key_name = key_string[4:]
             return getattr(Key, key_name)
@@ -150,6 +151,7 @@ class Synthia:
         """Save transcription to history file for GUI display."""
         try:
             from datetime import datetime
+
             # Load existing history
             history = []
             if os.path.exists(self.history_file):
