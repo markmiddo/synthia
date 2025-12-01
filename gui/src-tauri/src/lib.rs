@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 fn load_icon_from_path(path: &PathBuf) -> Option<Image<'static>> {
     let img = image::open(path).ok()?.to_rgba8();
@@ -27,6 +27,15 @@ struct SynthiaState {
     recording: bool,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct HistoryEntry {
+    id: u32,
+    text: String,
+    mode: String,
+    timestamp: String,
+    response: Option<String>,
+}
+
 fn get_lock_file() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
         .unwrap_or_else(|_| "/tmp".to_string());
@@ -37,6 +46,12 @@ fn get_state_file() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
         .unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(runtime_dir).join("synthia-state.json")
+}
+
+fn get_history_file() -> PathBuf {
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(runtime_dir).join("synthia-history.json")
 }
 
 fn acquire_lock() -> bool {
@@ -211,6 +226,53 @@ fn set_overlay_recording(app: tauri::AppHandle, active: bool) -> Result<(), Stri
     Ok(())
 }
 
+#[tauri::command]
+fn get_history() -> Vec<HistoryEntry> {
+    let history_file = get_history_file();
+    if let Ok(content) = fs::read_to_string(&history_file) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+#[tauri::command]
+fn clear_history() -> Result<String, String> {
+    let history_file = get_history_file();
+    fs::write(&history_file, "[]").map_err(|e| e.to_string())?;
+    Ok("History cleared".to_string())
+}
+
+#[tauri::command]
+fn resend_to_assistant(text: String) -> Result<String, String> {
+    // Use xdotool to type the text into Claude Code terminal
+    // First, we'll write to a temp file that the stop hook can check
+    let prompt_file = PathBuf::from("/tmp/synthia-resend-prompt");
+    fs::write(&prompt_file, &text).map_err(|e| e.to_string())?;
+
+    // Use xdotool to focus Claude Code window and type the text
+    let _ = Command::new("xdotool")
+        .args(["search", "--name", "Claude Code", "windowactivate", "--sync"])
+        .output();
+
+    // Type the text
+    Command::new("xdotool")
+        .args(["type", "--clearmodifiers", &text])
+        .output()
+        .map_err(|e| format!("Failed to type text: {}", e))?;
+
+    // Press Enter to submit
+    Command::new("xdotool")
+        .args(["key", "Return"])
+        .output()
+        .map_err(|e| format!("Failed to press Enter: {}", e))?;
+
+    // Clean up
+    let _ = fs::remove_file(&prompt_file);
+
+    Ok("Sent to assistant".to_string())
+}
+
 pub fn run() {
     if !acquire_lock() {
         eprintln!("Synthia GUI is already running");
@@ -339,7 +401,10 @@ pub fn run() {
             set_overlay_recording,
             start_remote_mode,
             stop_remote_mode,
-            get_remote_status
+            get_remote_status,
+            get_history,
+            clear_history,
+            resend_to_assistant
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

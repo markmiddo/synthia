@@ -4,6 +4,14 @@ import "./App.css";
 
 type Status = "stopped" | "running" | "recording" | "thinking";
 
+interface HistoryEntry {
+  id: number;
+  text: string;
+  mode: "dictation" | "assistant";
+  timestamp: string;
+  response?: string;
+}
+
 function App() {
   const [status, setStatus] = useState<Status>("stopped");
   const [remoteMode, setRemoteMode] = useState(false);
@@ -11,16 +19,21 @@ function App() {
   const [assistantKey, setAssistantKey] = useState("Right Alt");
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [currentView, setCurrentView] = useState<"main" | "history">("main");
+  const [copiedId, setCopiedId] = useState<number | null>(null);
 
   useEffect(() => {
     checkStatus();
     checkRemoteStatus();
+    loadHistory();
     const interval = setInterval(() => {
       checkStatus();
       checkRemoteStatus();
+      if (currentView === "history") loadHistory();
     }, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentView]);
 
   useEffect(() => {
     if (!editingKey) return;
@@ -98,6 +111,47 @@ function App() {
     }
   }
 
+  async function loadHistory() {
+    try {
+      const result = await invoke<HistoryEntry[]>("get_history");
+      setHistory(result.reverse()); // Show newest first
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function handleCopy(text: string, id: number) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (e) {
+      setError("Failed to copy");
+    }
+  }
+
+  async function handleResend(text: string) {
+    try {
+      await invoke("resend_to_assistant", { text });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleClearHistory() {
+    try {
+      await invoke("clear_history");
+      setHistory([]);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function formatTime(timestamp: string) {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
   const statusColors: Record<Status, string> = {
     stopped: "#6b7280",
     running: "#22c55e",
@@ -105,6 +159,68 @@ function App() {
     thinking: "#eab308",
   };
 
+  // History View
+  if (currentView === "history") {
+    return (
+      <main className="container">
+        <div className="header history-view-header">
+          <button className="back-btn" onClick={() => setCurrentView("main")}>
+            ← Back
+          </button>
+          <div className="logo-text-small">VOICE HISTORY</div>
+          {history.length > 0 && (
+            <button className="clear-all-btn" onClick={handleClearHistory}>
+              Clear All
+            </button>
+          )}
+        </div>
+
+        <div className="history-view-content">
+          {history.length === 0 ? (
+            <div className="history-empty-state">
+              <p>No transcriptions yet</p>
+              <p className="empty-hint">Use voice dictation or assistant to see history here</p>
+            </div>
+          ) : (
+            <div className="history-list-full">
+              {history.map((entry) => (
+                <div key={entry.id} className={`history-item ${entry.mode}`}>
+                  <div className="history-item-header">
+                    <span className={`history-mode-label ${entry.mode}`}>
+                      {entry.mode === "assistant" ? "ASSISTANT" : "DICTATION"}
+                    </span>
+                    <span className="history-time">{formatTime(entry.timestamp)}</span>
+                  </div>
+                  <p className="history-text">{entry.text}</p>
+                  {entry.response && (
+                    <p className="history-response">→ {entry.response}</p>
+                  )}
+                  <div className="history-item-actions">
+                    <button
+                      className={`history-btn ${copiedId === entry.id ? 'copied' : ''}`}
+                      onClick={() => handleCopy(entry.text, entry.id)}
+                    >
+                      {copiedId === entry.id ? "✓" : "Copy"}
+                    </button>
+                    <button
+                      className="history-btn resend"
+                      onClick={() => handleResend(entry.text)}
+                    >
+                      Re-send
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {error && <div className="error">{error}</div>}
+      </main>
+    );
+  }
+
+  // Main View
   return (
     <main className="container">
       <div className="header">
@@ -169,6 +285,14 @@ function App() {
             <span>AI Assistant</span>
           </div>
         </div>
+
+        <button
+          className="history-nav-btn"
+          onClick={() => { setCurrentView("history"); loadHistory(); }}
+        >
+          <span>Voice History</span>
+          {history.length > 0 && <span className="history-count">{history.length}</span>}
+        </button>
 
         {error && <div className="error">{error}</div>}
       </div>

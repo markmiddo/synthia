@@ -99,6 +99,11 @@ class Synthia:
             os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
             "synthia-state.json"
         )
+        # History file for voice transcription history
+        self.history_file = os.path.join(
+            os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
+            "synthia-history.json"
+        )
         self._update_state("ready")
 
         # Parse hotkeys from config
@@ -128,6 +133,38 @@ class Synthia:
                 json.dump(state, f)
         except Exception:
             pass  # Non-critical, don't crash if state file can't be written
+
+    def _save_to_history(self, text: str, mode: str, response: str = None):
+        """Save transcription to history file for GUI display."""
+        try:
+            from datetime import datetime
+            # Load existing history
+            history = []
+            if os.path.exists(self.history_file):
+                with open(self.history_file, "r") as f:
+                    history = json.load(f)
+
+            # Add new entry
+            entry = {
+                "id": len(history) + 1,
+                "text": text,
+                "mode": mode,  # "dictation" or "assistant"
+                "timestamp": datetime.now().isoformat(),
+            }
+            if response:
+                entry["response"] = response
+
+            history.append(entry)
+
+            # Keep only last 50 entries
+            if len(history) > 50:
+                history = history[-50:]
+
+            # Save back
+            with open(self.history_file, "w") as f:
+                json.dump(history, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not save history: {e}")
 
     def _on_quit(self):
         """Handle quit from tray icon."""
@@ -188,6 +225,7 @@ class Synthia:
                     text = self.transcriber.transcribe(audio_data)
                     if text:
                         type_text(text)
+                        self._save_to_history(text, "dictation")
                         if self.config.get("show_notifications", True):
                             notify_dictation(text)
 
@@ -218,6 +256,7 @@ class Synthia:
                         # Speak the response
                         if response.get("speech"):
                             self.tts.speak(response["speech"])
+                            self._save_to_history(text, "assistant", response["speech"])
                             if self.config.get("show_notifications", True):
                                 notify_assistant(response["speech"])
 
