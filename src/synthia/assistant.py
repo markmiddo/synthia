@@ -167,6 +167,8 @@ class Assistant:
 
     def _parse_response(self, response_text: str) -> Dict[str, Any]:
         """Parse JSON response from LLM."""
+        import re
+
         try:
             # Handle markdown code blocks
             if response_text.startswith("```"):
@@ -183,13 +185,34 @@ class Assistant:
                         json_lines.append(line)
                 response_text = "\n".join(json_lines)
 
-            # Try to extract JSON from response (handle extra chars)
-            import re
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                response_text = json_match.group()
+            # Fix common JSON errors from local models
+            # 1. Fix unquoted keys like: actions: -> "actions":
+            response_text = re.sub(r'(\s)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)', r'\1"\2"\3', response_text)
+            # 2. Fix trailing commas before }
+            response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
 
-            result = json.loads(response_text)
+            # Try to find valid JSON by bracket matching
+            result = None
+            start_idx = response_text.find('{')
+            if start_idx != -1:
+                # Count brackets to find the matching closing brace
+                depth = 0
+                for i, char in enumerate(response_text[start_idx:], start_idx):
+                    if char == '{':
+                        depth += 1
+                    elif char == '}':
+                        depth -= 1
+                        if depth == 0:
+                            # Found matching brace, try to parse
+                            json_str = response_text[start_idx:i+1]
+                            try:
+                                result = json.loads(json_str)
+                                break
+                            except json.JSONDecodeError:
+                                continue
+
+            if result is None:
+                result = json.loads(response_text)
 
             # Validate structure
             if "speech" not in result:

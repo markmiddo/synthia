@@ -4,6 +4,7 @@ import subprocess
 import os
 from typing import Dict, Any, List
 from synthia.output import type_text
+from synthia.display import is_wayland
 
 
 # Common app name mappings
@@ -287,14 +288,25 @@ def move_to_workspace(number: int) -> bool:
 # ============== CLIPBOARD ==============
 
 def copy_to_clipboard(text: str) -> bool:
-    """Copy text to clipboard."""
+    """Copy text to clipboard. Uses wl-copy on Wayland, xclip on X11."""
+    # Try wl-copy first on Wayland
+    if is_wayland():
+        try:
+            process = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
+            process.communicate(text.encode())
+            print(f"✅ Copied to clipboard (wl-copy): {text[:50]}...")
+            return True
+        except FileNotFoundError:
+            pass  # Fall through to xclip
+
+    # Fallback to xclip (X11 or XWayland)
     try:
         process = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE)
         process.communicate(text.encode())
-        print(f"✅ Copied to clipboard: {text[:50]}...")
+        print(f"✅ Copied to clipboard (xclip): {text[:50]}...")
         return True
     except FileNotFoundError:
-        print("❌ xclip not found - install with: sudo apt install xclip")
+        print("❌ No clipboard tool found. Install wl-clipboard (Wayland) or xclip (X11)")
         return False
     except Exception as e:
         print(f"❌ Clipboard error: {e}")
@@ -302,24 +314,48 @@ def copy_to_clipboard(text: str) -> bool:
 
 
 def get_clipboard() -> str:
-    """Get text from clipboard."""
+    """Get text from clipboard. Uses wl-paste on Wayland, xclip on X11."""
+    # Try wl-paste first on Wayland
+    if is_wayland():
+        try:
+            result = subprocess.run(["wl-paste"], capture_output=True, text=True)
+            content = result.stdout.strip()
+            print(f"✅ Clipboard content (wl-paste): {content[:50]}...")
+            return content
+        except FileNotFoundError:
+            pass  # Fall through to xclip
+
+    # Fallback to xclip (X11 or XWayland)
     try:
         result = subprocess.run(["xclip", "-selection", "clipboard", "-o"], capture_output=True, text=True)
         content = result.stdout.strip()
-        print(f"✅ Clipboard content: {content[:50]}...")
+        print(f"✅ Clipboard content (xclip): {content[:50]}...")
         return content
     except FileNotFoundError:
-        return "xclip not installed"
+        return "No clipboard tool found"
     except Exception as e:
         return f"Error: {e}"
 
 
 def paste_clipboard() -> bool:
     """Paste clipboard content at cursor."""
+    # Try wtype first on Wayland
+    if is_wayland():
+        try:
+            subprocess.run(["wtype", "-M", "ctrl", "v", "-m", "ctrl"], check=True)
+            print("✅ Pasted from clipboard (wtype)")
+            return True
+        except FileNotFoundError:
+            pass  # Fall through to xdotool
+
+    # Fallback to xdotool (X11 or XWayland)
     try:
         subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=True)
-        print("✅ Pasted from clipboard")
+        print("✅ Pasted from clipboard (xdotool)")
         return True
+    except FileNotFoundError:
+        print("❌ No paste tool found. Install wtype (Wayland) or xdotool (X11)")
+        return False
     except Exception as e:
         print(f"❌ Paste error: {e}")
         return False

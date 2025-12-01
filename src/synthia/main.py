@@ -11,8 +11,6 @@ import sys
 import signal
 import json
 import os
-from pynput import keyboard
-from pynput.keyboard import Key
 
 from synthia.config import load_config, get_google_credentials_path, get_anthropic_api_key
 from synthia.audio import AudioRecorder, list_audio_devices
@@ -24,6 +22,8 @@ from synthia.commands import execute_actions
 from synthia.indicator import TrayIndicator, Status
 from synthia.sounds import SoundEffects
 from synthia.notifications import notify_ready, notify_dictation, notify_assistant, notify_error
+from synthia.hotkeys import create_hotkey_listener
+from synthia.display import is_wayland, get_display_server
 
 
 class Synthia:
@@ -106,20 +106,32 @@ class Synthia:
         )
         self._update_state("ready")
 
-        # Parse hotkeys from config
+        # Parse hotkeys from config (for X11/pynput)
         self.dictation_key = self._parse_key(self.config["dictation_key"])
         self.assistant_key = self._parse_key(self.config["assistant_key"])
 
-        print(f"\n📌 Dictation key: {self.config['dictation_key']} (hold to dictate)")
-        print(f"📌 Assistant key: {self.config['assistant_key']} (hold to ask AI)")
+        # Create hotkey listener (auto-detects Wayland vs X11)
+        self.hotkey_listener = create_hotkey_listener(
+            on_dictation_press=self._on_dictation_press,
+            on_dictation_release=self._on_dictation_release,
+            on_assistant_press=self._on_assistant_press,
+            on_assistant_release=self._on_assistant_release,
+            dictation_key=self.dictation_key,
+            assistant_key=self.assistant_key,
+        )
+
+        print(f"\n🖥️  Display server: {get_display_server()}")
+        print(f"📌 Dictation key: Right Ctrl (hold to dictate)")
+        print(f"📌 Assistant key: Right Alt (hold to ask AI)")
         print("\n✨ Synthia ready!\n")
 
         # Show notification
         if self.config.get("show_notifications", True):
             notify_ready()
 
-    def _parse_key(self, key_string: str) -> Key:
+    def _parse_key(self, key_string: str):
         """Parse a key string like 'Key.ctrl_r' to a pynput Key."""
+        from pynput.keyboard import Key
         if key_string.startswith("Key."):
             key_name = key_string[4:]
             return getattr(Key, key_name)
@@ -170,121 +182,119 @@ class Synthia:
         """Handle quit from tray icon."""
         self.running = False
 
-    def on_press(self, key):
-        """Handle key press events."""
-        if not self.running:
-            return False
+    def _on_dictation_press(self):
+        """Handle dictation key press (Right Ctrl)."""
+        if not self.running or self.dictation_active or self.assistant_active:
+            return
 
         try:
-            # Dictation mode - Right Ctrl
-            if key == self.dictation_key and not self.dictation_active and not self.assistant_active:
-                try:
-                    self.recorder.start_recording()
-                    self.dictation_active = True
-                    self._update_state("recording")
-                    if self.tray:
-                        self.tray.set_status(Status.RECORDING)
-                    self.sounds.play_start()
-                except Exception as e:
-                    print(f"❌ Could not start recording: {e}")
-                    self.sounds.play_error()
+            self.recorder.start_recording()
+            self.dictation_active = True
+            self._update_state("recording")
+            if self.tray:
+                self.tray.set_status(Status.RECORDING)
+            self.sounds.play_start()
+        except Exception as e:
+            print(f"❌ Could not start recording: {e}")
+            self.sounds.play_error()
 
-            # Assistant mode - Right Alt
-            elif key == self.assistant_key and not self.assistant_active and not self.dictation_active:
-                try:
-                    self.recorder.start_recording()
-                    self.assistant_active = True
-                    self._update_state("recording")
-                    if self.tray:
-                        self.tray.set_status(Status.ASSISTANT)
-                    self.sounds.play_start()
-                except Exception as e:
-                    print(f"❌ Could not start recording: {e}")
-                    self.sounds.play_error()
-
-        except AttributeError:
-            pass
-
-    def on_release(self, key):
-        """Handle key release events."""
-        if not self.running:
-            return False
+    def _on_dictation_release(self):
+        """Handle dictation key release (Right Ctrl)."""
+        if not self.running or not self.dictation_active:
+            return
 
         try:
-            # Dictation mode - transcribe and type
-            if key == self.dictation_key and self.dictation_active:
-                self.dictation_active = False
-                self._update_state("thinking")
-                self.sounds.play_stop()
-                if self.tray:
-                    self.tray.set_status(Status.THINKING)
+            self.dictation_active = False
+            self._update_state("thinking")
+            self.sounds.play_stop()
+            if self.tray:
+                self.tray.set_status(Status.THINKING)
 
-                audio_data = self.recorder.stop_recording()
+            audio_data = self.recorder.stop_recording()
 
-                if audio_data:
-                    text = self.transcriber.transcribe(audio_data)
-                    if text:
-                        type_text(text)
-                        self._save_to_history(text, "dictation")
+            if audio_data:
+                text = self.transcriber.transcribe(audio_data)
+                if text:
+                    type_text(text)
+                    self._save_to_history(text, "dictation")
+                    if self.config.get("show_notifications", True):
+                        notify_dictation(text)
+
+            self._update_state("ready")
+            if self.tray:
+                self.tray.set_status(Status.READY)
+
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            self.sounds.play_error()
+            if self.config.get("show_notifications", True):
+                notify_error(str(e))
+            if self.tray:
+                self.tray.set_status(Status.READY)
+
+    def _on_assistant_press(self):
+        """Handle assistant key press (Right Alt)."""
+        if not self.running or self.assistant_active or self.dictation_active:
+            return
+
+        try:
+            self.recorder.start_recording()
+            self.assistant_active = True
+            self._update_state("recording")
+            if self.tray:
+                self.tray.set_status(Status.ASSISTANT)
+            self.sounds.play_start()
+        except Exception as e:
+            print(f"❌ Could not start recording: {e}")
+            self.sounds.play_error()
+
+    def _on_assistant_release(self):
+        """Handle assistant key release (Right Alt)."""
+        if not self.running or not self.assistant_active:
+            return
+
+        try:
+            self.assistant_active = False
+            self._update_state("thinking")
+            self.sounds.play_stop()
+            if self.tray:
+                self.tray.set_status(Status.THINKING)
+
+            audio_data = self.recorder.stop_recording()
+
+            if audio_data:
+                # Transcribe the command
+                text = self.transcriber.transcribe(audio_data)
+
+                if text:
+                    print(f"\n🎯 Command: {text}")
+
+                    # Process with Claude
+                    response = self.assistant.process(text)
+
+                    # Speak the response
+                    if response.get("speech"):
+                        self.tts.speak(response["speech"])
+                        self._save_to_history(text, "assistant", response["speech"])
                         if self.config.get("show_notifications", True):
-                            notify_dictation(text)
+                            notify_assistant(response["speech"])
 
-                self._update_state("ready")
-                if self.tray:
-                    self.tray.set_status(Status.READY)
+                    # Execute any actions
+                    print(f"🔧 Actions received: {response.get('actions')}")
+                    if response.get("actions"):
+                        results, command_output = execute_actions(response["actions"])
+                        print(f"🔧 Action results: {results}")
 
-            # Assistant mode - transcribe, process with Claude, speak response, execute actions
-            elif key == self.assistant_key and self.assistant_active:
-                self.assistant_active = False
-                self._update_state("thinking")
-                self.sounds.play_stop()
-                if self.tray:
-                    self.tray.set_status(Status.THINKING)
+                        # If a command returned output, speak it
+                        if command_output:
+                            self.tts.speak(command_output)
 
-                audio_data = self.recorder.stop_recording()
+                    print()
 
-                if audio_data:
-                    # Transcribe the command
-                    text = self.transcriber.transcribe(audio_data)
+            self._update_state("ready")
+            if self.tray:
+                self.tray.set_status(Status.READY)
 
-                    if text:
-                        print(f"\n🎯 Command: {text}")
-
-                        # Process with Claude
-                        response = self.assistant.process(text)
-
-                        # Speak the response
-                        if response.get("speech"):
-                            self.tts.speak(response["speech"])
-                            self._save_to_history(text, "assistant", response["speech"])
-                            if self.config.get("show_notifications", True):
-                                notify_assistant(response["speech"])
-
-                        # Execute any actions
-                        print(f"🔧 Actions received: {response.get('actions')}")
-                        if response.get("actions"):
-                            results, command_output = execute_actions(response["actions"])
-                            print(f"🔧 Action results: {results}")
-
-                            # If a command returned output, speak it
-                            if command_output:
-                                self.tts.speak(command_output)
-
-                        print()
-
-                self._update_state("ready")
-                if self.tray:
-                    self.tray.set_status(Status.READY)
-
-            # Disabled ESC quit - use Ctrl+C in terminal or kill process
-            # elif key == Key.esc:
-            #     print("\n👋 Exiting Synthia...")
-            #     self.running = False
-            #     return False
-            pass
-
-        except AttributeError:
-            pass
         except Exception as e:
             print(f"❌ Error: {e}")
             self.sounds.play_error()
@@ -301,14 +311,13 @@ class Synthia:
         def signal_handler(sig, frame):
             print("\n👋 Interrupted, exiting...")
             self.running = False
+            self.hotkey_listener.stop()
 
         signal.signal(signal.SIGINT, signal_handler)
 
-        with keyboard.Listener(
-            on_press=self.on_press,
-            on_release=self.on_release
-        ) as listener:
-            listener.join()
+        # Start the hotkey listener (auto-detects Wayland vs X11)
+        self.hotkey_listener.start()
+        self.hotkey_listener.join()
 
         # Cleanup
         if self.tray:
