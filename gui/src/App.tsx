@@ -24,7 +24,22 @@ function App() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
   useEffect(() => {
-    checkStatus();
+    // Auto-start Synthia when app opens
+    async function initAndAutoStart() {
+      try {
+        const currentStatus = await invoke<string>("get_status");
+        setStatus(currentStatus as Status);
+        // If stopped, auto-start
+        if (currentStatus === "stopped") {
+          await invoke("start_synthia");
+          setStatus("running");
+        }
+      } catch (e) {
+        setError(String(e));
+      }
+    }
+
+    initAndAutoStart();
     checkRemoteStatus();
     loadHistory();
     const interval = setInterval(() => {
