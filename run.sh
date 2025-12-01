@@ -6,6 +6,7 @@ CUDNN_LIB="$SCRIPT_DIR/venv/lib/python3.10/site-packages/nvidia/cudnn/lib"
 CUBLAS_LIB="$SCRIPT_DIR/venv/lib/python3.10/site-packages/nvidia/cublas/lib"
 
 export LD_LIBRARY_PATH="$CUDNN_LIB:$CUBLAS_LIB:$LD_LIBRARY_PATH"
+export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"
 
 cd "$SCRIPT_DIR"
 source venv/bin/activate

@@ -268,14 +268,31 @@ class SynthiaBot:
             logger.error(f"Error processing text: {e}")
             await update.message.reply_text(f"Error: {e}")
 
+    def _get_display(self) -> str:
+        """Get the active X display, trying common options."""
+        for display in [':1', ':0']:
+            try:
+                result = subprocess.run(
+                    ['wmctrl', '-l'],
+                    capture_output=True, text=True,
+                    env={**os.environ, 'DISPLAY': display},
+                    timeout=2
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return display
+            except:
+                pass
+        return os.environ.get('DISPLAY', ':0')
+
     def _send_to_claude_code(self, message: str) -> bool:
         """Send a message to the active Claude Code terminal using xdotool."""
         try:
+            display = self._get_display()
             # Find terminal window - look for "Remote" tab in WezTerm
             result = subprocess.run(
                 ['wmctrl', '-l'],
                 capture_output=True, text=True,
-                env={**os.environ, 'DISPLAY': ':0'}
+                env={**os.environ, 'DISPLAY': display}
             )
 
             # Priority order for window matching:
@@ -318,14 +335,14 @@ class SynthiaBot:
             subprocess.run(
                 ['xdotool', 'type', '--window', window_id, '--clearmodifiers', message],
                 check=True,
-                env={**os.environ, 'DISPLAY': ':0'}
+                env={**os.environ, 'DISPLAY': display}
             )
 
             # Press Enter
             subprocess.run(
                 ['xdotool', 'key', '--window', window_id, 'Return'],
                 check=True,
-                env={**os.environ, 'DISPLAY': ':0'}
+                env={**os.environ, 'DISPLAY': display}
             )
 
             logger.info(f"Sent to Claude Code: {message}")
@@ -492,8 +509,39 @@ class SynthiaBot:
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
+def send_telegram_notification(message: str):
+    """Send a one-off notification to all allowed users."""
+    import requests
+
+    config = load_config()
+    bot_token = config.get('telegram_bot_token')
+    allowed_users = config.get('telegram_allowed_users', [])
+
+    if not bot_token or not allowed_users:
+        return False
+
+    for user_id in allowed_users:
+        try:
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            requests.post(url, json={
+                "chat_id": user_id,
+                "text": message,
+                "parse_mode": "Markdown"
+            }, timeout=5)
+        except Exception as e:
+            logger.error(f"Failed to send notification: {e}")
+
+    return True
+
+
 def main():
     """Main entry point."""
+    # Check for notification mode
+    if len(sys.argv) > 1 and sys.argv[1] == "--notify":
+        message = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Notification"
+        send_telegram_notification(message)
+        return
+
     config = load_config()
 
     bot_token = config.get('telegram_bot_token')

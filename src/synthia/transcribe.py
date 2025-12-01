@@ -53,28 +53,23 @@ class Transcriber:
 
     def _init_whisper(self):
         """Initialize local Whisper model using faster-whisper."""
+        # Force CPU mode to avoid CUDA library issues
+        import os
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
         from faster_whisper import WhisperModel
 
         model_name = "tiny"
         print(f"Loading faster-whisper model: {model_name}...")
 
-        # Try GPU first, fall back to CPU
-        try:
-            self.whisper_model = WhisperModel(
-                model_name,
-                device="cuda",
-                compute_type="float16",
-            )
-            print(f"Faster-whisper {model_name} loaded (GPU float16)")
-        except Exception as e:
-            print(f"GPU failed ({e}), falling back to CPU...")
-            self.whisper_model = WhisperModel(
-                model_name,
-                device="cpu",
-                compute_type="int8",
-                cpu_threads=4
-            )
-            print(f"Faster-whisper {model_name} loaded (CPU int8)")
+        # Always use CPU - CUDA has library issues on this system
+        self.whisper_model = WhisperModel(
+            model_name,
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=4
+        )
+        print(f"Faster-whisper {model_name} loaded (CPU int8)")
 
     def transcribe(self, audio_data: bytes) -> str:
         """Transcribe audio bytes to text."""

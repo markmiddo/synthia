@@ -18,12 +18,12 @@ Hotkey: Right Ctrl (hold to record, release to transcribe)
 from pynput import keyboard
 from pynput.keyboard import Key
 
-from audio import AudioRecorder
-from transcribe import Transcriber
-from config import load_config, get_google_credentials_path
-from sounds import SoundEffects
-from notifications import notify
-from output import type_text
+from synthia.audio import AudioRecorder
+from synthia.transcribe import Transcriber
+from synthia.config import load_config, get_google_credentials_path
+from synthia.sounds import SoundEffects
+from synthia.notifications import notify
+from synthia.output import type_text
 
 
 class VoiceDaemon:

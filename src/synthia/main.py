@@ -9,19 +9,21 @@ Usage:
 
 import sys
 import signal
+import json
+import os
 from pynput import keyboard
 from pynput.keyboard import Key
 
-from config import load_config, get_google_credentials_path, get_anthropic_api_key
-from audio import AudioRecorder, list_audio_devices
-from transcribe import Transcriber
-from output import type_text
-from tts import TextToSpeech
-from assistant import Assistant
-from commands import execute_actions
-from indicator import TrayIndicator, Status
-from sounds import SoundEffects
-from notifications import notify_ready, notify_dictation, notify_assistant, notify_error
+from synthia.config import load_config, get_google_credentials_path, get_anthropic_api_key
+from synthia.audio import AudioRecorder, list_audio_devices
+from synthia.transcribe import Transcriber
+from synthia.output import type_text
+from synthia.tts import TextToSpeech
+from synthia.assistant import Assistant
+from synthia.commands import execute_actions
+from synthia.indicator import TrayIndicator, Status
+from synthia.sounds import SoundEffects
+from synthia.notifications import notify_ready, notify_dictation, notify_assistant, notify_error
 
 
 class Synthia:
@@ -92,6 +94,13 @@ class Synthia:
         self.assistant_active = False
         self.running = True
 
+        # State file for GUI overlay communication
+        self.state_file = os.path.join(
+            os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
+            "synthia-state.json"
+        )
+        self._update_state("ready")
+
         # Parse hotkeys from config
         self.dictation_key = self._parse_key(self.config["dictation_key"])
         self.assistant_key = self._parse_key(self.config["assistant_key"])
@@ -111,6 +120,15 @@ class Synthia:
             return getattr(Key, key_name)
         return key_string
 
+    def _update_state(self, status: str):
+        """Update state file for GUI overlay communication."""
+        try:
+            state = {"status": status, "recording": status == "recording"}
+            with open(self.state_file, "w") as f:
+                json.dump(state, f)
+        except Exception:
+            pass  # Non-critical, don't crash if state file can't be written
+
     def _on_quit(self):
         """Handle quit from tray icon."""
         self.running = False
@@ -126,6 +144,7 @@ class Synthia:
                 try:
                     self.recorder.start_recording()
                     self.dictation_active = True
+                    self._update_state("recording")
                     if self.tray:
                         self.tray.set_status(Status.RECORDING)
                     self.sounds.play_start()
@@ -138,6 +157,7 @@ class Synthia:
                 try:
                     self.recorder.start_recording()
                     self.assistant_active = True
+                    self._update_state("recording")
                     if self.tray:
                         self.tray.set_status(Status.ASSISTANT)
                     self.sounds.play_start()
@@ -157,6 +177,7 @@ class Synthia:
             # Dictation mode - transcribe and type
             if key == self.dictation_key and self.dictation_active:
                 self.dictation_active = False
+                self._update_state("thinking")
                 self.sounds.play_stop()
                 if self.tray:
                     self.tray.set_status(Status.THINKING)
@@ -170,12 +191,14 @@ class Synthia:
                         if self.config.get("show_notifications", True):
                             notify_dictation(text)
 
+                self._update_state("ready")
                 if self.tray:
                     self.tray.set_status(Status.READY)
 
             # Assistant mode - transcribe, process with Claude, speak response, execute actions
             elif key == self.assistant_key and self.assistant_active:
                 self.assistant_active = False
+                self._update_state("thinking")
                 self.sounds.play_stop()
                 if self.tray:
                     self.tray.set_status(Status.THINKING)
@@ -210,14 +233,16 @@ class Synthia:
 
                         print()
 
+                self._update_state("ready")
                 if self.tray:
                     self.tray.set_status(Status.READY)
 
-            # Escape to quit
-            elif key == Key.esc:
-                print("\n👋 Exiting Synthia...")
-                self.running = False
-                return False
+            # Disabled ESC quit - use Ctrl+C in terminal or kill process
+            # elif key == Key.esc:
+            #     print("\n👋 Exiting Synthia...")
+            #     self.running = False
+            #     return False
+            pass
 
         except AttributeError:
             pass
@@ -231,7 +256,7 @@ class Synthia:
 
     def run(self):
         """Run the main keyboard listener loop."""
-        print("Press ESC to exit\n")
+        print("Use Ctrl+C to exit\n")
 
         # Handle Ctrl+C gracefully
         def signal_handler(sig, frame):
