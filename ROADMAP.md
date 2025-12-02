@@ -31,7 +31,7 @@ This document outlines the planned features and direction for Synthia. We welcom
 - [ ] Email commands ("Read my latest emails", "Send email to...")
 - [ ] Music control (Spotify, local players)
 - [ ] Smart home integration (Home Assistant)
-- [ ] Web search and summarization
+- [x] Web search and summarization (Tavily integration)
 - [ ] Note-taking and reminders
 - [ ] File operations ("Find files named...", "Open recent documents")
 
@@ -65,7 +65,7 @@ This document outlines the planned features and direction for Synthia. We welcom
 - [ ] MSI/winget installer
 
 ### Linux Improvements
-- [ ] Wayland support (currently X11 only)
+- [x] Wayland support (wtype for input, clipboard with wl-copy/wl-paste)
 - [ ] PipeWire audio support
 - [ ] Flatpak/Snap packaging
 - [ ] AppImage distribution

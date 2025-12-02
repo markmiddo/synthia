@@ -9,6 +9,7 @@ from typing import Any
 
 from synthia.display import is_wayland
 from synthia.output import type_text
+from synthia.web_search import web_search
 
 # Common app name mappings
 APP_ALIASES = {
@@ -316,65 +317,130 @@ def toggle_mute() -> bool:
 
 def maximize_window() -> bool:
     """Maximize the active window."""
-    try:
-        subprocess.run(
-            ["wmctrl", "-r", ":ACTIVE:", "-b", "add,maximized_vert,maximized_horz"], check=True
-        )
-        print("✅ Window maximized")
-        return True
-    except FileNotFoundError:
-        print("❌ wmctrl not found - install with: sudo apt install wmctrl")
-        return False
-    except Exception as e:
-        print(f"❌ Window error: {e}")
-        return False
+    if is_wayland():
+        # On Wayland, use keyboard shortcut (works on most compositors including Cosmic)
+        try:
+            subprocess.run(["wtype", "-M", "logo", "-k", "Up", "-m", "logo"], check=True)
+            print("✅ Window maximized (Wayland)")
+            return True
+        except FileNotFoundError:
+            print("❌ wtype not found - install with: sudo apt install wtype")
+            return False
+        except Exception as e:
+            print(f"❌ Window error: {e}")
+            return False
+    else:
+        try:
+            subprocess.run(
+                ["wmctrl", "-r", ":ACTIVE:", "-b", "add,maximized_vert,maximized_horz"], check=True
+            )
+            print("✅ Window maximized")
+            return True
+        except FileNotFoundError:
+            print("❌ wmctrl not found - install with: sudo apt install wmctrl")
+            return False
+        except Exception as e:
+            print(f"❌ Window error: {e}")
+            return False
 
 
 def minimize_window() -> bool:
     """Minimize the active window."""
-    try:
-        subprocess.run(["xdotool", "getactivewindow", "windowminimize"], check=True)
-        print("✅ Window minimized")
-        return True
-    except Exception as e:
-        print(f"❌ Window error: {e}")
-        return False
+    if is_wayland():
+        # On Wayland, use keyboard shortcut
+        try:
+            subprocess.run(["wtype", "-M", "logo", "-k", "h", "-m", "logo"], check=True)
+            print("✅ Window minimized (Wayland)")
+            return True
+        except FileNotFoundError:
+            print("❌ wtype not found")
+            return False
+        except Exception as e:
+            print(f"❌ Window error: {e}")
+            return False
+    else:
+        try:
+            subprocess.run(["xdotool", "getactivewindow", "windowminimize"], check=True)
+            print("✅ Window minimized")
+            return True
+        except Exception as e:
+            print(f"❌ Window error: {e}")
+            return False
 
 
 def close_window() -> bool:
     """Close the active window."""
-    try:
-        subprocess.run(["xdotool", "getactivewindow", "windowclose"], check=True)
-        print("✅ Window closed")
-        return True
-    except Exception as e:
-        print(f"❌ Window error: {e}")
-        return False
+    if is_wayland():
+        # On Wayland, use keyboard shortcut (Alt+F4 is universal)
+        try:
+            subprocess.run(["wtype", "-M", "alt", "-k", "F4", "-m", "alt"], check=True)
+            print("✅ Window closed (Wayland)")
+            return True
+        except FileNotFoundError:
+            print("❌ wtype not found")
+            return False
+        except Exception as e:
+            print(f"❌ Window error: {e}")
+            return False
+    else:
+        try:
+            subprocess.run(["xdotool", "getactivewindow", "windowclose"], check=True)
+            print("✅ Window closed")
+            return True
+        except Exception as e:
+            print(f"❌ Window error: {e}")
+            return False
 
 
 def switch_workspace(number: int) -> bool:
     """Switch to a specific workspace (1-indexed)."""
-    try:
-        subprocess.run(["wmctrl", "-s", str(number - 1)], check=True)
-        print(f"✅ Switched to workspace {number}")
-        return True
-    except FileNotFoundError:
-        print("❌ wmctrl not found")
-        return False
-    except Exception as e:
-        print(f"❌ Workspace error: {e}")
-        return False
+    if is_wayland():
+        # On Cosmic/Wayland, use Super+number
+        try:
+            subprocess.run(["wtype", "-M", "logo", "-k", str(number), "-m", "logo"], check=True)
+            print(f"✅ Switched to workspace {number} (Wayland)")
+            return True
+        except FileNotFoundError:
+            print("❌ wtype not found")
+            return False
+        except Exception as e:
+            print(f"❌ Workspace error: {e}")
+            return False
+    else:
+        try:
+            subprocess.run(["wmctrl", "-s", str(number - 1)], check=True)
+            print(f"✅ Switched to workspace {number}")
+            return True
+        except FileNotFoundError:
+            print("❌ wmctrl not found")
+            return False
+        except Exception as e:
+            print(f"❌ Workspace error: {e}")
+            return False
 
 
 def move_to_workspace(number: int) -> bool:
     """Move active window to a specific workspace."""
-    try:
-        subprocess.run(["wmctrl", "-r", ":ACTIVE:", "-t", str(number - 1)], check=True)
-        print(f"✅ Moved window to workspace {number}")
-        return True
-    except Exception as e:
-        print(f"❌ Move error: {e}")
-        return False
+    if is_wayland():
+        # On Cosmic/Wayland, use Super+Shift+number
+        try:
+            subprocess.run(["wtype", "-M", "logo", "-M", "shift", "-k", str(number), "-m", "shift", "-m", "logo"], check=True)
+            print(f"✅ Moved window to workspace {number} (Wayland)")
+            return True
+        except FileNotFoundError:
+            print("❌ wtype not found")
+            return False
+        except Exception as e:
+            print(f"❌ Move error: {e}")
+            return False
+    else:
+        try:
+            subprocess.run(["wmctrl", "-r", ":ACTIVE:", "-t", str(number - 1)], check=True)
+            print(f"✅ Moved window to workspace {number}")
+            return True
+        except Exception as e:
+            print(f"❌ Move error: {e}")
+            return False
 
 
 # ============== CLIPBOARD ==============
@@ -641,6 +707,15 @@ def execute_actions(actions: list[dict[str, Any]]) -> tuple[list[bool], str | No
             if path:
                 command_output = f"Screenshot saved to {path}"
             results.append(bool(path))
+
+        elif action_type == "web_search":
+            query = action.get("query", "")
+            if query:
+                answer = web_search(query)
+                command_output = answer
+                results.append(bool(answer))
+            else:
+                results.append(False)
 
         # Standard handlers from dispatch table
         elif action_type in _ACTION_HANDLERS:

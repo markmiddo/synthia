@@ -42,6 +42,8 @@ DEFAULT_CONFIG: ConfigDict = {
     # Telegram remote access (must be configured by user)
     "telegram_bot_token": "",  # Get from @BotFather
     "telegram_allowed_users": [],  # List of Telegram user IDs
+    # Web search (Tavily)
+    "tavily_api_key": "",  # Get from tavily.com
 }
 
 CONFIG_PATH = Path.home() / ".config" / "synthia" / "config.yaml"

@@ -305,6 +305,10 @@ class SynthiaBot:
             logger.error(f"Error processing text: {e}")
             await update.message.reply_text(f"Error: {e}")
 
+    def _is_wayland(self) -> bool:
+        """Check if running on Wayland."""
+        return bool(os.environ.get("WAYLAND_DISPLAY"))
+
     def _get_display(self) -> str:
         """Get the active X display, trying common options."""
         for display in [':1', ':0']:
@@ -322,7 +326,10 @@ class SynthiaBot:
         return os.environ.get('DISPLAY', ':0')
 
     def _send_to_claude_code(self, message: str) -> bool:
-        """Send a message to the active Claude Code terminal using xdotool.
+        """Send a message to the Claude Code terminal.
+
+        On Wayland: Uses wtype to type to the focused window.
+        On X11: Uses xdotool with window targeting.
 
         SECURITY: Input is sanitized to prevent terminal escape sequence injection.
         """
@@ -333,70 +340,108 @@ class SynthiaBot:
             return False
 
         try:
-            display = self._get_display()
-            # Find terminal window - look for "Remote" tab in WezTerm
-            result = subprocess.run(
-                ['wmctrl', '-l'],
-                capture_output=True, text=True,
-                env={**os.environ, 'DISPLAY': display}
-            )
-
-            # Priority order for window matching:
-            # 1. Window titled "Remote" (dedicated remote control tab)
-            # 2. Window with Claude Code indicator (✳ or Claude)
-            # 3. WezTerm windows (contain tab info like [1/4])
-            window_id = None
-            candidates = []
-            for line in result.stdout.strip().split('\n'):
-                parts = line.split(None, 4)
-                if len(parts) >= 4:
-                    wid = parts[0]
-                    title = parts[-1] if len(parts) > 4 else ''
-                    # Skip empty titles and desktop/panel windows
-                    if not title or title.startswith('@!') or title.startswith('N/A'):
-                        continue
-                    # Skip browser windows (Chrome, Firefox, etc)
-                    if any(x in title for x in ['Chrome', 'Firefox', 'Zen', 'Brave']):
-                        continue
-                    # Highest priority - "Remote" tab
-                    if title == 'Remote':
-                        candidates.insert(0, (wid, title))
-                    # High priority - Claude Code window (has ✳ indicator)
-                    elif '✳' in title:
-                        candidates.insert(1 if candidates and candidates[0][1] == 'Remote' else 0, (wid, title))
-                    # Medium priority - WezTerm with tab indicator [X/Y]
-                    elif title.startswith('[') and '/' in title[:6]:
-                        candidates.append((wid, title))
-
-            if candidates:
-                wid, title = candidates[0]
-                window_id = str(int(wid, 16))
-                logger.info(f"Found terminal window: {title} ({wid})")
-
-            if not window_id:
-                logger.error("No terminal window found")
-                return False
-
-            # Type the message into the terminal
-            subprocess.run(
-                ['xdotool', 'type', '--window', window_id, '--clearmodifiers', message],
-                check=True,
-                env={**os.environ, 'DISPLAY': display}
-            )
-
-            # Press Enter
-            subprocess.run(
-                ['xdotool', 'key', '--window', window_id, 'Return'],
-                check=True,
-                env={**os.environ, 'DISPLAY': display}
-            )
-
-            logger.info(f"Sent to Claude Code: {message}")
-            return True
+            # Use Wayland-native approach if available
+            if self._is_wayland():
+                return self._send_wayland(message)
+            else:
+                return self._send_x11(message)
 
         except Exception as e:
             logger.error(f"Error sending to Claude Code: {e}")
             return False
+
+    def _send_wayland(self, message: str) -> bool:
+        """Send message using Wayland tools (wtype or ydotool)."""
+        # Try ydotool first (works even without focus on the window)
+        try:
+            # Check if ydotoold is running
+            result = subprocess.run(['pgrep', '-x', 'ydotoold'], capture_output=True)
+            if result.returncode == 0:
+                # ydotool is available and daemon is running
+                subprocess.run(['ydotool', 'type', '--', message], check=True)
+                subprocess.run(['ydotool', 'key', 'enter'], check=True)
+                logger.info(f"Sent via ydotool: {message}")
+                return True
+        except FileNotFoundError:
+            pass  # ydotool not installed, try wtype
+
+        # Fallback to wtype (requires the terminal to be focused)
+        try:
+            # wtype types to the currently focused window
+            subprocess.run(['wtype', message], check=True)
+            subprocess.run(['wtype', '-k', 'Return'], check=True)
+            logger.info(f"Sent via wtype: {message}")
+            return True
+        except FileNotFoundError:
+            logger.error("No Wayland typing tool found. Install wtype or ydotool.")
+            return False
+        except subprocess.CalledProcessError as e:
+            logger.error(f"wtype failed: {e}")
+            return False
+
+    def _send_x11(self, message: str) -> bool:
+        """Send message using X11 tools (xdotool with window targeting)."""
+        display = self._get_display()
+
+        # Find terminal window - look for "Remote" tab in WezTerm
+        result = subprocess.run(
+            ['wmctrl', '-l'],
+            capture_output=True, text=True,
+            env={**os.environ, 'DISPLAY': display}
+        )
+
+        # Priority order for window matching:
+        # 1. Window titled "Remote" (dedicated remote control tab)
+        # 2. Window with Claude Code indicator (✳ or Claude)
+        # 3. WezTerm windows (contain tab info like [1/4])
+        window_id = None
+        candidates = []
+        for line in result.stdout.strip().split('\n'):
+            parts = line.split(None, 4)
+            if len(parts) >= 4:
+                wid = parts[0]
+                title = parts[-1] if len(parts) > 4 else ''
+                # Skip empty titles and desktop/panel windows
+                if not title or title.startswith('@!') or title.startswith('N/A'):
+                    continue
+                # Skip browser windows (Chrome, Firefox, etc)
+                if any(x in title for x in ['Chrome', 'Firefox', 'Zen', 'Brave']):
+                    continue
+                # Highest priority - "Remote" tab
+                if title == 'Remote':
+                    candidates.insert(0, (wid, title))
+                # High priority - Claude Code window (has ✳ indicator)
+                elif '✳' in title:
+                    candidates.insert(1 if candidates and candidates[0][1] == 'Remote' else 0, (wid, title))
+                # Medium priority - WezTerm with tab indicator [X/Y]
+                elif title.startswith('[') and '/' in title[:6]:
+                    candidates.append((wid, title))
+
+        if candidates:
+            wid, title = candidates[0]
+            window_id = str(int(wid, 16))
+            logger.info(f"Found terminal window: {title} ({wid})")
+
+        if not window_id:
+            logger.error("No terminal window found")
+            return False
+
+        # Type the message into the terminal
+        subprocess.run(
+            ['xdotool', 'type', '--window', window_id, '--clearmodifiers', message],
+            check=True,
+            env={**os.environ, 'DISPLAY': display}
+        )
+
+        # Press Enter
+        subprocess.run(
+            ['xdotool', 'key', '--window', window_id, 'Return'],
+            check=True,
+            env={**os.environ, 'DISPLAY': display}
+        )
+
+        logger.info(f"Sent via xdotool: {message}")
+        return True
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle voice notes - transcribe and process."""

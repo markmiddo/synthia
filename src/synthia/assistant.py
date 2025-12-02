@@ -54,6 +54,9 @@ System:
 - {{"type": "type_text", "text": "..."}}
 - {{"type": "run_command", "command": "..."}}
 
+Web Search (for current info, news, facts you don't know):
+- {{"type": "web_search", "query": "..."}}
+
 Remote Mode (for controlling via Telegram when away):
 - {{"type": "enable_remote"}} - Switch to Telegram mode
 - {{"type": "disable_remote"}} - Switch back to voice mode
@@ -67,6 +70,8 @@ EXAMPLES:
 - "What's in my clipboard?" → {{"speech": "Let me check.", "actions": [{{"type": "get_clipboard"}}]}}
 - "Remote mode" or "Enable remote" → {{"speech": "Switching to remote mode. Updates will go to Telegram.", "actions": [{{"type": "enable_remote"}}]}}
 - "Local mode" or "Disable remote" → {{"speech": "Back to local mode.", "actions": [{{"type": "disable_remote"}}]}}
+- "What's the weather in Sydney?" → {{"speech": "Let me search for that.", "actions": [{{"type": "web_search", "query": "weather in Sydney today"}}]}}
+- "What's happening in the news?" → {{"speech": "Let me check.", "actions": [{{"type": "web_search", "query": "top news headlines today"}}]}}
 
 Be brief, friendly, conversational. One sentence is usually enough."""
 
