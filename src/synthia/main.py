@@ -11,6 +11,8 @@ import json
 import os
 import signal
 import sys
+import threading
+import time
 
 from synthia.assistant import Assistant
 from synthia.audio import AudioRecorder, list_audio_devices
@@ -104,6 +106,8 @@ class Synthia:
         self.history_file = os.path.join(
             os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "synthia-history.json"
         )
+        # Signal file for config reload (used by GUI to trigger live hotkey updates)
+        self.reload_signal_file = "/tmp/synthia-reload-config"
         self._update_state("ready")
 
         # Parse hotkeys from config (for X11/pynput)
@@ -118,11 +122,17 @@ class Synthia:
             on_assistant_release=self._on_assistant_release,
             dictation_key=self.dictation_key,
             assistant_key=self.assistant_key,
+            dictation_key_string=self.config["dictation_key"],
+            assistant_key_string=self.config["assistant_key"],
         )
 
+        # Display friendly key names
+        dictation_display = self.config["dictation_key"].replace("Key.", "").replace("_", " ").title()
+        assistant_display = self.config["assistant_key"].replace("Key.", "").replace("_", " ").title()
+
         print(f"\n🖥️  Display server: {get_display_server()}")
-        print(f"📌 Dictation key: Right Ctrl (hold to dictate)")
-        print(f"📌 Assistant key: Right Alt (hold to ask AI)")
+        print(f"📌 Dictation key: {dictation_display} (hold to dictate)")
+        print(f"📌 Assistant key: {assistant_display} (hold to ask AI)")
         print("\n✨ Synthia ready!\n")
 
         # Show notification
@@ -183,6 +193,31 @@ class Synthia:
     def _on_quit(self):
         """Handle quit from tray icon."""
         self.running = False
+
+    def _watch_config_reload(self):
+        """Watch for config reload signal file and update hotkeys dynamically."""
+        while self.running:
+            try:
+                if os.path.exists(self.reload_signal_file):
+                    # Remove the signal file
+                    os.remove(self.reload_signal_file)
+
+                    # Reload config
+                    new_config = load_config()
+                    new_dictation_key = new_config["dictation_key"]
+                    new_assistant_key = new_config["assistant_key"]
+
+                    # Update the hotkey listener
+                    self.hotkey_listener.update_keys(new_dictation_key, new_assistant_key)
+
+                    # Update our stored config
+                    self.config = new_config
+
+                    print(f"✅ Hotkeys updated dynamically!")
+            except Exception as e:
+                print(f"⚠️ Config reload error: {e}")
+
+            time.sleep(0.5)  # Check twice per second
 
     def _on_dictation_press(self):
         """Handle dictation key press (Right Ctrl)."""
@@ -316,6 +351,10 @@ class Synthia:
             self.hotkey_listener.stop()
 
         signal.signal(signal.SIGINT, signal_handler)
+
+        # Start config watcher thread (for live hotkey updates from GUI)
+        config_watcher = threading.Thread(target=self._watch_config_reload, daemon=True)
+        config_watcher.start()
 
         # Start the hotkey listener (auto-detects Wayland vs X11)
         self.hotkey_listener.start()

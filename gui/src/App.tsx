@@ -15,6 +15,7 @@ interface HistoryEntry {
 function App() {
   const [status, setStatus] = useState<Status>("stopped");
   const [remoteMode, setRemoteMode] = useState(false);
+  const [remoteToggling, setRemoteToggling] = useState(false);
   const [dictateKey, setDictateKey] = useState("Right Ctrl");
   const [assistantKey, setAssistantKey] = useState("Right Alt");
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
@@ -39,7 +40,19 @@ function App() {
       }
     }
 
+    // Load saved hotkeys from config
+    async function loadHotkeys() {
+      try {
+        const [dictation, assistant] = await invoke<[string, string]>("get_hotkeys");
+        setDictateKey(dictation);
+        setAssistantKey(assistant);
+      } catch (e) {
+        // Use defaults if config can't be read
+      }
+    }
+
     initAndAutoStart();
+    loadHotkeys();
     checkRemoteStatus();
     loadHistory();
     const interval = setInterval(() => {
@@ -53,24 +66,39 @@ function App() {
   useEffect(() => {
     if (!editingKey) return;
 
-    function handleKeyDown(e: KeyboardEvent) {
+    async function handleKeyDown(e: KeyboardEvent) {
       e.preventDefault();
       const key = e.key === "Control" ? (e.location === 2 ? "Right Ctrl" : "Left Ctrl")
         : e.key === "Alt" ? (e.location === 2 ? "Right Alt" : "Left Alt")
         : e.key === "Shift" ? (e.location === 2 ? "Right Shift" : "Left Shift")
         : e.key;
 
+      // Determine new key values
+      const newDictateKey = editingKey === "dictate" ? key : dictateKey;
+      const newAssistantKey = editingKey === "assistant" ? key : assistantKey;
+
+      // Update state
       if (editingKey === "dictate") {
         setDictateKey(key);
       } else {
         setAssistantKey(key);
       }
       setEditingKey(null);
+
+      // Save to config and restart Synthia to apply
+      try {
+        await invoke("save_hotkeys", {
+          dictationKey: newDictateKey,
+          assistantKey: newAssistantKey
+        });
+      } catch (e) {
+        setError(String(e));
+      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editingKey]);
+  }, [editingKey, dictateKey, assistantKey]);
 
   async function checkStatus() {
     try {
@@ -103,6 +131,9 @@ function App() {
   }
 
   async function checkRemoteStatus() {
+    // Skip polling if we're in the middle of a toggle action
+    if (remoteToggling) return;
+
     try {
       const result = await invoke<boolean>("get_remote_status");
       setRemoteMode(result);
@@ -112,6 +143,9 @@ function App() {
   }
 
   async function handleRemoteToggle() {
+    // Prevent polling from overriding our state during toggle
+    setRemoteToggling(true);
+
     try {
       if (remoteMode) {
         await invoke("stop_remote_mode");
@@ -124,6 +158,9 @@ function App() {
     } catch (e) {
       setError(String(e));
     }
+
+    // Re-enable polling after a delay to let the backend settle
+    setTimeout(() => setRemoteToggling(false), 3000);
   }
 
   async function loadHistory() {

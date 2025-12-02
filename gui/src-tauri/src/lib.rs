@@ -243,6 +243,103 @@ fn clear_history() -> Result<String, String> {
     Ok("History cleared".to_string())
 }
 
+fn get_config_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/markmiddo".to_string());
+    PathBuf::from(home).join(".config/synthia/config.yaml")
+}
+
+#[tauri::command]
+fn get_hotkeys() -> Result<(String, String), String> {
+    let config_path = get_config_path();
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+
+    // Parse YAML manually for simplicity
+    let mut dictation_key = "Right Ctrl".to_string();
+    let mut assistant_key = "Right Alt".to_string();
+
+    for line in content.lines() {
+        if line.starts_with("dictation_key:") {
+            dictation_key = line.split(':').nth(1)
+                .map(|s| s.trim().trim_matches('"').to_string())
+                .unwrap_or(dictation_key);
+            // Convert from pynput format to display format
+            dictation_key = dictation_key
+                .replace("Key.ctrl_r", "Right Ctrl")
+                .replace("Key.ctrl_l", "Left Ctrl")
+                .replace("Key.alt_r", "Right Alt")
+                .replace("Key.alt_l", "Left Alt")
+                .replace("Key.shift_r", "Right Shift")
+                .replace("Key.shift_l", "Left Shift");
+        } else if line.starts_with("assistant_key:") {
+            assistant_key = line.split(':').nth(1)
+                .map(|s| s.trim().trim_matches('"').to_string())
+                .unwrap_or(assistant_key);
+            // Convert from pynput format to display format
+            assistant_key = assistant_key
+                .replace("Key.ctrl_r", "Right Ctrl")
+                .replace("Key.ctrl_l", "Left Ctrl")
+                .replace("Key.alt_r", "Right Alt")
+                .replace("Key.alt_l", "Left Alt")
+                .replace("Key.shift_r", "Right Shift")
+                .replace("Key.shift_l", "Left Shift");
+        }
+    }
+
+    Ok((dictation_key, assistant_key))
+}
+
+#[tauri::command]
+fn save_hotkeys(dictation_key: String, assistant_key: String) -> Result<String, String> {
+    let config_path = get_config_path();
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+
+    // Convert display format to pynput format
+    let dictation_pynput = match dictation_key.as_str() {
+        "Right Ctrl" => "Key.ctrl_r",
+        "Left Ctrl" => "Key.ctrl_l",
+        "Right Alt" => "Key.alt_r",
+        "Left Alt" => "Key.alt_l",
+        "Right Shift" => "Key.shift_r",
+        "Left Shift" => "Key.shift_l",
+        _ => &dictation_key,
+    };
+
+    let assistant_pynput = match assistant_key.as_str() {
+        "Right Ctrl" => "Key.ctrl_r",
+        "Left Ctrl" => "Key.ctrl_l",
+        "Right Alt" => "Key.alt_r",
+        "Left Alt" => "Key.alt_l",
+        "Right Shift" => "Key.shift_r",
+        "Left Shift" => "Key.shift_l",
+        _ => &assistant_key,
+    };
+
+    // Update the config file
+    let mut new_content = String::new();
+    for line in content.lines() {
+        if line.starts_with("dictation_key:") {
+            new_content.push_str(&format!("dictation_key: \"{}\"\n", dictation_pynput));
+        } else if line.starts_with("assistant_key:") {
+            new_content.push_str(&format!("assistant_key: \"{}\"\n", assistant_pynput));
+        } else {
+            new_content.push_str(line);
+            new_content.push('\n');
+        }
+    }
+
+    fs::write(&config_path, new_content.trim_end())
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    // Signal Synthia to reload config by touching a signal file
+    // Synthia watches for this file and updates hotkeys dynamically (no restart needed!)
+    let signal_file = PathBuf::from("/tmp/synthia-reload-config");
+    fs::write(&signal_file, "reload").ok();
+
+    Ok("Hotkeys saved".to_string())
+}
+
 #[tauri::command]
 fn resend_to_assistant(text: String) -> Result<String, String> {
     // Use xdotool to type the text into Claude Code terminal
@@ -404,7 +501,9 @@ pub fn run() {
             get_remote_status,
             get_history,
             clear_history,
-            resend_to_assistant
+            resend_to_assistant,
+            get_hotkeys,
+            save_hotkeys
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
