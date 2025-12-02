@@ -17,7 +17,7 @@ import time
 from synthia.assistant import Assistant
 from synthia.audio import AudioRecorder, list_audio_devices
 from synthia.commands import execute_actions
-from synthia.config import get_anthropic_api_key, get_google_credentials_path, load_config
+from synthia.config import apply_word_replacements, get_anthropic_api_key, get_google_credentials_path, load_config
 from synthia.display import get_display_server, is_wayland
 from synthia.hotkeys import create_hotkey_listener
 from synthia.indicator import Status, TrayIndicator
@@ -252,6 +252,8 @@ class Synthia:
             if audio_data:
                 text = self.transcriber.transcribe(audio_data)
                 if text:
+                    # Apply word replacements to fix common misrecognitions
+                    text = apply_word_replacements(text, self.config)
                     type_text(text)
                     self._save_to_history(text, "dictation")
                     if self.config.get("show_notifications", True):

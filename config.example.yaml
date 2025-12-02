@@ -27,3 +27,12 @@ anthropic_api_key: "~/.config/synthia/anthropic-key.txt"
 # UI
 show_notifications: true
 play_sound_on_record: true
+
+# Word replacements for dictation
+# Fixes common Whisper misrecognitions by replacing words after transcription
+# Add your own corrections here (case-sensitive)
+word_replacements:
+  Cynthia: Synthia
+  cynthia: synthia
+  # Add more as needed:
+  # "wrong word": "correct word"

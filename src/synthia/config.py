@@ -44,6 +44,11 @@ DEFAULT_CONFIG: ConfigDict = {
     "telegram_allowed_users": [],  # List of Telegram user IDs
     # Web search (Tavily)
     "tavily_api_key": "",  # Get from tavily.com
+    # Word replacements for dictation (fixes common Whisper misrecognitions)
+    "word_replacements": {
+        "Cynthia": "Synthia",
+        "cynthia": "synthia",
+    },
 }
 
 CONFIG_PATH = Path.home() / ".config" / "synthia" / "config.yaml"
@@ -71,3 +76,19 @@ def get_anthropic_api_key(config: ConfigDict) -> str:
     key_path = os.path.expanduser(config["anthropic_api_key"])
     with open(key_path) as f:
         return f.read().strip()
+
+
+def apply_word_replacements(text: str, config: ConfigDict) -> str:
+    """Apply word replacements to fix common transcription errors.
+
+    Args:
+        text: The transcribed text from Whisper
+        config: Configuration dictionary containing word_replacements
+
+    Returns:
+        Text with all configured word replacements applied
+    """
+    replacements = config.get("word_replacements", {})
+    for wrong, correct in replacements.items():
+        text = text.replace(wrong, correct)
+    return text
