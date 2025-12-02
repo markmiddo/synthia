@@ -35,6 +35,10 @@ This document outlines the planned features and direction for Synthia. We welcom
 - [ ] Note-taking and reminders
 - [ ] File operations ("Find files named...", "Open recent documents")
 
+### Enhanced Dictation Mode
+- [ ] **Smart transcription polish** - AI post-processing layer that reviews dictation output to fix grammar, unclear phrasing, and weird word artifacts before final output
+- [ ] **Custom word dictionary** - User-configurable word replacements (e.g., "Cynthia" → "Synthia") to correct consistent Whisper misrecognitions
+
 ### Improved Dev Mode
 - [ ] Easy terminal session selection for remote control
 - [ ] Support for multiple AI coding platforms:
@@ -101,6 +105,16 @@ Building a lightweight, fast GUI in Rust using egui or iced:
 - [ ] Dark/light theme support
 - [ ] Custom accent colors
 - [ ] Compact/expanded view modes
+- [ ] **Research history panel** - Save and display responses from Assistant Mode research tool queries for reference
+
+### Clipboard Manager
+- [ ] Clipboard history tracking (wl-paste watcher)
+- [ ] Searchable history panel in GUI
+- [ ] Hotkey to open clipboard history (Super+V)
+- [ ] Click to paste from history
+- [ ] Pin frequently used items
+- [ ] Image clipboard support
+- [ ] Auto-clear sensitive data (passwords)
 
 ---
 
