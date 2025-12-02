@@ -12,6 +12,11 @@ interface HistoryEntry {
   response?: string;
 }
 
+interface WordReplacement {
+  from: string;
+  to: string;
+}
+
 function App() {
   const [status, setStatus] = useState<Status>("stopped");
   const [remoteMode, setRemoteMode] = useState(false);
@@ -21,8 +26,11 @@ function App() {
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [currentView, setCurrentView] = useState<"main" | "history">("main");
+  const [currentView, setCurrentView] = useState<"main" | "history" | "words">("main");
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [wordReplacements, setWordReplacements] = useState<WordReplacement[]>([]);
+  const [newWordFrom, setNewWordFrom] = useState("");
+  const [newWordTo, setNewWordTo] = useState("");
 
   useEffect(() => {
     // Auto-start Synthia when app opens
@@ -55,6 +63,7 @@ function App() {
     loadHotkeys();
     checkRemoteStatus();
     loadHistory();
+    loadWordReplacements();
     const interval = setInterval(() => {
       checkStatus();
       checkRemoteStatus();
@@ -62,6 +71,39 @@ function App() {
     }, 2000);
     return () => clearInterval(interval);
   }, [currentView]);
+
+  async function loadWordReplacements() {
+    try {
+      const result = await invoke<WordReplacement[]>("get_word_replacements");
+      setWordReplacements(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function handleAddWordReplacement() {
+    if (!newWordFrom.trim() || !newWordTo.trim()) return;
+
+    const updated = [...wordReplacements, { from: newWordFrom.trim(), to: newWordTo.trim() }];
+    try {
+      await invoke("save_word_replacements", { replacements: updated });
+      setWordReplacements(updated);
+      setNewWordFrom("");
+      setNewWordTo("");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRemoveWordReplacement(index: number) {
+    const updated = wordReplacements.filter((_, i) => i !== index);
+    try {
+      await invoke("save_word_replacements", { replacements: updated });
+      setWordReplacements(updated);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   useEffect(() => {
     if (!editingKey) return;
@@ -211,6 +253,73 @@ function App() {
     thinking: "#eab308",
   };
 
+  // Word Replacements View
+  if (currentView === "words") {
+    return (
+      <main className="container">
+        <div className="header history-view-header">
+          <button className="back-btn" onClick={() => setCurrentView("main")}>
+            ← Back
+          </button>
+          <div className="logo-text-small">WORD DICTIONARY</div>
+        </div>
+
+        <div className="words-view-content">
+          <p className="words-description">
+            Fix common Whisper misrecognitions. Words on the left get replaced with words on the right.
+          </p>
+
+          <div className="word-add-form">
+            <input
+              type="text"
+              placeholder="Wrong word"
+              value={newWordFrom}
+              onChange={(e) => setNewWordFrom(e.target.value)}
+              className="word-input"
+            />
+            <span className="word-arrow">→</span>
+            <input
+              type="text"
+              placeholder="Correct word"
+              value={newWordTo}
+              onChange={(e) => setNewWordTo(e.target.value)}
+              className="word-input"
+              onKeyDown={(e) => e.key === "Enter" && handleAddWordReplacement()}
+            />
+            <button className="word-add-btn" onClick={handleAddWordReplacement}>
+              Add
+            </button>
+          </div>
+
+          <div className="word-list">
+            {wordReplacements.length === 0 ? (
+              <div className="words-empty-state">
+                <p>No word replacements yet</p>
+                <p className="empty-hint">Add words that Whisper commonly gets wrong</p>
+              </div>
+            ) : (
+              wordReplacements.map((r, index) => (
+                <div key={index} className="word-item">
+                  <span className="word-from">{r.from}</span>
+                  <span className="word-arrow">→</span>
+                  <span className="word-to">{r.to}</span>
+                  <button
+                    className="word-remove-btn"
+                    onClick={() => handleRemoveWordReplacement(index)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {error && <div className="error">{error}</div>}
+      </main>
+    );
+  }
+
   // History View
   if (currentView === "history") {
     return (
@@ -344,6 +453,14 @@ function App() {
         >
           <span>Voice History</span>
           {history.length > 0 && <span className="history-count">{history.length}</span>}
+        </button>
+
+        <button
+          className="history-nav-btn"
+          onClick={() => { setCurrentView("words"); loadWordReplacements(); }}
+        >
+          <span>Word Dictionary</span>
+          {wordReplacements.length > 0 && <span className="history-count">{wordReplacements.length}</span>}
         </button>
 
         {error && <div className="error">{error}</div>}

@@ -579,3 +579,146 @@
   background: rgba(6, 182, 212, 0.2);
   box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
 }
+
+/* Word Dictionary View */
+.words-view-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.words-description {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  margin: 0 0 20px 0;
+  line-height: 1.5;
+}
+
+.word-add-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 12px;
+  background: rgba(6, 182, 212, 0.05);
+  border: 1px solid rgba(6, 182, 212, 0.15);
+  border-radius: 10px;
+}
+
+.word-input {
+  flex: 1;
+  padding: 10px 12px;
+  background: rgba(10, 11, 20, 0.8);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 12px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.word-input:focus {
+  border-color: rgba(6, 182, 212, 0.5);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.15);
+}
+
+.word-input::placeholder {
+  color: #475569;
+}
+
+.word-arrow {
+  color: #06b6d4;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.word-add-btn {
+  padding: 10px 16px;
+  background: #06b6d4;
+  border: none;
+  border-radius: 6px;
+  color: #0a0b14;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.word-add-btn:hover {
+  background: #22d3ee;
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.4);
+}
+
+.word-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.words-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #475569;
+}
+
+.words-empty-state p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.word-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(6, 182, 212, 0.03);
+  border: 1px solid rgba(6, 182, 212, 0.1);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.word-item:hover {
+  background: rgba(6, 182, 212, 0.06);
+  border-color: rgba(6, 182, 212, 0.2);
+}
+
+.word-from {
+  flex: 1;
+  color: #f87171;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.word-to {
+  flex: 1;
+  color: #22c55e;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.word-remove-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: 4px;
+  color: #f87171;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.word-remove-btn:hover {
+  background: rgba(220, 38, 38, 0.15);
+  border-color: rgba(220, 38, 38, 0.4);
+}

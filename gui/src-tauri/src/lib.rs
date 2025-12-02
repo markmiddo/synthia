@@ -36,6 +36,12 @@ struct HistoryEntry {
     response: Option<String>,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct WordReplacement {
+    from: String,
+    to: String,
+}
+
 fn get_lock_file() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
         .unwrap_or_else(|_| "/tmp".to_string());
@@ -341,6 +347,102 @@ fn save_hotkeys(dictation_key: String, assistant_key: String) -> Result<String, 
 }
 
 #[tauri::command]
+fn get_word_replacements() -> Vec<WordReplacement> {
+    let config_path = get_config_path();
+    let content = match fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut replacements = Vec::new();
+    let mut in_word_replacements = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("word_replacements:") {
+            in_word_replacements = true;
+            continue;
+        }
+
+        // Check if we've left the word_replacements section
+        if in_word_replacements && !trimmed.is_empty() && !trimmed.starts_with('#') {
+            if !line.starts_with(' ') && !line.starts_with('\t') {
+                // New top-level key, we're done
+                break;
+            }
+
+            // Parse "from: to" format
+            if let Some(colon_pos) = trimmed.find(':') {
+                let from = trimmed[..colon_pos].trim().to_string();
+                let to = trimmed[colon_pos + 1..].trim().to_string();
+                if !from.is_empty() && !to.is_empty() {
+                    replacements.push(WordReplacement { from, to });
+                }
+            }
+        }
+    }
+
+    replacements
+}
+
+#[tauri::command]
+fn save_word_replacements(replacements: Vec<WordReplacement>) -> Result<String, String> {
+    let config_path = get_config_path();
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+
+    let mut new_content = String::new();
+    let mut in_word_replacements = false;
+    let mut wrote_replacements = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("word_replacements:") {
+            in_word_replacements = true;
+            new_content.push_str("word_replacements:\n");
+            // Write all replacements
+            for r in &replacements {
+                new_content.push_str(&format!("  {}: {}\n", r.from, r.to));
+            }
+            wrote_replacements = true;
+            continue;
+        }
+
+        if in_word_replacements {
+            // Skip old replacement lines (indented lines)
+            if line.starts_with(' ') || line.starts_with('\t') {
+                if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                    continue; // Skip old entries
+                }
+            } else if !trimmed.is_empty() {
+                // New top-level key, we're done with word_replacements
+                in_word_replacements = false;
+            }
+        }
+
+        if !in_word_replacements {
+            new_content.push_str(line);
+            new_content.push('\n');
+        }
+    }
+
+    // If word_replacements section didn't exist, add it
+    if !wrote_replacements {
+        new_content.push_str("\n# Word replacements for dictation\nword_replacements:\n");
+        for r in &replacements {
+            new_content.push_str(&format!("  {}: {}\n", r.from, r.to));
+        }
+    }
+
+    fs::write(&config_path, new_content.trim_end())
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    Ok("Word replacements saved".to_string())
+}
+
+#[tauri::command]
 fn resend_to_assistant(text: String) -> Result<String, String> {
     // Use xdotool to type the text into Claude Code terminal
     // First, we'll write to a temp file that the stop hook can check
@@ -503,7 +605,9 @@ pub fn run() {
             clear_history,
             resend_to_assistant,
             get_hotkeys,
-            save_hotkeys
+            save_hotkeys,
+            get_word_replacements,
+            save_word_replacements
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
