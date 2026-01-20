@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -40,6 +40,8 @@ from synthia.config_manager import (
     set_plugin_enabled,
     HookConfig,
     list_hooks,
+    CommandConfig,
+    list_commands,
 )
 
 
@@ -149,6 +151,43 @@ class HookListItem(ListItem):
         # Show event type and truncated command
         cmd_short = self.hook.command[-40:] if len(self.hook.command) > 40 else self.hook.command
         text = f"[{self.hook.event}] {cmd_short}"
+        yield Label(text)
+
+
+class CommandListItem(ListItem):
+    """List item for command entries."""
+
+    def __init__(self, command: CommandConfig):
+        super().__init__()
+        self.command = command
+
+    def compose(self) -> ComposeResult:
+        # Show filename (without .md) and description preview
+        name = self.command.filename.replace('.md', '')
+        desc = self.command.description[:40] if self.command.description else "No description"
+        text = f"/{name} - {desc}"
+        yield Label(text)
+
+
+class SettingListItem(ListItem):
+    """List item for settings entries."""
+
+    def __init__(self, key: str, value: Any):
+        super().__init__()
+        self.key = key
+        self.value = value
+
+    def compose(self) -> ComposeResult:
+        # Format value display
+        if isinstance(self.value, bool):
+            val_str = "✓" if self.value else "✗"
+        elif isinstance(self.value, dict):
+            val_str = "{...}"
+        elif isinstance(self.value, list):
+            val_str = f"[{len(self.value)} items]"
+        else:
+            val_str = str(self.value)[:30]
+        text = f"{self.key}: {val_str}"
         yield Label(text)
 
 
@@ -330,8 +369,12 @@ class SynthiaDashboard(App):
                 self._show_agents_section()
             elif section == Section.PLUGINS:
                 self._show_plugins_section()
+            elif section == Section.COMMANDS:
+                self._show_commands_section()
             elif section == Section.HOOKS:
                 self._show_hooks_section()
+            elif section == Section.SETTINGS:
+                self._show_settings_section()
             else:
                 self._set_status(f"{section.value.title()} | Coming soon")
 
@@ -481,6 +524,56 @@ class SynthiaDashboard(App):
             for hook in hooks:
                 list_view.append(HookListItem(hook))
             self._set_status(f"Hooks | {len(hooks)} configured")
+        except Exception:
+            pass
+
+    def _show_commands_section(self) -> None:
+        """Show commands section."""
+        self._load_commands()
+
+    @work(thread=True)
+    def _load_commands(self) -> None:
+        """Load all commands."""
+        commands = list_commands()
+        self.call_from_thread(self._display_commands, commands)
+
+    def _display_commands(self, commands: list[CommandConfig]) -> None:
+        """Display commands in list."""
+        self._commands = commands
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            list_view.clear()
+            for command in commands:
+                list_view.append(CommandListItem(command))
+            self._set_status(f"Commands | {len(commands)} found")
+        except Exception:
+            pass
+
+    def _show_settings_section(self) -> None:
+        """Show settings section."""
+        self._load_settings()
+
+    @work(thread=True)
+    def _load_settings(self) -> None:
+        """Load settings."""
+        from synthia.config_manager import load_settings
+        settings = load_settings()
+        # Filter out complex nested objects for display
+        display_settings = {
+            k: v for k, v in settings.items()
+            if k not in ("hooks", "enabledPlugins")
+        }
+        self.call_from_thread(self._display_settings, display_settings)
+
+    def _display_settings(self, settings: dict) -> None:
+        """Display settings in list."""
+        self._settings = settings
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            list_view.clear()
+            for key, value in sorted(settings.items()):
+                list_view.append(SettingListItem(key, value))
+            self._set_status(f"Settings | {len(settings)} items")
         except Exception:
             pass
 
