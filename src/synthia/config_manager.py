@@ -259,3 +259,83 @@ def set_plugin_enabled(plugin_name: str, enabled: bool) -> None:
         settings["enabledPlugins"] = {}
     settings["enabledPlugins"][plugin_name] = enabled
     save_settings(settings)
+
+
+@dataclass
+class HookConfig:
+    """Represents a hook configuration."""
+
+    event: str  # "UserPromptSubmit", "Stop", etc.
+    command: str
+    timeout: int = 30
+    hook_type: str = "command"
+
+
+def list_hooks() -> List[HookConfig]:
+    """List all configured hooks."""
+    settings = load_settings()
+    hooks_config = settings.get("hooks", {})
+
+    hooks = []
+    for event, event_hooks in hooks_config.items():
+        for hook_group in event_hooks:
+            for hook in hook_group.get("hooks", []):
+                hooks.append(HookConfig(
+                    event=event,
+                    command=hook.get("command", ""),
+                    timeout=hook.get("timeout", 30),
+                    hook_type=hook.get("type", "command"),
+                ))
+
+    return hooks
+
+
+def save_hook(hook: HookConfig) -> None:
+    """Save or update a hook configuration."""
+    settings = load_settings()
+    if "hooks" not in settings:
+        settings["hooks"] = {}
+
+    if hook.event not in settings["hooks"]:
+        settings["hooks"][hook.event] = []
+
+    # Find and update existing or add new
+    event_hooks = settings["hooks"][hook.event]
+    found = False
+    for hook_group in event_hooks:
+        for existing in hook_group.get("hooks", []):
+            if existing.get("command") == hook.command:
+                existing["timeout"] = hook.timeout
+                existing["type"] = hook.hook_type
+                found = True
+                break
+
+    if not found:
+        if not event_hooks:
+            event_hooks.append({"hooks": []})
+        event_hooks[0]["hooks"].append({
+            "type": hook.hook_type,
+            "command": hook.command,
+            "timeout": hook.timeout,
+        })
+
+    save_settings(settings)
+
+
+def delete_hook(event: str, command: str) -> bool:
+    """Delete a hook by event and command. Returns True if deleted."""
+    settings = load_settings()
+    hooks_config = settings.get("hooks", {})
+
+    if event not in hooks_config:
+        return False
+
+    for hook_group in hooks_config[event]:
+        hooks_list = hook_group.get("hooks", [])
+        for i, hook in enumerate(hooks_list):
+            if hook.get("command") == command:
+                hooks_list.pop(i)
+                save_settings(settings)
+                return True
+
+    return False
