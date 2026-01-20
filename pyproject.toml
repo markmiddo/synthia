@@ -34,6 +34,7 @@ dependencies = [
     "requests>=2.31.0",
     "PyYAML>=6.0",
     "python-telegram-bot>=20.0",
+    "textual>=0.47.0",
 ]
 
 [project.optional-dependencies]
@@ -56,6 +57,7 @@ Issues = "https://github.com/markmiddo/synthia/issues"
 
 [project.scripts]
 synthia = "synthia.main:main"
+synthia-dash = "synthia.dashboard:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
