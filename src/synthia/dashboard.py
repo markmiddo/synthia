@@ -87,17 +87,19 @@ class MemoryListItem(ListItem):
     def compose(self) -> ComposeResult:
         cat = self.entry.category.upper()
         if self.entry.category == "bug":
-            text = f"[{cat}] {self.entry.data.get('error', 'N/A')[:50]}"
+            content = self.entry.data.get('error', 'N/A')[:50]
         elif self.entry.category == "pattern":
-            text = f"[{cat}] {self.entry.data.get('topic', 'N/A')[:50]}"
+            content = self.entry.data.get('topic', 'N/A')[:50]
         elif self.entry.category == "arch":
-            text = f"[{cat}] {self.entry.data.get('decision', 'N/A')[:50]}"
+            content = self.entry.data.get('decision', 'N/A')[:50]
         elif self.entry.category == "gotcha":
-            text = f"[{cat}] {self.entry.data.get('area', 'N/A')[:50]}"
+            content = self.entry.data.get('area', 'N/A')[:50]
         elif self.entry.category == "stack":
-            text = f"[{cat}] {self.entry.data.get('tool', 'N/A')[:50]}"
+            content = self.entry.data.get('tool', 'N/A')[:50]
         else:
-            text = f"[{cat}] Unknown"
+            content = "Unknown"
+        # Use \[ to escape brackets (Textual interprets [] as markup)
+        text = f"\\[{cat}\\] {content}"
         yield Label(text)
 
 
@@ -131,7 +133,7 @@ class AgentListItem(ListItem):
         self.agent = agent
 
     def compose(self) -> ComposeResult:
-        text = f"[{self.agent.model.upper()}] {self.agent.name}"
+        text = f"\\[{self.agent.model.upper()}\\] {self.agent.name}"
         yield Label(text)
 
 
@@ -144,7 +146,7 @@ class PluginListItem(ListItem):
 
     def compose(self) -> ComposeResult:
         status = "✓" if self.plugin.enabled else "✗"
-        text = f"[{status}] {self.plugin.display_name} ({self.plugin.version})"
+        text = f"\\[{status}\\] {self.plugin.display_name} ({self.plugin.version})"
         yield Label(text)
 
 
@@ -158,7 +160,7 @@ class HookListItem(ListItem):
     def compose(self) -> ComposeResult:
         # Show event type and truncated command
         cmd_short = self.hook.command[-40:] if len(self.hook.command) > 40 else self.hook.command
-        text = f"[{self.hook.event}] {cmd_short}"
+        text = f"\\[{self.hook.event}\\] {cmd_short}"
         yield Label(text)
 
 
