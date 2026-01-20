@@ -313,6 +313,7 @@ class SynthiaDashboard(App):
         Binding("e", "edit_selected", "Edit"),
         Binding("d", "delete_selected", "Delete"),
         Binding("n", "new_item", "New"),
+        Binding("?", "show_help", "Help"),
     ]
 
     TITLE = "Synthia Dashboard"
@@ -733,6 +734,10 @@ class SynthiaDashboard(App):
         delete_command(filename)
         self._load_commands()
         self._set_status("Command deleted")
+
+    def action_show_help(self) -> None:
+        """Show help overlay."""
+        self.push_screen(HelpScreen())
 
 
 def main():

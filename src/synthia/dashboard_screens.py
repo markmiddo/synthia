@@ -312,3 +312,71 @@ class EditCommandScreen(ModalScreen[Optional[CommandConfig]]):
             body=body,
         )
         self.dismiss(result)
+
+
+class HelpScreen(ModalScreen[None]):
+    """Help overlay showing keyboard shortcuts."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss_screen", "Close"),
+        Binding("?", "dismiss_screen", "Close"),
+    ]
+
+    CSS = """
+    HelpScreen {
+        align: center middle;
+    }
+
+    #help-dialog {
+        width: 60;
+        height: auto;
+        max-height: 80%;
+        border: thick $primary;
+        background: $surface;
+        padding: 2;
+    }
+
+    #help-title {
+        text-style: bold;
+        color: $primary;
+        margin-bottom: 1;
+    }
+
+    .help-section {
+        margin-top: 1;
+        color: $secondary;
+    }
+
+    .help-item {
+        margin-left: 2;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-dialog"):
+            yield Label("Synthia Dashboard Help", id="help-title")
+
+            yield Label("Navigation:", classes="help-section")
+            yield Static("  1-6    Switch sections", classes="help-item")
+            yield Static("  ↑/↓    Move in list", classes="help-item")
+            yield Static("  Tab    Cycle memory filters", classes="help-item")
+
+            yield Label("Actions:", classes="help-section")
+            yield Static("  e      Edit selected item", classes="help-item")
+            yield Static("  n      New item", classes="help-item")
+            yield Static("  d      Delete selected item", classes="help-item")
+            yield Static("  Space  Toggle plugin", classes="help-item")
+
+            yield Label("General:", classes="help-section")
+            yield Static("  r      Refresh", classes="help-item")
+            yield Static("  ?      Show this help", classes="help-item")
+            yield Static("  q      Quit", classes="help-item")
+
+            yield Static("")
+            yield Button("Close (Esc)", id="close-btn", variant="primary")
+
+    def action_dismiss_screen(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
