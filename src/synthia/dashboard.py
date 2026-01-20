@@ -407,28 +407,28 @@ class SynthiaDashboard(App):
         # Get content widgets
         content_area = self.query_one("#content-area", Static)
         content_list = self.query_one("#content-list", ListView)
+        detail_panel = self.query_one("#detail-panel", Static)
 
-        # Memory uses its own widgets, others use content-list
+        # Clear detail panel when switching sections
+        detail_panel.update("Select an item to view details")
+
+        # Hide content-area, show content-list for all sections
+        content_area.display = False
+        content_list.add_class("visible")
+        content_list.clear()
+
         if section == Section.MEMORY:
-            content_area.display = True
-            content_list.remove_class("visible")
             self._show_memory_section()
-        elif section in (Section.AGENTS, Section.PLUGINS, Section.COMMANDS, Section.HOOKS, Section.SETTINGS):
-            content_area.display = False
-            content_list.add_class("visible")
-            content_list.clear()
-            if section == Section.AGENTS:
-                self._show_agents_section()
-            elif section == Section.PLUGINS:
-                self._show_plugins_section()
-            elif section == Section.COMMANDS:
-                self._show_commands_section()
-            elif section == Section.HOOKS:
-                self._show_hooks_section()
-            elif section == Section.SETTINGS:
-                self._show_settings_section()
-            else:
-                self._set_status(f"{section.value.title()} | Coming soon")
+        elif section == Section.AGENTS:
+            self._show_agents_section()
+        elif section == Section.PLUGINS:
+            self._show_plugins_section()
+        elif section == Section.COMMANDS:
+            self._show_commands_section()
+        elif section == Section.HOOKS:
+            self._show_hooks_section()
+        elif section == Section.SETTINGS:
+            self._show_settings_section()
 
         self._set_status(f"Viewing {section.value.title()}")
 
@@ -439,9 +439,6 @@ class SynthiaDashboard(App):
 
     def _show_memory_section(self) -> None:
         """Show the memory section content."""
-        content = self.query_one("#content-area", Static)
-        # Replace static with memory content widget
-        content.update("")
         self._load_memory_all()
 
     @work(thread=True)
@@ -491,11 +488,11 @@ class SynthiaDashboard(App):
         """Display memory entries in the list."""
         self._memory_entries = entries
         try:
-            list_view = self.query_one("#memory-list", ListView)
+            list_view = self.query_one("#content-list", ListView)
             list_view.clear()
             for entry, line_num in entries:
                 list_view.append(MemoryListItem(entry, line_num))
-            self._set_status(f"{title} | {len(entries)} entries")
+            self._set_status(f"Memory | {len(entries)} entries")
         except Exception:
             pass
 
