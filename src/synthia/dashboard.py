@@ -42,6 +42,13 @@ from synthia.config_manager import (
     list_hooks,
     CommandConfig,
     list_commands,
+    save_command,
+    delete_command,
+)
+from synthia.dashboard_screens import (
+    ConfirmDeleteScreen,
+    EditAgentScreen,
+    EditCommandScreen,
 )
 
 
@@ -295,6 +302,9 @@ class SynthiaDashboard(App):
         Binding("6", "goto_section('settings')", "Settings", show=False),
         Binding("r", "refresh", "Refresh"),
         Binding("space", "toggle_plugin", "Toggle", show=False),
+        Binding("e", "edit_selected", "Edit"),
+        Binding("d", "delete_selected", "Delete"),
+        Binding("n", "new_item", "New"),
     ]
 
     TITLE = "Synthia Dashboard"
@@ -576,6 +586,112 @@ class SynthiaDashboard(App):
             self._set_status(f"Settings | {len(settings)} items")
         except Exception:
             pass
+
+    def action_edit_selected(self) -> None:
+        """Edit the selected item."""
+        if self.current_section == Section.AGENTS:
+            self._edit_selected_agent()
+        elif self.current_section == Section.COMMANDS:
+            self._edit_selected_command()
+
+    def _edit_selected_agent(self) -> None:
+        """Edit selected agent."""
+        if not hasattr(self, '_agents') or not self._agents:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._agents):
+                agent = self._agents[index]
+                self.push_screen(EditAgentScreen(agent), self._on_agent_edit_complete)
+        except Exception:
+            pass
+
+    def _on_agent_edit_complete(self, result: Optional[AgentConfig]) -> None:
+        """Handle agent edit completion."""
+        if result:
+            save_agent(result)
+            self._load_agents()
+            self._set_status(f"Saved agent: {result.name}")
+
+    def _edit_selected_command(self) -> None:
+        """Edit selected command."""
+        if not hasattr(self, '_commands') or not self._commands:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._commands):
+                cmd = self._commands[index]
+                self.push_screen(EditCommandScreen(cmd), self._on_command_edit_complete)
+        except Exception:
+            pass
+
+    def _on_command_edit_complete(self, result: Optional[CommandConfig]) -> None:
+        """Handle command edit completion."""
+        if result:
+            save_command(result)
+            self._load_commands()
+            self._set_status(f"Saved command: {result.filename}")
+
+    def action_new_item(self) -> None:
+        """Create a new item in current section."""
+        if self.current_section == Section.AGENTS:
+            self.push_screen(EditAgentScreen(None), self._on_agent_edit_complete)
+        elif self.current_section == Section.COMMANDS:
+            self.push_screen(EditCommandScreen(None), self._on_command_edit_complete)
+
+    def action_delete_selected(self) -> None:
+        """Delete the selected item."""
+        if self.current_section == Section.AGENTS:
+            self._delete_selected_agent()
+        elif self.current_section == Section.COMMANDS:
+            self._delete_selected_command()
+
+    def _delete_selected_agent(self) -> None:
+        """Delete selected agent."""
+        if not hasattr(self, '_agents') or not self._agents:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._agents):
+                agent = self._agents[index]
+                self.push_screen(
+                    ConfirmDeleteScreen(agent.name),
+                    lambda confirmed: self._do_delete_agent(agent.filename) if confirmed else None
+                )
+        except Exception:
+            pass
+
+    def _do_delete_agent(self, filename: str) -> None:
+        """Actually delete the agent."""
+        delete_agent(filename)
+        self._load_agents()
+        self._set_status("Agent deleted")
+
+    def _delete_selected_command(self) -> None:
+        """Delete selected command."""
+        if not hasattr(self, '_commands') or not self._commands:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._commands):
+                cmd = self._commands[index]
+                name = cmd.filename.replace(".md", "")
+                self.push_screen(
+                    ConfirmDeleteScreen(f"/{name}"),
+                    lambda confirmed: self._do_delete_command(cmd.filename) if confirmed else None
+                )
+        except Exception:
+            pass
+
+    def _do_delete_command(self, filename: str) -> None:
+        """Actually delete the command."""
+        delete_command(filename)
+        self._load_commands()
+        self._set_status("Command deleted")
 
 
 def main():
