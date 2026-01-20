@@ -187,6 +187,16 @@ class SynthiaDashboard(App):
         padding: 1;
     }
 
+    #content-list {
+        height: 1fr;
+        border: solid $secondary;
+        display: none;
+    }
+
+    #content-list.visible {
+        display: block;
+    }
+
     #status-bar {
         height: 1;
         background: $primary-darken-2;
@@ -255,6 +265,7 @@ class SynthiaDashboard(App):
             with Vertical(id="main-content"):
                 yield Label("Memory", id="content-title")
                 yield Static("Select a section from the sidebar", id="content-area")
+                yield ListView(id="content-list")
         yield Static("[1-6] Section | [r] Refresh | [q] Quit", id="status-bar")
         yield Footer()
 
@@ -286,15 +297,25 @@ class SynthiaDashboard(App):
         title = self.query_one("#content-title", Label)
         title.update(section.value.title())
 
+        # Get content widgets
+        content_area = self.query_one("#content-area", Static)
+        content_list = self.query_one("#content-list", ListView)
+
+        # Memory uses its own widgets, others use content-list
         if section == Section.MEMORY:
+            content_area.display = True
+            content_list.remove_class("visible")
             self._show_memory_section()
-        elif section == Section.AGENTS:
-            self._show_agents_section()
-        elif section == Section.PLUGINS:
-            self._show_plugins_section()
-        else:
-            content = self.query_one("#content-area", Static)
-            content.update(f"[{section.value.upper()}] Content will appear here")
+        elif section in (Section.AGENTS, Section.PLUGINS, Section.COMMANDS, Section.HOOKS, Section.SETTINGS):
+            content_area.display = False
+            content_list.add_class("visible")
+            content_list.clear()
+            if section == Section.AGENTS:
+                self._show_agents_section()
+            elif section == Section.PLUGINS:
+                self._show_plugins_section()
+            else:
+                self._set_status(f"{section.value.title()} | Coming soon")
 
         self._set_status(f"Viewing {section.value.title()}")
 
