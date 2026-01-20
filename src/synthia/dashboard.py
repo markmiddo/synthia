@@ -13,13 +13,22 @@ Features:
 
 from __future__ import annotations
 
+import json
 from enum import Enum
 from typing import Optional
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+from textual.screen import ModalScreen
+from textual.widgets import Button, Footer, Header, Input, Label, ListItem, ListView, Static, TextArea
+
+from synthia.memory import (
+    MEMORY_CATEGORIES,
+    MemoryEntry,
+    get_memory_system,
+)
 
 
 class Section(Enum):
@@ -43,6 +52,53 @@ class SidebarItem(ListItem):
     def compose(self) -> ComposeResult:
         label = f"{self.index}. {self.section.value.title()}"
         yield Label(label)
+
+
+class MemoryListItem(ListItem):
+    """List item for memory entries."""
+
+    def __init__(self, entry: MemoryEntry, line_number: int):
+        super().__init__()
+        self.entry = entry
+        self.line_number = line_number
+
+    def compose(self) -> ComposeResult:
+        cat = self.entry.category.upper()
+        if self.entry.category == "bug":
+            text = f"[{cat}] {self.entry.data.get('error', 'N/A')[:50]}"
+        elif self.entry.category == "pattern":
+            text = f"[{cat}] {self.entry.data.get('topic', 'N/A')[:50]}"
+        elif self.entry.category == "arch":
+            text = f"[{cat}] {self.entry.data.get('decision', 'N/A')[:50]}"
+        elif self.entry.category == "gotcha":
+            text = f"[{cat}] {self.entry.data.get('area', 'N/A')[:50]}"
+        elif self.entry.category == "stack":
+            text = f"[{cat}] {self.entry.data.get('tool', 'N/A')[:50]}"
+        else:
+            text = f"[{cat}] Unknown"
+        yield Label(text)
+
+
+class MemorySectionContent(Vertical):
+    """Content widget for Memory section."""
+
+    def __init__(self):
+        super().__init__()
+        self.current_entries: list[tuple[MemoryEntry, int]] = []
+        self.selected_index: int = -1
+        self.active_filter: str = "all"
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(classes="toolbar"):
+            yield Button("All", id="btn-all", variant="primary")
+            yield Button("Bugs", id="btn-bugs")
+            yield Button("Patterns", id="btn-patterns")
+            yield Button("Arch", id="btn-arch")
+            yield Button("Gotchas", id="btn-gotchas")
+            yield Button("Stack", id="btn-stack")
+            yield Input(placeholder="Search...", id="memory-search")
+        yield ListView(id="memory-list")
+        yield Static("Select an entry to view details", id="memory-detail")
 
 
 class SynthiaDashboard(App):
@@ -101,6 +157,31 @@ class SynthiaDashboard(App):
         background: $primary-darken-2;
         color: $text;
         padding: 0 1;
+    }
+
+    .toolbar {
+        height: 3;
+        margin-bottom: 1;
+    }
+
+    .toolbar Button {
+        margin-right: 1;
+    }
+
+    .toolbar Input {
+        width: 1fr;
+    }
+
+    #memory-list {
+        height: 1fr;
+        border: solid $secondary;
+    }
+
+    #memory-detail {
+        height: 10;
+        border: solid $accent;
+        margin-top: 1;
+        padding: 1;
     }
     """
 
