@@ -614,6 +614,48 @@ def is_remote_mode() -> bool:
     return os.path.exists(REMOTE_MODE_FILE)
 
 
+# ============== MEMORY SYSTEM ==============
+
+
+def memory_recall(tags: list[str]) -> str:
+    """Recall memories by tags and return formatted output."""
+    from synthia.memory import recall
+
+    entries = recall(tags, limit=5)
+
+    if not entries:
+        return f"No memories found for tags: {', '.join(tags)}"
+
+    lines = [f"Found {len(entries)} relevant memories:"]
+    for entry in entries:
+        lines.append(entry.format_display())
+
+    return "\n".join(lines)
+
+
+def memory_search(query: str) -> str:
+    """Search memories by text and return formatted output."""
+    from synthia.memory import search
+
+    entries = search(query, limit=5)
+
+    if not entries:
+        return f"No memories found matching: {query}"
+
+    lines = [f"Found {len(entries)} matching memories:"]
+    for entry in entries:
+        lines.append(entry.format_display())
+
+    return "\n".join(lines)
+
+
+def memory_add(category: str, tags: list[str], **data) -> bool:
+    """Add a new memory entry."""
+    from synthia.memory import remember
+
+    return remember(category, tags, **data)
+
+
 # ============== SYSTEM CONTROL ==============
 
 
@@ -714,6 +756,36 @@ def execute_actions(actions: list[dict[str, Any]]) -> tuple[list[bool], str | No
                 answer = web_search(query)
                 command_output = answer
                 results.append(bool(answer))
+            else:
+                results.append(False)
+
+        elif action_type == "memory_recall":
+            tags = action.get("tags", [])
+            if tags:
+                output = memory_recall(tags)
+                command_output = output
+                results.append(True)
+            else:
+                results.append(False)
+
+        elif action_type == "memory_search":
+            query = action.get("query", "")
+            if query:
+                output = memory_search(query)
+                command_output = output
+                results.append(True)
+            else:
+                results.append(False)
+
+        elif action_type == "memory_add":
+            category = action.get("category", "")
+            tags = action.get("tags", [])
+            data = action.get("data", {})
+            if category and tags and data:
+                success = memory_add(category, tags, **data)
+                if success:
+                    command_output = f"Memory saved to {category}"
+                results.append(success)
             else:
                 results.append(False)
 

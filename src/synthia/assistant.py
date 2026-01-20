@@ -61,6 +61,13 @@ Remote Mode (for controlling via Telegram when away):
 - {{"type": "enable_remote"}} - Switch to Telegram mode
 - {{"type": "disable_remote"}} - Switch back to voice mode
 
+Memory System (for recalling project knowledge):
+- {{"type": "memory_recall", "tags": ["frontend", "react"]}} - Recall by tags
+- {{"type": "memory_search", "query": "CORS error"}} - Search memories
+- {{"type": "memory_add", "category": "bug", "tags": ["api"], "data": {{"error": "...", "cause": "...", "fix": "..."}}}}
+
+Memory categories: bug (error/cause/fix), pattern (topic/rule/why), arch (decision/why), gotcha (area/gotcha), stack (tool/note)
+
 EXAMPLES:
 - "Turn up the volume" → {{"speech": "Turning up the volume.", "actions": [{{"type": "change_volume", "delta": 10}}]}}
 - "Mute" → {{"speech": "Muted.", "actions": [{{"type": "mute"}}]}}
@@ -72,6 +79,8 @@ EXAMPLES:
 - "Local mode" or "Disable remote" → {{"speech": "Back to local mode.", "actions": [{{"type": "disable_remote"}}]}}
 - "What's the weather in Sydney?" → {{"speech": "Let me search for that.", "actions": [{{"type": "web_search", "query": "weather in Sydney today"}}]}}
 - "What's happening in the news?" → {{"speech": "Let me check.", "actions": [{{"type": "web_search", "query": "top news headlines today"}}]}}
+- "What do we know about React bugs?" → {{"speech": "Let me check our memory.", "actions": [{{"type": "memory_recall", "tags": ["react", "bug"]}}]}}
+- "Search memory for MongoDB" → {{"speech": "Searching memory.", "actions": [{{"type": "memory_search", "query": "MongoDB"}}]}}
 
 Be brief, friendly, conversational. One sentence is usually enough."""
 
@@ -87,6 +96,7 @@ class Assistant:
         use_local: bool = False,
         local_model: str = "qwen2.5:7b-instruct-q4_0",
         ollama_url: str = "http://localhost:11434",
+        dev_mode: bool = False,
     ):
         self.use_local = use_local
         self.model = model if not use_local else local_model
@@ -94,6 +104,7 @@ class Assistant:
         self.conversation_history: List[Dict[str, str]] = []
         self.ollama_url = ollama_url
         self.client = None
+        self.dev_mode = dev_mode  # Auto-retrieve memory context in dev mode
 
         if use_local:
             print(f"Assistant initialized with local model: {self.model}")
@@ -111,19 +122,46 @@ class Assistant:
         while len(self.conversation_history) > self.memory_size * 2:
             self.conversation_history.pop(0)
 
+    def _get_memory_context(self, text: str) -> str:
+        """Auto-retrieve relevant memory context based on keywords in text.
+
+        This is used in dev_mode to automatically inject relevant memories
+        into the conversation context.
+        """
+        try:
+            from synthia.memory import get_memory_system
+
+            mem = get_memory_system()
+            return mem.get_context_for_task(text)
+        except Exception as e:
+            print(f"Memory context error: {e}")
+            return ""
+
     def process(self, user_input: str) -> Dict[str, Any]:
         """Process user input and return response with actions."""
         if not user_input.strip():
             return {"speech": "I didn't catch that. Could you repeat?", "actions": []}
 
-        # Add user message to history
-        self._add_to_history("user", user_input)
+        # In dev mode, auto-retrieve relevant memory context
+        memory_context = ""
+        if self.dev_mode:
+            memory_context = self._get_memory_context(user_input)
+            if memory_context:
+                print(f"Auto-retrieved memory context for: {user_input[:50]}...")
+
+        # Combine memory context with user input if available
+        enriched_input = user_input
+        if memory_context:
+            enriched_input = f"{memory_context}\n\nUser request: {user_input}"
+
+        # Add user message to history (with memory context if available)
+        self._add_to_history("user", enriched_input)
 
         try:
             if self.use_local:
-                return self._process_ollama(user_input)
+                return self._process_ollama(enriched_input)
             else:
-                return self._process_claude(user_input)
+                return self._process_claude(enriched_input)
         except Exception as e:
             print(f"Assistant error: {e}")
             return {"speech": f"Sorry, I encountered an error: {str(e)}", "actions": []}

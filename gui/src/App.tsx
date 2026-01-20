@@ -17,6 +17,25 @@ interface WordReplacement {
   to: string;
 }
 
+interface ClipboardEntry {
+  id: number;
+  content: string;
+  timestamp: string;
+  hash: string;
+}
+
+interface InboxItem {
+  id: string;
+  type: "file" | "url" | "image";
+  filename: string;
+  path?: string;
+  url?: string;
+  received_at: string;
+  size_bytes?: number;
+  from_user?: string;
+  opened: boolean;
+}
+
 function App() {
   const [status, setStatus] = useState<Status>("stopped");
   const [remoteMode, setRemoteMode] = useState(false);
@@ -26,9 +45,11 @@ function App() {
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [currentView, setCurrentView] = useState<"main" | "history" | "words">("main");
+  const [currentView, setCurrentView] = useState<"main" | "history" | "words" | "clipboard" | "inbox">("main");
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [wordReplacements, setWordReplacements] = useState<WordReplacement[]>([]);
+  const [clipboardHistory, setClipboardHistory] = useState<ClipboardEntry[]>([]);
+  const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [newWordFrom, setNewWordFrom] = useState("");
   const [newWordTo, setNewWordTo] = useState("");
 
@@ -64,10 +85,14 @@ function App() {
     checkRemoteStatus();
     loadHistory();
     loadWordReplacements();
+    loadClipboardHistory();
+    loadInboxItems();
     const interval = setInterval(() => {
       checkStatus();
       checkRemoteStatus();
       if (currentView === "history") loadHistory();
+      if (currentView === "clipboard") loadClipboardHistory();
+      if (currentView === "inbox") loadInboxItems();
     }, 2000);
     return () => clearInterval(interval);
   }, [currentView]);
@@ -78,6 +103,68 @@ function App() {
       setWordReplacements(result);
     } catch (e) {
       // Ignore errors
+    }
+  }
+
+  async function loadClipboardHistory() {
+    try {
+      const result = await invoke<ClipboardEntry[]>("get_clipboard_history");
+      setClipboardHistory(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function handleCopyFromHistory(content: string) {
+    try {
+      await invoke("copy_from_clipboard_history", { content });
+      // Show brief feedback by setting copied state
+      setCopiedId(-1); // Use -1 to indicate clipboard copy
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function loadInboxItems() {
+    try {
+      const result = await invoke<InboxItem[]>("get_inbox_items");
+      setInboxItems(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function handleOpenInboxItem(item: InboxItem) {
+    try {
+      await invoke("open_inbox_item", {
+        id: item.id,
+        itemType: item.type,
+        path: item.path,
+        url: item.url,
+      });
+      // Reload to reflect opened status
+      loadInboxItems();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleDeleteInboxItem(id: string) {
+    try {
+      await invoke("delete_inbox_item", { id });
+      setInboxItems(inboxItems.filter((i) => i.id !== id));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleClearInbox() {
+    try {
+      await invoke("clear_inbox");
+      setInboxItems([]);
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -252,6 +339,123 @@ function App() {
     recording: "#ef4444",
     thinking: "#eab308",
   };
+
+  // Clipboard History View
+  if (currentView === "clipboard") {
+    return (
+      <main className="container">
+        <div className="header history-view-header">
+          <button className="back-btn" onClick={() => setCurrentView("main")}>
+            ← Back
+          </button>
+          <div className="logo-text-small">CLIPBOARD</div>
+        </div>
+
+        <div className="clipboard-view-content">
+          <p className="clipboard-description">
+            Recent clipboard items. Click to copy back to clipboard.
+          </p>
+
+          <div className="clipboard-list">
+            {clipboardHistory.length === 0 ? (
+              <div className="clipboard-empty-state">
+                <p>No clipboard history yet</p>
+                <p className="empty-hint">Copy something to see it here</p>
+              </div>
+            ) : (
+              clipboardHistory.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="clipboard-item"
+                  onClick={() => handleCopyFromHistory(entry.content)}
+                >
+                  <div className="clipboard-content">
+                    {entry.content.length > 100
+                      ? entry.content.substring(0, 100) + "..."
+                      : entry.content}
+                  </div>
+                  <div className="clipboard-meta">
+                    <span className="clipboard-time">{formatTime(entry.timestamp)}</span>
+                    <span className="clipboard-copy-hint">Click to copy</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {error && <div className="error">{error}</div>}
+      </main>
+    );
+  }
+
+  // Phone Inbox View
+  if (currentView === "inbox") {
+    return (
+      <main className="container">
+        <div className="header history-view-header">
+          <button className="back-btn" onClick={() => setCurrentView("main")}>
+            ← Back
+          </button>
+          <div className="logo-text-small">PHONE INBOX</div>
+          {inboxItems.length > 0 && (
+            <button className="clear-all-btn" onClick={handleClearInbox}>
+              Clear All
+            </button>
+          )}
+        </div>
+
+        <div className="inbox-view-content">
+          <p className="inbox-description">
+            Files and links sent from your phone via Telegram.
+          </p>
+
+          <div className="inbox-list">
+            {inboxItems.length === 0 ? (
+              <div className="inbox-empty-state">
+                <p>No items in inbox</p>
+                <p className="empty-hint">Send files or URLs via Telegram to see them here</p>
+              </div>
+            ) : (
+              inboxItems.map((item) => (
+                <div
+                  key={item.id}
+                  className={`inbox-item ${item.type} ${item.opened ? "opened" : "unread"}`}
+                >
+                  <div className="inbox-item-icon">
+                    {item.type === "url" ? "🔗" : item.type === "image" ? "🖼️" : "📄"}
+                  </div>
+                  <div className="inbox-item-info">
+                    <span className="inbox-filename">{item.filename}</span>
+                    <span className="inbox-meta">
+                      {item.from_user && `From ${item.from_user} • `}
+                      {formatTime(item.received_at)}
+                    </span>
+                  </div>
+                  <div className="inbox-item-actions">
+                    <button
+                      className="inbox-open-btn"
+                      onClick={() => handleOpenInboxItem(item)}
+                    >
+                      Open
+                    </button>
+                    <button
+                      className="inbox-delete-btn"
+                      onClick={() => handleDeleteInboxItem(item.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {error && <div className="error">{error}</div>}
+      </main>
+    );
+  }
 
   // Word Replacements View
   if (currentView === "words") {
@@ -461,6 +665,24 @@ function App() {
         >
           <span>Word Dictionary</span>
           {wordReplacements.length > 0 && <span className="history-count">{wordReplacements.length}</span>}
+        </button>
+
+        <button
+          className="history-nav-btn"
+          onClick={() => { setCurrentView("clipboard"); loadClipboardHistory(); }}
+        >
+          <span>Clipboard</span>
+          {clipboardHistory.length > 0 && <span className="history-count">{clipboardHistory.length}</span>}
+        </button>
+
+        <button
+          className="history-nav-btn"
+          onClick={() => { setCurrentView("inbox"); loadInboxItems(); }}
+        >
+          <span>Phone Inbox</span>
+          {inboxItems.filter((i) => !i.opened).length > 0 && (
+            <span className="history-count unread">{inboxItems.filter((i) => !i.opened).length}</span>
+          )}
         </button>
 
         {error && <div className="error">{error}</div>}

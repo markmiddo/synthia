@@ -1,8 +1,8 @@
 # SYNTHIA
 
-**Talk to your code. From anywhere.**
+**Talk to your code. Manage your workflow. From anywhere.**
 
-Free open-source voice assistant for Linux. Local speech-to-text, hands-free coding with Claude Code, and remote control via Telegram. Your data stays home — even when you can't.
+Free open-source Claude Code companion for Linux. Voice control, persistent memory, and a full configuration dashboard — all in one toolkit. Your data stays home.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -15,11 +15,12 @@ Free open-source voice assistant for Linux. Local speech-to-text, hands-free cod
 
 ## Why SYNTHIA?
 
-Your voice never leaves your machine. No cloud. No creepy. No "we updated our privacy policy" emails.
+Your voice never leaves your machine. Your memories stay organized. Your Claude Code config stays in check.
 
 - **100% Local** — Whisper runs on your hardware. No servers. No logs. Pinky promise.
 - **Free Forever** — MIT licensed. No paywalls. No "premium tier" upsell.
-- **Claude Code Integration** — Voice-control your AI coding sessions. Ship features from the couch.
+- **Claude Code Companion** — Voice control, persistent memory, and a TUI dashboard for agents, commands, hooks, and settings.
+- **Memory Layer** — Store bugs, patterns, architecture decisions, and gotchas. Never re-learn the same lesson twice.
 
 ---
 
@@ -81,6 +82,7 @@ SYNTHIA is built on best-in-class open source AI and modern system tooling:
 | Speech Recognition | [Faster-Whisper](https://github.com/guillaumekln/faster-whisper) | OpenAI's Whisper, but 4x faster |
 | AI Brain | [Ollama](https://ollama.ai) + Qwen 2.5 | Local LLM, no API keys needed |
 | Voice Output | [Piper](https://github.com/rhasspy/piper) | Sounds like a human, not a GPS from 2008 |
+| Dashboard TUI | [Textual](https://textual.textualize.io) | Beautiful terminal UI, keyboard-first |
 | Desktop GUI | [Tauri](https://tauri.app) + Rust | Native performance, tiny footprint |
 | Frontend | React + TypeScript | Modern, type-safe UI |
 
@@ -139,6 +141,81 @@ Now every Claude response is spoken aloud — or sent to your phone in Remote Mo
 
 ---
 
+## Synthia Dashboard
+
+A full TUI for managing your entire Claude Code setup. One command, everything at your fingertips.
+
+```bash
+synthia-dash
+```
+
+### What You Can Manage
+
+| Section | What It Does |
+|---------|--------------|
+| **Memory** | Browse, filter, edit, and delete memory entries by category |
+| **Agents** | View and edit your custom agents (model, color, prompt) |
+| **Commands** | Manage slash commands with built-in editor |
+| **Plugins** | Toggle plugins on/off with spacebar |
+| **Hooks** | View configured hooks (UserPromptSubmit, Stop, etc.) |
+| **Settings** | Quick access to Claude Code settings |
+
+### Keyboard Navigation
+
+- `1-6` — Jump to section
+- `↑/↓` — Navigate lists
+- `e` — Edit selected item
+- `n` — New item
+- `d` — Delete (with confirmation)
+- `Tab` — Cycle memory filters
+- `?` — Help overlay
+- `q` — Quit
+
+---
+
+## Memory System
+
+SYNTHIA includes a persistent memory system for storing project knowledge, bugs, patterns, and gotchas. Perfect for development workflows where you need quick access to past learnings.
+
+### Memory Categories
+
+| Category | Fields | Use Case |
+|----------|--------|----------|
+| `bug` | error, cause, fix | Track bug solutions |
+| `pattern` | topic, rule, why | Document coding conventions |
+| `arch` | decision, why | Record architecture decisions |
+| `gotcha` | area, gotcha | Capture project landmines |
+| `stack` | tool, note | Tool configuration notes |
+
+### CLI Access
+
+```bash
+# Quick recall by tags
+synthia memory recall "frontend,react"
+
+# Text search
+synthia memory search "MongoDB"
+
+# View statistics
+synthia memory stats
+```
+
+### Voice Commands
+
+- "What do we know about React bugs?" — Searches memory by tags
+- "Search memory for MongoDB" — Full-text search
+
+### Auto-Retrieval (Dev Mode)
+
+Enable in `config.yaml`:
+```yaml
+memory_auto_retrieve: true
+```
+
+When enabled, SYNTHIA automatically injects relevant memories into your queries based on detected keywords.
+
+---
+
 ## Configuration
 
 ```bash
@@ -158,6 +235,11 @@ use_local_tts: true
 local_stt_model: "tiny"  # tiny, base, small, medium, large
 local_llm_model: "qwen2.5:1.5b-instruct-q4_0"
 local_tts_voice: "~/.local/share/piper-voices/en_US-amy-medium.onnx"
+
+# Memory system
+memory_enabled: true
+memory_auto_retrieve: false  # Enable for dev mode
+memory_dir: "~/.claude/memory"
 ```
 
 ---

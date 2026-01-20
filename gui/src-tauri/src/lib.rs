@@ -4,9 +4,10 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
-use std::process::{Command, Child};
+use std::process::{Command, Child, Stdio};
 use std::sync::Mutex;
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
@@ -14,6 +15,17 @@ use serde::{Deserialize, Serialize};
 
 fn load_icon_from_path(path: &PathBuf) -> Option<Image<'static>> {
     let img = image::open(path).ok()?.to_rgba8();
+    let (width, height) = img.dimensions();
+    let rgba = img.into_raw();
+    Some(Image::new_owned(rgba, width, height))
+}
+
+// Embed icons directly in binary for better compatibility
+static TRAY_ICON_PNG: &[u8] = include_bytes!("../icons/tray-icon.png");
+static TRAY_RECORDING_PNG: &[u8] = include_bytes!("../icons/tray-recording.png");
+
+fn load_embedded_icon(data: &'static [u8]) -> Option<Image<'static>> {
+    let img = image::load_from_memory(data).ok()?.to_rgba8();
     let (width, height) = img.dimensions();
     let rgba = img.into_raw();
     Some(Image::new_owned(rgba, width, height))
@@ -42,6 +54,28 @@ struct WordReplacement {
     to: String,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct ClipboardEntry {
+    id: u64,
+    content: String,
+    timestamp: String,
+    hash: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct InboxItem {
+    id: String,
+    #[serde(rename = "type")]
+    item_type: String,
+    filename: String,
+    path: Option<String>,
+    url: Option<String>,
+    received_at: String,
+    size_bytes: Option<u64>,
+    from_user: Option<String>,
+    opened: bool,
+}
+
 fn get_lock_file() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
         .unwrap_or_else(|_| "/tmp".to_string());
@@ -58,6 +92,21 @@ fn get_history_file() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
         .unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(runtime_dir).join("synthia-history.json")
+}
+
+fn get_clipboard_file() -> PathBuf {
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(runtime_dir).join("synthia-clipboard.json")
+}
+
+fn get_inbox_file() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".local/share/synthia/inbox/inbox.json")
+}
+
+fn is_wayland_env() -> bool {
+    std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
 fn acquire_lock() -> bool {
@@ -443,6 +492,142 @@ fn save_word_replacements(replacements: Vec<WordReplacement>) -> Result<String, 
 }
 
 #[tauri::command]
+fn get_clipboard_history() -> Vec<ClipboardEntry> {
+    let clipboard_file = get_clipboard_file();
+    if let Ok(content) = fs::read_to_string(&clipboard_file) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+#[tauri::command]
+fn copy_from_clipboard_history(content: String) -> Result<String, String> {
+    if is_wayland_env() {
+        let mut child = Command::new("wl-copy")
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn wl-copy: {}", e))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(content.as_bytes())
+                .map_err(|e| format!("Failed to write to wl-copy: {}", e))?;
+        }
+
+        child.wait().map_err(|e| format!("wl-copy failed: {}", e))?;
+    } else {
+        let mut child = Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn xclip: {}", e))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(content.as_bytes())
+                .map_err(|e| format!("Failed to write to xclip: {}", e))?;
+        }
+
+        child.wait().map_err(|e| format!("xclip failed: {}", e))?;
+    }
+
+    Ok("Copied to clipboard".to_string())
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct InboxData {
+    items: Vec<InboxItem>,
+}
+
+#[tauri::command]
+fn get_inbox_items() -> Vec<InboxItem> {
+    let inbox_file = get_inbox_file();
+    if let Ok(content) = fs::read_to_string(&inbox_file) {
+        if let Ok(data) = serde_json::from_str::<InboxData>(&content) {
+            return data.items;
+        }
+    }
+    Vec::new()
+}
+
+#[tauri::command]
+fn open_inbox_item(id: String, item_type: String, path: Option<String>, url: Option<String>) -> Result<String, String> {
+    // Open the item with xdg-open
+    let target = if item_type == "url" {
+        url.ok_or("No URL provided")?
+    } else {
+        path.ok_or("No path provided")?
+    };
+
+    Command::new("xdg-open")
+        .arg(&target)
+        .spawn()
+        .map_err(|e| format!("Failed to open: {}", e))?;
+
+    // Mark as opened in the inbox file
+    let inbox_file = get_inbox_file();
+    if let Ok(content) = fs::read_to_string(&inbox_file) {
+        if let Ok(mut data) = serde_json::from_str::<InboxData>(&content) {
+            for item in &mut data.items {
+                if item.id == id {
+                    item.opened = true;
+                    break;
+                }
+            }
+            let _ = fs::write(&inbox_file, serde_json::to_string_pretty(&data).unwrap_or_default());
+        }
+    }
+
+    Ok("Opened".to_string())
+}
+
+#[tauri::command]
+fn delete_inbox_item(id: String) -> Result<String, String> {
+    let inbox_file = get_inbox_file();
+    if let Ok(content) = fs::read_to_string(&inbox_file) {
+        if let Ok(mut data) = serde_json::from_str::<InboxData>(&content) {
+            // Find and remove the item, also delete file if exists
+            let mut path_to_delete: Option<String> = None;
+            data.items.retain(|item| {
+                if item.id == id {
+                    path_to_delete = item.path.clone();
+                    false
+                } else {
+                    true
+                }
+            });
+
+            // Delete the file if it exists
+            if let Some(path) = path_to_delete {
+                let _ = fs::remove_file(&path);
+            }
+
+            let _ = fs::write(&inbox_file, serde_json::to_string_pretty(&data).unwrap_or_default());
+            return Ok("Deleted".to_string());
+        }
+    }
+    Err("Failed to delete item".to_string())
+}
+
+#[tauri::command]
+fn clear_inbox() -> Result<String, String> {
+    let inbox_file = get_inbox_file();
+    if let Ok(content) = fs::read_to_string(&inbox_file) {
+        if let Ok(data) = serde_json::from_str::<InboxData>(&content) {
+            // Delete all files
+            for item in &data.items {
+                if let Some(path) = &item.path {
+                    let _ = fs::remove_file(path);
+                }
+            }
+        }
+    }
+
+    // Clear the inbox
+    let _ = fs::write(&inbox_file, r#"{"items": []}"#);
+    Ok("Inbox cleared".to_string())
+}
+
+#[tauri::command]
 fn resend_to_assistant(text: String) -> Result<String, String> {
     // Use xdotool to type the text into Claude Code terminal
     // First, we'll write to a temp file that the stop hook can check
@@ -481,6 +666,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Clean up any stale remote mode state from previous sessions
+            let _ = fs::remove_file("/tmp/synthia-remote-mode");
+            let _ = Command::new("pkill")
+                .args(["-f", "telegram_bot.py"])
+                .output();
+
             // Create tray menu
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Show Settings", true, None::<&str>)?;
@@ -490,9 +681,13 @@ pub fn run() {
                 &quit,
             ])?;
 
+            // Load the tray icon immediately for COSMIC/StatusNotifierItem compatibility
+            let initial_icon = load_embedded_icon(TRAY_ICON_PNG)
+                .unwrap_or_else(|| app.default_window_icon().unwrap().clone());
+
             // Create tray icon with ID so we can update it later
             let tray = TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(initial_icon)
                 .menu(&menu)
                 .tooltip("Synthia - Voice Assistant")
                 .on_menu_event(|app, event| {
@@ -556,11 +751,18 @@ pub fn run() {
             // Start state watcher thread for tray icon
             let app_handle = app.handle().clone();
             thread::spawn(move || {
-                let mut last_recording = false;
+                // Load embedded icons (more reliable across desktop environments)
+                let normal_icon = load_embedded_icon(TRAY_ICON_PNG);
+                let recording_icon = load_embedded_icon(TRAY_RECORDING_PNG);
 
-                // Load icons
-                let normal_icon = load_icon_from_path(&normal_icon_path);
-                let recording_icon = load_icon_from_path(&recording_icon_path);
+                // Set initial icon immediately
+                if let Some(tray) = app_handle.tray_by_id("main-tray") {
+                    if let Some(ref icon) = normal_icon {
+                        let _ = tray.set_icon(Some(icon.clone()));
+                    }
+                }
+
+                let mut last_recording = false;
 
                 loop {
                     let state = read_synthia_state();
@@ -607,7 +809,13 @@ pub fn run() {
             get_hotkeys,
             save_hotkeys,
             get_word_replacements,
-            save_word_replacements
+            save_word_replacements,
+            get_clipboard_history,
+            copy_from_clipboard_history,
+            get_inbox_items,
+            open_inbox_item,
+            delete_inbox_item,
+            clear_inbox
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -246,6 +246,109 @@ class SynthiaBot:
         except Exception as e:
             await update.message.reply_text(f"Screenshot failed: {e}")
 
+    async def clip_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /clip command - copy text to PC clipboard."""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        text = ' '.join(context.args) if context.args else ''
+        if not text:
+            await update.message.reply_text("Usage: /clip <text to copy>")
+            return
+
+        try:
+            from synthia.commands import copy_to_clipboard
+            success = copy_to_clipboard(text)
+
+            if success:
+                preview = text[:50] + "..." if len(text) > 50 else text
+                await update.message.reply_text(f"Copied to PC clipboard:\n`{preview}`", parse_mode='Markdown')
+            else:
+                await update.message.reply_text("Failed to copy to clipboard")
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    async def getclip_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /getclip command - get PC clipboard content."""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            from synthia.commands import get_clipboard
+            content = get_clipboard()
+
+            if content:
+                # Truncate if too long for Telegram
+                if len(content) > 4000:
+                    content = content[:4000] + "\n\n... (truncated)"
+                await update.message.reply_text(f"*PC Clipboard:*\n```\n{content}\n```", parse_mode='Markdown')
+            else:
+                await update.message.reply_text("Clipboard is empty")
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle document uploads - save to inbox."""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            from synthia.remote.inbox import add_inbox_item, get_files_dir
+
+            doc = update.message.document
+            file = await doc.get_file()
+
+            # Download file
+            files_dir = get_files_dir()
+            file_path = files_dir / doc.file_name
+            await file.download_to_drive(str(file_path))
+
+            # Add to inbox
+            add_inbox_item(
+                item_type="file",
+                filename=doc.file_name,
+                path=str(file_path),
+                size_bytes=doc.file_size,
+                from_user=update.effective_user.first_name,
+            )
+
+            await update.message.reply_text(f"Saved to inbox: {doc.file_name}")
+        except Exception as e:
+            await update.message.reply_text(f"Error saving file: {e}")
+
+    async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle photo uploads - save largest resolution to inbox."""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            from synthia.remote.inbox import add_inbox_item, get_files_dir
+            from datetime import datetime
+
+            # Get largest photo
+            photo = update.message.photo[-1]
+            file = await photo.get_file()
+
+            # Download
+            files_dir = get_files_dir()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"photo_{timestamp}.jpg"
+            file_path = files_dir / filename
+            await file.download_to_drive(str(file_path))
+
+            # Add to inbox
+            add_inbox_item(
+                item_type="image",
+                filename=filename,
+                path=str(file_path),
+                size_bytes=photo.file_size,
+                from_user=update.effective_user.first_name,
+            )
+
+            await update.message.reply_text(f"Saved to inbox: {filename}")
+        except Exception as e:
+            await update.message.reply_text(f"Error saving photo: {e}")
+
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages - route to Claude Code if in remote mode, else local LLM."""
         if not self.is_authorized(update.effective_user.id):
@@ -253,6 +356,25 @@ class SynthiaBot:
 
         text = update.message.text
         logger.info(f"Received text: {text}")
+
+        # Check for URLs and save to inbox (only if not in remote mode)
+        if not self._is_remote_mode():
+            url_pattern = r'https?://[^\s]+'
+            urls = re.findall(url_pattern, text)
+            if urls:
+                from synthia.remote.inbox import add_inbox_item
+                for url in urls:
+                    add_inbox_item(
+                        item_type="url",
+                        filename=url[:60] + "..." if len(url) > 60 else url,
+                        url=url,
+                        from_user=update.effective_user.first_name,
+                    )
+                await update.message.reply_text(f"Saved {len(urls)} URL(s) to inbox")
+                # If the message is just URL(s), don't process further
+                text_without_urls = re.sub(url_pattern, '', text).strip()
+                if not text_without_urls:
+                    return
 
         # If in remote mode, send to Claude Code instead of local LLM
         if self._is_remote_mode():
@@ -592,8 +714,14 @@ class SynthiaBot:
         # Keep old commands as aliases for backwards compatibility
         self.app.add_handler(CommandHandler("remote", self.enable_dev_mode))
         self.app.add_handler(CommandHandler("local", self.enable_quick_mode))
+        # Clipboard sync commands
+        self.app.add_handler(CommandHandler("clip", self.clip_command))
+        self.app.add_handler(CommandHandler("getclip", self.getclip_command))
+        # Message handlers
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
         self.app.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
+        self.app.add_handler(MessageHandler(filters.Document.ALL, self.handle_document))
+        self.app.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
 
         # Run the bot
         logger.info("Bot is ready! Listening for messages...")

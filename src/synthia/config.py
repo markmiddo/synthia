@@ -44,6 +44,17 @@ DEFAULT_CONFIG: ConfigDict = {
     "telegram_allowed_users": [],  # List of Telegram user IDs
     # Web search (Tavily)
     "tavily_api_key": "",  # Get from tavily.com
+    # LLM Polish for dictation accuracy
+    "use_llm_polish": True,  # Enable LLM review of transcriptions
+    "llm_polish_model": "qwen2.5:7b-instruct-q4_0",  # Model for polishing
+    "llm_polish_timeout": 3.0,  # Timeout in seconds (fail-safe to original)
+    # Clipboard Manager
+    "clipboard_history_enabled": True,  # Enable clipboard history tracking
+    "clipboard_history_max_items": 5,  # Number of items to remember
+    # Memory System
+    "memory_enabled": True,  # Enable memory system integration
+    "memory_auto_retrieve": False,  # Auto-retrieve relevant memories in dev mode
+    "memory_dir": "~/.claude/memory",  # Memory storage directory
     # Word replacements for dictation (fixes common Whisper misrecognitions)
     "word_replacements": {
         "Cynthia": "Synthia",

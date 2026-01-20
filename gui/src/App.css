@@ -722,3 +722,208 @@
   background: rgba(220, 38, 38, 0.15);
   border-color: rgba(220, 38, 38, 0.4);
 }
+
+/* Clipboard Manager Styles */
+.clipboard-view-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.clipboard-description {
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 0;
+  text-align: center;
+}
+
+.clipboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clipboard-empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: #64748b;
+}
+
+.clipboard-empty-state p {
+  margin: 0 0 8px 0;
+}
+
+.clipboard-item {
+  padding: 12px;
+  background: rgba(6, 182, 212, 0.03);
+  border: 1px solid rgba(6, 182, 212, 0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clipboard-item:hover {
+  background: rgba(6, 182, 212, 0.08);
+  border-color: rgba(6, 182, 212, 0.3);
+}
+
+.clipboard-content {
+  color: #e2e8f0;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  word-break: break-word;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.clipboard-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.clipboard-time {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.clipboard-copy-hint {
+  color: #06b6d4;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.clipboard-item:hover .clipboard-copy-hint {
+  opacity: 1;
+}
+
+/* Phone Inbox Styles */
+.inbox-view-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.inbox-description {
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 0;
+  text-align: center;
+}
+
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inbox-empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: #64748b;
+}
+
+.inbox-empty-state p {
+  margin: 0 0 8px 0;
+}
+
+.inbox-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(6, 182, 212, 0.03);
+  border: 1px solid rgba(6, 182, 212, 0.1);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.inbox-item.unread {
+  background: rgba(6, 182, 212, 0.08);
+  border-color: rgba(6, 182, 212, 0.25);
+}
+
+.inbox-item:hover {
+  background: rgba(6, 182, 212, 0.1);
+  border-color: rgba(6, 182, 212, 0.3);
+}
+
+.inbox-item-icon {
+  font-size: 20px;
+  width: 32px;
+  text-align: center;
+}
+
+.inbox-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inbox-filename {
+  color: #e2e8f0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-meta {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.inbox-item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.inbox-open-btn {
+  padding: 6px 12px;
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: 4px;
+  color: #06b6d4;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.inbox-open-btn:hover {
+  background: rgba(6, 182, 212, 0.2);
+  border-color: rgba(6, 182, 212, 0.5);
+}
+
+.inbox-delete-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: 4px;
+  color: #f87171;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inbox-delete-btn:hover {
+  background: rgba(220, 38, 38, 0.15);
+  border-color: rgba(220, 38, 38, 0.4);
+}
+
+.history-count.unread {
+  background: #ef4444;
+}

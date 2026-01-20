@@ -26,6 +26,8 @@ from synthia.output import type_text
 from synthia.sounds import SoundEffects
 from synthia.transcribe import Transcriber
 from synthia.tts import TextToSpeech
+from synthia.llm_polish import TranscriptionPolisher
+from synthia.clipboard_monitor import ClipboardMonitor
 
 
 class Synthia:
@@ -83,6 +85,7 @@ class Synthia:
 
         # Initialize Assistant (local Ollama or Claude API)
         use_local_llm = self.config.get("use_local_llm", False)
+        dev_mode = self.config.get("memory_auto_retrieve", False)
         self.assistant = Assistant(
             api_key=anthropic_key if not use_local_llm else None,
             model=self.config["assistant_model"],
@@ -90,8 +93,33 @@ class Synthia:
             use_local=use_local_llm,
             local_model=self.config.get("local_llm_model", "qwen2.5:7b-instruct-q4_0"),
             ollama_url=self.config.get("ollama_url", "http://localhost:11434"),
+            dev_mode=dev_mode,
         )
         print(f"✅ Assistant initialized ({'local Ollama' if use_local_llm else 'Claude API'})")
+        if dev_mode:
+            print("✅ Memory auto-retrieval enabled (dev mode)")
+
+        # Initialize LLM polisher for dictation accuracy (if enabled)
+        use_llm_polish = self.config.get("use_llm_polish", True)
+        if use_llm_polish:
+            self.polisher = TranscriptionPolisher(
+                ollama_url=self.config.get("ollama_url", "http://localhost:11434"),
+                model=self.config.get("llm_polish_model", "qwen2.5:7b-instruct-q4_0"),
+                timeout=self.config.get("llm_polish_timeout", 3.0),
+                enabled=True,
+            )
+            print("✅ LLM polish for dictation: enabled")
+        else:
+            self.polisher = None
+
+        # Initialize clipboard monitor (if enabled)
+        clipboard_enabled = self.config.get("clipboard_history_enabled", True)
+        if clipboard_enabled:
+            self.clipboard_monitor = ClipboardMonitor(
+                max_items=self.config.get("clipboard_history_max_items", 5),
+            )
+        else:
+            self.clipboard_monitor = None
 
         # State tracking
         self.dictation_active = False
@@ -252,6 +280,9 @@ class Synthia:
             if audio_data:
                 text = self.transcriber.transcribe(audio_data)
                 if text:
+                    # LLM polish for improved accuracy (optional)
+                    if self.polisher:
+                        text = self.polisher.polish(text)
                     # Apply word replacements to fix common misrecognitions
                     text = apply_word_replacements(text, self.config)
                     type_text(text)
@@ -358,14 +389,110 @@ class Synthia:
         config_watcher = threading.Thread(target=self._watch_config_reload, daemon=True)
         config_watcher.start()
 
+        # Start clipboard monitor (if enabled)
+        if self.clipboard_monitor:
+            self.clipboard_monitor.start()
+            print("✅ Clipboard monitor started")
+
         # Start the hotkey listener (auto-detects Wayland vs X11)
         self.hotkey_listener.start()
         self.hotkey_listener.join()
 
         # Cleanup
+        if self.clipboard_monitor:
+            self.clipboard_monitor.stop()
         if self.tray:
             self.tray.stop()
         self.sounds.cleanup()
+
+
+def handle_memory_command(args: list[str]):
+    """Handle memory subcommand.
+
+    Usage:
+        synthia memory           - Launch TUI dashboard
+        synthia memory recall <tags>    - Quick recall by tags
+        synthia memory search <query>   - Text search
+        synthia memory stats     - Show statistics
+        synthia memory tags      - List all tags
+    """
+    from synthia.memory import get_memory_system, recall, search
+
+    if not args or args[0] == "tui":
+        # Launch TUI dashboard
+        try:
+            from synthia.memory_tui import main as run_tui
+            run_tui()
+        except ImportError:
+            print("TUI requires textual. Install with: pip install textual")
+            return
+        return
+
+    subcmd = args[0]
+
+    if subcmd == "recall":
+        if len(args) < 2:
+            print("Usage: synthia memory recall <tags>")
+            print("Example: synthia memory recall frontend,react")
+            return
+
+        tags = [t.strip() for t in args[1].split(",")]
+        entries = recall(tags)
+
+        if not entries:
+            print("No memories found for those tags")
+            return
+
+        print(f"\n=== Memory Recall: {', '.join(tags)} ===\n")
+        for entry in entries:
+            print(entry.format_display())
+            print("-" * 40)
+        print(f"\n=== Found {len(entries)} entries ===")
+
+    elif subcmd == "search":
+        if len(args) < 2:
+            print("Usage: synthia memory search <query>")
+            return
+
+        query = " ".join(args[1:])
+        entries = search(query)
+
+        if not entries:
+            print(f"No memories found for '{query}'")
+            return
+
+        print(f"\n=== Search: {query} ===\n")
+        for entry in entries:
+            print(entry.format_display())
+            print("-" * 40)
+        print(f"\n=== Found {len(entries)} entries ===")
+
+    elif subcmd == "stats":
+        mem = get_memory_system()
+        counts = mem.list_categories()
+        total = sum(counts.values())
+
+        print("\n=== Memory Statistics ===\n")
+        print(f"Total entries: {total}")
+        for cat, count in counts.items():
+            print(f"  {cat}: {count}")
+
+    elif subcmd == "tags":
+        mem = get_memory_system()
+        tags = mem.list_all_tags()
+
+        print("\n=== All Tags (by usage) ===\n")
+        for tag, count in tags.items():
+            print(f"  {tag}: {count}")
+
+    else:
+        print(f"Unknown memory subcommand: {subcmd}")
+        print("\nUsage:")
+        print("  synthia memory           - Launch TUI dashboard")
+        print("  synthia memory recall <tags>  - Quick recall by tags")
+        print("  synthia memory search <query> - Text search")
+        print("  synthia memory stats     - Show statistics")
+        print("  synthia memory tags      - List all tags")
 
 
 def main():
@@ -373,6 +500,19 @@ def main():
     # Show audio devices for debugging
     if "--list-devices" in sys.argv:
         list_audio_devices()
+        return
+
+    # Handle memory subcommand
+    if len(sys.argv) > 1 and sys.argv[1] == "memory":
+        handle_memory_command(sys.argv[2:])
+        return
+
+    # Show help
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        print("\nSubcommands:")
+        print("  synthia memory    - Memory system TUI and CLI")
+        print("  synthia --list-devices  - Show audio devices")
         return
 
     try:
