@@ -49,6 +49,7 @@ from synthia.dashboard_screens import (
     ConfirmDeleteScreen,
     EditAgentScreen,
     EditCommandScreen,
+    HelpScreen,
 )
 
 
@@ -290,6 +291,13 @@ class SynthiaDashboard(App):
         margin-top: 1;
         padding: 1;
     }
+
+    #detail-panel {
+        height: 12;
+        border: solid $accent;
+        margin-top: 1;
+        padding: 1;
+    }
     """
 
     BINDINGS = [
@@ -331,6 +339,7 @@ class SynthiaDashboard(App):
                 yield Label("Memory", id="content-title")
                 yield Static("Select a section from the sidebar", id="content-area")
                 yield ListView(id="content-list")
+                yield Static("Select an item to view details", id="detail-panel")
         yield Static("[1-6] Section | [r] Refresh | [q] Quit", id="status-bar")
         yield Footer()
 
@@ -342,6 +351,38 @@ class SynthiaDashboard(App):
         """Handle sidebar selection."""
         if isinstance(event.item, SidebarItem):
             self._switch_section(event.item.section)
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        """Update detail panel when item is highlighted."""
+        try:
+            detail = self.query_one("#detail-panel", Static)
+        except Exception:
+            return
+
+        if isinstance(event.item, AgentListItem):
+            agent = event.item.agent
+            detail.update(f"Name: {agent.name}\nModel: {agent.model}\nColor: {agent.color}\n\n{agent.description}")
+        elif isinstance(event.item, CommandListItem):
+            cmd = event.item.command
+            detail.update(f"Command: /{cmd.filename.replace('.md', '')}\n\n{cmd.description}")
+        elif isinstance(event.item, PluginListItem):
+            plugin = event.item.plugin
+            status = "Enabled" if plugin.enabled else "Disabled"
+            detail.update(f"Plugin: {plugin.display_name}\nVersion: {plugin.version}\nStatus: {status}")
+        elif isinstance(event.item, HookListItem):
+            hook = event.item.hook
+            detail.update(f"Event: {hook.event}\nCommand: {hook.command}\nTimeout: {hook.timeout}s")
+        elif isinstance(event.item, SettingListItem):
+            detail.update(f"Key: {event.item.key}\nValue: {event.item.value}")
+        elif isinstance(event.item, MemoryListItem):
+            entry = event.item.entry
+            # Show memory entry details based on category
+            if entry.category == "bug":
+                detail.update(f"Error: {entry.data.get('error', 'N/A')}\nFix: {entry.data.get('fix', 'N/A')}")
+            elif entry.category == "pattern":
+                detail.update(f"Topic: {entry.data.get('topic', 'N/A')}\nPattern: {entry.data.get('pattern', 'N/A')}")
+            else:
+                detail.update(str(entry.data))
 
     def action_goto_section(self, section_name: str) -> None:
         """Jump to section by name."""
