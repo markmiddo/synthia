@@ -29,6 +29,13 @@ from synthia.memory import (
     MemoryEntry,
     get_memory_system,
 )
+from synthia.config_manager import (
+    AgentConfig,
+    list_agents,
+    load_agent,
+    save_agent,
+    delete_agent,
+)
 
 
 class Section(Enum):
@@ -99,6 +106,18 @@ class MemorySectionContent(Vertical):
             yield Input(placeholder="Search...", id="memory-search")
         yield ListView(id="memory-list")
         yield Static("Select an entry to view details", id="memory-detail")
+
+
+class AgentListItem(ListItem):
+    """List item for agent entries."""
+
+    def __init__(self, agent: AgentConfig):
+        super().__init__()
+        self.agent = agent
+
+    def compose(self) -> ComposeResult:
+        text = f"[{self.agent.model.upper()}] {self.agent.name}"
+        yield Label(text)
 
 
 class SynthiaDashboard(App):
@@ -252,6 +271,8 @@ class SynthiaDashboard(App):
 
         if section == Section.MEMORY:
             self._show_memory_section()
+        elif section == Section.AGENTS:
+            self._show_agents_section()
         else:
             content = self.query_one("#content-area", Static)
             content.update(f"[{section.value.upper()}] Content will appear here")
@@ -322,6 +343,28 @@ class SynthiaDashboard(App):
             for entry, line_num in entries:
                 list_view.append(MemoryListItem(entry, line_num))
             self._set_status(f"{title} | {len(entries)} entries")
+        except Exception:
+            pass
+
+    def _show_agents_section(self) -> None:
+        """Show agents section."""
+        self._load_agents()
+
+    @work(thread=True)
+    def _load_agents(self) -> None:
+        """Load all agents."""
+        agents = list_agents()
+        self.call_from_thread(self._display_agents, agents)
+
+    def _display_agents(self, agents: list[AgentConfig]) -> None:
+        """Display agents in list."""
+        self._agents = agents
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            list_view.clear()
+            for agent in agents:
+                list_view.append(AgentListItem(agent))
+            self._set_status(f"Agents | {len(agents)} found")
         except Exception:
             pass
 
