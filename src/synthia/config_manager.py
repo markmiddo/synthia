@@ -133,3 +133,72 @@ def delete_agent(filename: str) -> bool:
         filepath.unlink()
         return True
     return False
+
+
+@dataclass
+class CommandConfig:
+    """Represents a slash command from ~/.claude/commands/*.md"""
+
+    filename: str
+    description: str
+    body: str = ""
+
+    @classmethod
+    def from_file(cls, filepath: Path) -> "CommandConfig":
+        """Parse command markdown file."""
+        content = filepath.read_text()
+        frontmatter, body = parse_frontmatter(content)
+        return cls(
+            filename=filepath.name,
+            description=frontmatter.get("description", ""),
+            body=body.strip(),
+        )
+
+    def to_markdown(self) -> str:
+        """Convert back to markdown with frontmatter."""
+        lines = [
+            "---",
+            f"description: {self.description}",
+            "---",
+            "",
+            self.body,
+        ]
+        return "\n".join(lines)
+
+
+def list_commands() -> List[CommandConfig]:
+    """List all command configs from ~/.claude/commands/"""
+    if not COMMANDS_DIR.exists():
+        return []
+
+    commands = []
+    for filepath in sorted(COMMANDS_DIR.glob("*.md")):
+        try:
+            commands.append(CommandConfig.from_file(filepath))
+        except Exception:
+            pass
+    return commands
+
+
+def load_command(filename: str) -> Optional[CommandConfig]:
+    """Load a specific command by filename."""
+    filepath = COMMANDS_DIR / filename
+    if not filepath.exists():
+        return None
+    return CommandConfig.from_file(filepath)
+
+
+def save_command(command: CommandConfig) -> None:
+    """Save command to file."""
+    COMMANDS_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = COMMANDS_DIR / command.filename
+    filepath.write_text(command.to_markdown())
+
+
+def delete_command(filename: str) -> bool:
+    """Delete a command file. Returns True if deleted."""
+    filepath = COMMANDS_DIR / filename
+    if filepath.exists():
+        filepath.unlink()
+        return True
+    return False
