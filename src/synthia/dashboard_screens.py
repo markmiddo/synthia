@@ -157,13 +157,21 @@ class EditAgentScreen(ModalScreen[Optional[AgentConfig]]):
 
             yield Label("Model / Color:", classes="field-label")
             with Horizontal(classes="field-row"):
+                # Ensure current model is in the list
+                models = ["sonnet", "opus", "haiku"]
+                if self.agent.model and self.agent.model not in models:
+                    models.append(self.agent.model)
                 yield Select(
-                    [(m, m) for m in ["sonnet", "opus", "haiku"]],
+                    [(m, m) for m in models],
                     value=self.agent.model,
                     id="model-select",
                 )
+                # Ensure current color is in the list
+                colors = ["green", "blue", "red", "yellow", "purple", "orange", "cyan", "magenta"]
+                if self.agent.color and self.agent.color not in colors:
+                    colors.append(self.agent.color)
                 yield Select(
-                    [(c, c) for c in ["green", "blue", "red", "yellow", "purple"]],
+                    [(c, c) for c in colors],
                     value=self.agent.color,
                     id="color-select",
                 )
