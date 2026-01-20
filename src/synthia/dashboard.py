@@ -98,9 +98,8 @@ class MemoryListItem(ListItem):
             content = self.entry.data.get('tool', 'N/A')[:50]
         else:
             content = "Unknown"
-        # Use \[ to escape brackets (Textual interprets [] as markup)
-        text = f"\\[{cat}\\] {content}"
-        yield Label(text)
+        text = f"[{cat}] {content}"
+        yield Label(text, markup=False)
 
 
 class MemorySectionContent(Vertical):
@@ -133,8 +132,8 @@ class AgentListItem(ListItem):
         self.agent = agent
 
     def compose(self) -> ComposeResult:
-        text = f"\\[{self.agent.model.upper()}\\] {self.agent.name}"
-        yield Label(text)
+        text = f"[{self.agent.model.upper()}] {self.agent.name}"
+        yield Label(text, markup=False)
 
 
 class PluginListItem(ListItem):
@@ -146,8 +145,8 @@ class PluginListItem(ListItem):
 
     def compose(self) -> ComposeResult:
         status = "✓" if self.plugin.enabled else "✗"
-        text = f"\\[{status}\\] {self.plugin.display_name} ({self.plugin.version})"
-        yield Label(text)
+        text = f"[{status}] {self.plugin.display_name} ({self.plugin.version})"
+        yield Label(text, markup=False)
 
 
 class HookListItem(ListItem):
@@ -160,8 +159,8 @@ class HookListItem(ListItem):
     def compose(self) -> ComposeResult:
         # Show event type and truncated command
         cmd_short = self.hook.command[-40:] if len(self.hook.command) > 40 else self.hook.command
-        text = f"\\[{self.hook.event}\\] {cmd_short}"
-        yield Label(text)
+        text = f"[{self.hook.event}] {cmd_short}"
+        yield Label(text, markup=False)
 
 
 class CommandListItem(ListItem):
@@ -282,6 +281,14 @@ class SynthiaDashboard(App):
         width: 1fr;
     }
 
+    #memory-toolbar {
+        display: none;
+    }
+
+    #memory-toolbar.visible {
+        display: block;
+    }
+
     #memory-list {
         height: 1fr;
         border: solid $secondary;
@@ -340,6 +347,13 @@ class SynthiaDashboard(App):
                 )
             with Vertical(id="main-content"):
                 yield Label("Memory", id="content-title")
+                with Horizontal(id="memory-toolbar", classes="toolbar"):
+                    yield Button("All", id="mem-all", variant="primary")
+                    yield Button("Bugs", id="mem-bugs")
+                    yield Button("Patterns", id="mem-patterns")
+                    yield Button("Arch", id="mem-arch")
+                    yield Button("Gotchas", id="mem-gotchas")
+                    yield Button("Stack", id="mem-stack")
                 yield Static("Select a section from the sidebar", id="content-area")
                 yield ListView(id="content-list")
                 yield Static("Select an item to view details", id="detail-panel")
@@ -387,6 +401,32 @@ class SynthiaDashboard(App):
             else:
                 detail.update(str(entry.data))
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses for memory filter."""
+        button_id = event.button.id
+        if button_id and button_id.startswith("mem-"):
+            # Memory filter button
+            category = button_id.replace("mem-", "")
+            self._filter_memory(category)
+            # Update button variants to show active filter
+            for btn in self.query("#memory-toolbar Button"):
+                btn.variant = "primary" if btn.id == button_id else "default"
+
+    def _filter_memory(self, category: str) -> None:
+        """Filter memory entries by category."""
+        if category == "all":
+            self._load_memory_all()
+        elif category == "bugs":
+            self._load_memory_category("bug")
+        elif category == "patterns":
+            self._load_memory_category("pattern")
+        elif category == "arch":
+            self._load_memory_category("arch")
+        elif category == "gotchas":
+            self._load_memory_category("gotcha")
+        elif category == "stack":
+            self._load_memory_category("stack")
+
     def action_goto_section(self, section_name: str) -> None:
         """Jump to section by name."""
         try:
@@ -410,6 +450,7 @@ class SynthiaDashboard(App):
         content_area = self.query_one("#content-area", Static)
         content_list = self.query_one("#content-list", ListView)
         detail_panel = self.query_one("#detail-panel", Static)
+        memory_toolbar = self.query_one("#memory-toolbar", Horizontal)
 
         # Clear detail panel when switching sections
         detail_panel.update("Select an item to view details")
@@ -419,18 +460,22 @@ class SynthiaDashboard(App):
         content_list.add_class("visible")
         content_list.clear()
 
+        # Show memory toolbar only for Memory section
         if section == Section.MEMORY:
+            memory_toolbar.add_class("visible")
             self._show_memory_section()
-        elif section == Section.AGENTS:
-            self._show_agents_section()
-        elif section == Section.PLUGINS:
-            self._show_plugins_section()
-        elif section == Section.COMMANDS:
-            self._show_commands_section()
-        elif section == Section.HOOKS:
-            self._show_hooks_section()
-        elif section == Section.SETTINGS:
-            self._show_settings_section()
+        else:
+            memory_toolbar.remove_class("visible")
+            if section == Section.AGENTS:
+                self._show_agents_section()
+            elif section == Section.PLUGINS:
+                self._show_plugins_section()
+            elif section == Section.COMMANDS:
+                self._show_commands_section()
+            elif section == Section.HOOKS:
+                self._show_hooks_section()
+            elif section == Section.SETTINGS:
+                self._show_settings_section()
 
         self._set_status(f"Viewing {section.value.title()}")
 
