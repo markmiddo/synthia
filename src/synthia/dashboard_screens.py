@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, TextArea
 
 from synthia.config_manager import AgentConfig, CommandConfig, HookConfig
+from synthia.memory import MemoryEntry
 
 
 class ConfirmDeleteScreen(ModalScreen[bool]):
@@ -320,6 +321,149 @@ class EditCommandScreen(ModalScreen[Optional[CommandConfig]]):
             body=body,
         )
         self.dismiss(result)
+
+
+class EditMemoryScreen(ModalScreen[Optional[dict]]):
+    """Modal screen for editing a memory entry."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+s", "save", "Save"),
+    ]
+
+    CSS = """
+    EditMemoryScreen {
+        align: center middle;
+    }
+
+    #edit-dialog {
+        width: 80%;
+        height: 80%;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #edit-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    .field-label {
+        margin-top: 1;
+        color: $primary;
+    }
+
+    #tags-input {
+        margin-top: 1;
+    }
+
+    #button-row {
+        margin-top: 2;
+        height: auto;
+    }
+
+    #button-row Button {
+        margin-right: 2;
+    }
+
+    TextArea {
+        height: 4;
+    }
+    """
+
+    def __init__(self, entry: MemoryEntry, line_number: int):
+        super().__init__()
+        self.entry = entry
+        self.line_number = line_number
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="edit-dialog"):
+            yield Label(f"Edit {self.entry.category.upper()} Entry", id="edit-title")
+
+            # Create fields based on category
+            if self.entry.category == "bug":
+                yield Label("Error:", classes="field-label")
+                yield TextArea(self.entry.data.get("error", ""), id="field-error")
+                yield Label("Cause:", classes="field-label")
+                yield TextArea(self.entry.data.get("cause", ""), id="field-cause")
+                yield Label("Fix:", classes="field-label")
+                yield TextArea(self.entry.data.get("fix", ""), id="field-fix")
+            elif self.entry.category == "pattern":
+                yield Label("Topic:", classes="field-label")
+                yield TextArea(self.entry.data.get("topic", ""), id="field-topic")
+                yield Label("Rule:", classes="field-label")
+                yield TextArea(self.entry.data.get("rule", ""), id="field-rule")
+                yield Label("Why:", classes="field-label")
+                yield TextArea(self.entry.data.get("why", ""), id="field-why")
+            elif self.entry.category == "arch":
+                yield Label("Decision:", classes="field-label")
+                yield TextArea(self.entry.data.get("decision", ""), id="field-decision")
+                yield Label("Why:", classes="field-label")
+                yield TextArea(self.entry.data.get("why", ""), id="field-why")
+            elif self.entry.category == "gotcha":
+                yield Label("Area:", classes="field-label")
+                yield TextArea(self.entry.data.get("area", ""), id="field-area")
+                yield Label("Gotcha:", classes="field-label")
+                yield TextArea(self.entry.data.get("gotcha", ""), id="field-gotcha")
+            elif self.entry.category == "stack":
+                yield Label("Tool:", classes="field-label")
+                yield TextArea(self.entry.data.get("tool", ""), id="field-tool")
+                yield Label("Note:", classes="field-label")
+                yield TextArea(self.entry.data.get("note", ""), id="field-note")
+
+            yield Label("Tags (comma-separated):", classes="field-label")
+            yield Input(", ".join(self.entry.tags), id="tags-input")
+
+            with Horizontal(id="button-row"):
+                yield Button("Save (Ctrl+S)", id="save-btn", variant="primary")
+                yield Button("Cancel (Esc)", id="cancel-btn")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def action_save(self) -> None:
+        self._do_save()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save-btn":
+            self._do_save()
+        elif event.button.id == "cancel-btn":
+            self.dismiss(None)
+
+    def _do_save(self) -> None:
+        """Collect field values and save."""
+        data = {}
+
+        # Collect fields based on category
+        field_ids = {
+            "bug": ["error", "cause", "fix"],
+            "pattern": ["topic", "rule", "why"],
+            "arch": ["decision", "why"],
+            "gotcha": ["area", "gotcha"],
+            "stack": ["tool", "note"],
+        }
+
+        for field_name in field_ids.get(self.entry.category, []):
+            try:
+                textarea = self.query_one(f"#field-{field_name}", TextArea)
+                data[field_name] = textarea.text
+            except Exception:
+                pass
+
+        # Get tags
+        try:
+            tags_input = self.query_one("#tags-input", Input)
+            tags = [t.strip() for t in tags_input.value.split(",") if t.strip()]
+        except Exception:
+            tags = self.entry.tags
+
+        self.dismiss({
+            "category": self.entry.category,
+            "data": data,
+            "tags": tags,
+            "line_number": self.line_number,
+        })
 
 
 class HelpScreen(ModalScreen[None]):

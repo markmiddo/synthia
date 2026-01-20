@@ -49,6 +49,7 @@ from synthia.dashboard_screens import (
     ConfirmDeleteScreen,
     EditAgentScreen,
     EditCommandScreen,
+    EditMemoryScreen,
     HelpScreen,
 )
 
@@ -675,7 +676,9 @@ class SynthiaDashboard(App):
 
     def action_edit_selected(self) -> None:
         """Edit the selected item."""
-        if self.current_section == Section.AGENTS:
+        if self.current_section == Section.MEMORY:
+            self._edit_selected_memory()
+        elif self.current_section == Section.AGENTS:
             self._edit_selected_agent()
         elif self.current_section == Section.COMMANDS:
             self._edit_selected_command()
@@ -720,6 +723,53 @@ class SynthiaDashboard(App):
             self._load_commands()
             self._set_status(f"Saved command: {result.filename}")
 
+    def _edit_selected_memory(self) -> None:
+        """Edit selected memory entry."""
+        if not hasattr(self, '_memory_entries') or not self._memory_entries:
+            self._set_status("No memory entry selected")
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._memory_entries):
+                entry, line_num = self._memory_entries[index]
+                self.push_screen(EditMemoryScreen(entry, line_num), self._on_memory_edit_complete)
+        except Exception:
+            pass
+
+    def _on_memory_edit_complete(self, result: Optional[dict]) -> None:
+        """Handle memory edit completion."""
+        if result:
+            self._save_memory_edit(result)
+
+    def _save_memory_edit(self, result: dict) -> None:
+        """Save the edited memory entry."""
+        category = result["category"]
+        line_number = result["line_number"]
+        new_data = result["data"]
+        new_tags = result["tags"]
+
+        mem = get_memory_system()
+        filepath = mem.memory_dir / MEMORY_CATEGORIES[category]
+
+        # Read all lines
+        with open(filepath, "r") as f:
+            lines = f.readlines()
+
+        # Update the specific line
+        if 0 <= line_number < len(lines):
+            entry = MemoryEntry(category=category, data=new_data, tags=new_tags)
+            lines[line_number] = json.dumps(entry.to_dict()) + "\n"
+
+            # Write back
+            with open(filepath, "w") as f:
+                f.writelines(lines)
+
+            self._set_status(f"Saved {category} entry")
+            self._load_memory_all()  # Refresh
+        else:
+            self._set_status("Error: Could not save (line number mismatch)")
+
     def action_new_item(self) -> None:
         """Create a new item in current section."""
         if self.current_section == Section.AGENTS:
@@ -729,7 +779,9 @@ class SynthiaDashboard(App):
 
     def action_delete_selected(self) -> None:
         """Delete the selected item."""
-        if self.current_section == Section.AGENTS:
+        if self.current_section == Section.MEMORY:
+            self._delete_selected_memory()
+        elif self.current_section == Section.AGENTS:
             self._delete_selected_agent()
         elif self.current_section == Section.COMMANDS:
             self._delete_selected_command()
@@ -778,6 +830,51 @@ class SynthiaDashboard(App):
         delete_command(filename)
         self._load_commands()
         self._set_status("Command deleted")
+
+    def _delete_selected_memory(self) -> None:
+        """Delete selected memory entry."""
+        if not hasattr(self, '_memory_entries') or not self._memory_entries:
+            self._set_status("No memory entry selected")
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._memory_entries):
+                entry, line_num = self._memory_entries[index]
+                # Store for callback
+                self._pending_memory_delete = (entry.category, line_num)
+                self.push_screen(
+                    ConfirmDeleteScreen(f"{entry.category.upper()} entry"),
+                    self._on_memory_delete_confirm
+                )
+        except Exception:
+            pass
+
+    def _on_memory_delete_confirm(self, confirmed: bool) -> None:
+        """Callback when memory delete confirmation is dismissed."""
+        if confirmed and hasattr(self, '_pending_memory_delete'):
+            category, line_num = self._pending_memory_delete
+            self._do_delete_memory(category, line_num)
+        self._pending_memory_delete = None
+
+    def _do_delete_memory(self, category: str, line_number: int) -> None:
+        """Actually delete the memory entry."""
+        mem = get_memory_system()
+        filepath = mem.memory_dir / MEMORY_CATEGORIES[category]
+
+        with open(filepath, "r") as f:
+            lines = f.readlines()
+
+        if 0 <= line_number < len(lines):
+            del lines[line_number]
+
+            with open(filepath, "w") as f:
+                f.writelines(lines)
+
+            self._set_status(f"Deleted {category} entry")
+            self._load_memory_all()  # Refresh
+        else:
+            self._set_status("Error: Could not delete")
 
     def action_show_help(self) -> None:
         """Show help overlay."""
