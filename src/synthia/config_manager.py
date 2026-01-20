@@ -202,3 +202,60 @@ def delete_command(filename: str) -> bool:
         filepath.unlink()
         return True
     return False
+
+
+PLUGINS_FILE = CLAUDE_DIR / "plugins" / "installed_plugins.json"
+
+
+@dataclass
+class PluginInfo:
+    """Plugin information combining installed status and enabled state."""
+
+    name: str
+    version: str
+    enabled: bool
+    installed_at: str = ""
+
+    @property
+    def display_name(self) -> str:
+        """Extract readable name from plugin ID."""
+        # "context7@claude-plugins-official" -> "context7"
+        return self.name.split("@")[0]
+
+
+def list_plugins() -> List[PluginInfo]:
+    """List all installed plugins with their enabled status."""
+    settings = load_settings()
+    enabled_plugins = settings.get("enabledPlugins", {})
+
+    if not PLUGINS_FILE.exists():
+        # Fall back to just what's in settings
+        return [
+            PluginInfo(name=name, version="", enabled=enabled)
+            for name, enabled in enabled_plugins.items()
+        ]
+
+    with open(PLUGINS_FILE, "r") as f:
+        installed = json.load(f)
+
+    plugins = []
+    for name, versions in installed.get("plugins", {}).items():
+        if versions:
+            latest = versions[0]
+            plugins.append(PluginInfo(
+                name=name,
+                version=latest.get("version", ""),
+                enabled=enabled_plugins.get(name, False),
+                installed_at=latest.get("installedAt", ""),
+            ))
+
+    return plugins
+
+
+def set_plugin_enabled(plugin_name: str, enabled: bool) -> None:
+    """Enable or disable a plugin."""
+    settings = load_settings()
+    if "enabledPlugins" not in settings:
+        settings["enabledPlugins"] = {}
+    settings["enabledPlugins"][plugin_name] = enabled
+    save_settings(settings)
