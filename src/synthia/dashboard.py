@@ -38,6 +38,8 @@ from synthia.config_manager import (
     PluginInfo,
     list_plugins,
     set_plugin_enabled,
+    HookConfig,
+    list_hooks,
 )
 
 
@@ -133,6 +135,20 @@ class PluginListItem(ListItem):
     def compose(self) -> ComposeResult:
         status = "✓" if self.plugin.enabled else "✗"
         text = f"[{status}] {self.plugin.display_name} ({self.plugin.version})"
+        yield Label(text)
+
+
+class HookListItem(ListItem):
+    """List item for hook entries."""
+
+    def __init__(self, hook: HookConfig):
+        super().__init__()
+        self.hook = hook
+
+    def compose(self) -> ComposeResult:
+        # Show event type and truncated command
+        cmd_short = self.hook.command[-40:] if len(self.hook.command) > 40 else self.hook.command
+        text = f"[{self.hook.event}] {cmd_short}"
         yield Label(text)
 
 
@@ -314,6 +330,8 @@ class SynthiaDashboard(App):
                 self._show_agents_section()
             elif section == Section.PLUGINS:
                 self._show_plugins_section()
+            elif section == Section.HOOKS:
+                self._show_hooks_section()
             else:
                 self._set_status(f"{section.value.title()} | Coming soon")
 
@@ -441,6 +459,28 @@ class SynthiaDashboard(App):
                 new_state = not plugin.enabled
                 set_plugin_enabled(plugin.name, new_state)
                 self._load_plugins()  # Refresh
+        except Exception:
+            pass
+
+    def _show_hooks_section(self) -> None:
+        """Show hooks section."""
+        self._load_hooks()
+
+    @work(thread=True)
+    def _load_hooks(self) -> None:
+        """Load all hooks."""
+        hooks = list_hooks()
+        self.call_from_thread(self._display_hooks, hooks)
+
+    def _display_hooks(self, hooks: list[HookConfig]) -> None:
+        """Display hooks in list."""
+        self._hooks = hooks
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            list_view.clear()
+            for hook in hooks:
+                list_view.append(HookListItem(hook))
+            self._set_status(f"Hooks | {len(hooks)} configured")
         except Exception:
             pass
 
