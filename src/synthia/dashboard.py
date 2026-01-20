@@ -250,8 +250,11 @@ class SynthiaDashboard(App):
         title = self.query_one("#content-title", Label)
         title.update(section.value.title())
 
-        content = self.query_one("#content-area", Static)
-        content.update(f"[{section.value.upper()}] Content will appear here")
+        if section == Section.MEMORY:
+            self._show_memory_section()
+        else:
+            content = self.query_one("#content-area", Static)
+            content.update(f"[{section.value.upper()}] Content will appear here")
 
         self._set_status(f"Viewing {section.value.title()}")
 
@@ -259,6 +262,68 @@ class SynthiaDashboard(App):
         """Update status bar."""
         status = self.query_one("#status-bar", Static)
         status.update(f"{text} | [1-6] Section | [r] Refresh | [q] Quit")
+
+    def _show_memory_section(self) -> None:
+        """Show the memory section content."""
+        content = self.query_one("#content-area", Static)
+        # Replace static with memory content widget
+        content.update("")
+        self._load_memory_all()
+
+    @work(thread=True)
+    def _load_memory_all(self) -> None:
+        """Load all memory entries."""
+        mem = get_memory_system()
+        all_entries = []
+
+        for cat, filename in MEMORY_CATEGORIES.items():
+            filepath = mem.memory_dir / filename
+            if filepath.exists():
+                with open(filepath, "r") as f:
+                    for i, line in enumerate(f):
+                        line = line.strip()
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                entry = MemoryEntry.from_dict(cat, data)
+                                all_entries.append((entry, i))
+                            except json.JSONDecodeError:
+                                pass
+
+        self.call_from_thread(self._display_memory_results, all_entries, "All Entries")
+
+    @work(thread=True)
+    def _load_memory_category(self, category: str) -> None:
+        """Load specific memory category."""
+        mem = get_memory_system()
+        filepath = mem.memory_dir / MEMORY_CATEGORIES.get(category, "")
+
+        entries = []
+        if filepath.exists():
+            with open(filepath, "r") as f:
+                for i, line in enumerate(f):
+                    line = line.strip()
+                    if line:
+                        try:
+                            data = json.loads(line)
+                            entry = MemoryEntry.from_dict(category, data)
+                            entries.append((entry, i))
+                        except json.JSONDecodeError:
+                            pass
+
+        self.call_from_thread(self._display_memory_results, entries, f"{category.title()}")
+
+    def _display_memory_results(self, entries: list[tuple[MemoryEntry, int]], title: str) -> None:
+        """Display memory entries in the list."""
+        self._memory_entries = entries
+        try:
+            list_view = self.query_one("#memory-list", ListView)
+            list_view.clear()
+            for entry, line_num in entries:
+                list_view.append(MemoryListItem(entry, line_num))
+            self._set_status(f"{title} | {len(entries)} entries")
+        except Exception:
+            pass
 
 
 def main():
