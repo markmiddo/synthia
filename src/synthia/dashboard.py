@@ -35,6 +35,9 @@ from synthia.config_manager import (
     load_agent,
     save_agent,
     delete_agent,
+    PluginInfo,
+    list_plugins,
+    set_plugin_enabled,
 )
 
 
@@ -117,6 +120,19 @@ class AgentListItem(ListItem):
 
     def compose(self) -> ComposeResult:
         text = f"[{self.agent.model.upper()}] {self.agent.name}"
+        yield Label(text)
+
+
+class PluginListItem(ListItem):
+    """List item for plugin entries."""
+
+    def __init__(self, plugin: PluginInfo):
+        super().__init__()
+        self.plugin = plugin
+
+    def compose(self) -> ComposeResult:
+        status = "✓" if self.plugin.enabled else "✗"
+        text = f"[{status}] {self.plugin.display_name} ({self.plugin.version})"
         yield Label(text)
 
 
@@ -213,6 +229,7 @@ class SynthiaDashboard(App):
         Binding("5", "goto_section('hooks')", "Hooks", show=False),
         Binding("6", "goto_section('settings')", "Settings", show=False),
         Binding("r", "refresh", "Refresh"),
+        Binding("space", "toggle_plugin", "Toggle", show=False),
     ]
 
     TITLE = "Synthia Dashboard"
@@ -273,6 +290,8 @@ class SynthiaDashboard(App):
             self._show_memory_section()
         elif section == Section.AGENTS:
             self._show_agents_section()
+        elif section == Section.PLUGINS:
+            self._show_plugins_section()
         else:
             content = self.query_one("#content-area", Static)
             content.update(f"[{section.value.upper()}] Content will appear here")
@@ -365,6 +384,42 @@ class SynthiaDashboard(App):
             for agent in agents:
                 list_view.append(AgentListItem(agent))
             self._set_status(f"Agents | {len(agents)} found")
+        except Exception:
+            pass
+
+    def _show_plugins_section(self) -> None:
+        """Show plugins section."""
+        self._load_plugins()
+
+    @work(thread=True)
+    def _load_plugins(self) -> None:
+        """Load all plugins."""
+        plugins = list_plugins()
+        self.call_from_thread(self._display_plugins, plugins)
+
+    def _display_plugins(self, plugins: list[PluginInfo]) -> None:
+        """Display plugins in list."""
+        self._plugins = plugins
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            list_view.clear()
+            for plugin in plugins:
+                list_view.append(PluginListItem(plugin))
+            self._set_status(f"Plugins | {len(plugins)} found | [Space] Toggle")
+        except Exception:
+            pass
+
+    def action_toggle_plugin(self) -> None:
+        """Toggle selected plugin enabled/disabled."""
+        if self.current_section != Section.PLUGINS:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            if list_view.highlighted_child and isinstance(list_view.highlighted_child, PluginListItem):
+                plugin = list_view.highlighted_child.plugin
+                new_state = not plugin.enabled
+                set_plugin_enabled(plugin.name, new_state)
+                self._load_plugins()  # Refresh
         except Exception:
             pass
 
