@@ -157,6 +157,71 @@ fn is_wayland_env() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
+fn load_tasks_for_session(session_id: &str) -> Vec<WorktreeTask> {
+    let tasks_dir = get_claude_dir().join("tasks").join(session_id);
+
+    if !tasks_dir.exists() {
+        return Vec::new();
+    }
+
+    let mut tasks = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(&tasks_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(task) = serde_json::from_str::<WorktreeTask>(&content) {
+                        tasks.push(task);
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by ID numerically
+    tasks.sort_by(|a, b| {
+        a.id.parse::<u32>().unwrap_or(0).cmp(&b.id.parse::<u32>().unwrap_or(0))
+    });
+
+    tasks
+}
+
+fn find_session_for_path(project_path: &str) -> Option<String> {
+    let projects_dir = get_claude_dir().join("projects");
+
+    if !projects_dir.exists() {
+        return None;
+    }
+
+    let normalized_path = PathBuf::from(project_path).canonicalize().ok()?;
+
+    for entry in fs::read_dir(&projects_dir).ok()?.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+
+        let index_file = entry.path().join("sessions-index.json");
+        if !index_file.exists() {
+            continue;
+        }
+
+        if let Ok(content) = fs::read_to_string(&index_file) {
+            if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
+                for session in index.entries {
+                    if let Ok(entry_path) = PathBuf::from(&session.project_path).canonicalize() {
+                        if entry_path == normalized_path {
+                            return Some(session.session_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn acquire_lock() -> bool {
     let lock_file = get_lock_file();
 
