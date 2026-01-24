@@ -58,13 +58,13 @@ from synthia.worktrees import WorktreeInfo, WorktreeTask, scan_worktrees
 
 class Section(Enum):
     """Dashboard sections."""
+    WORKTREES = "worktrees"
     MEMORY = "memory"
     AGENTS = "agents"
     COMMANDS = "commands"
     PLUGINS = "plugins"
     HOOKS = "hooks"
     SETTINGS = "settings"
-    WORKTREES = "worktrees"
 
 
 class SidebarItem(ListItem):
@@ -360,14 +360,14 @@ class SynthiaDashboard(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("1", "goto_section('memory')", "Memory", show=False),
-        Binding("2", "goto_section('agents')", "Agents", show=False),
-        Binding("3", "goto_section('commands')", "Commands", show=False),
-        Binding("4", "goto_section('plugins')", "Plugins", show=False),
-        Binding("5", "goto_section('hooks')", "Hooks", show=False),
-        Binding("6", "goto_section('settings')", "Settings", show=False),
-        Binding("7", "goto_section('worktrees')", "Worktrees", show=False),
+        Binding("1", "goto_section('worktrees')", "Worktrees", show=False),
         Binding("w", "goto_section('worktrees')", "Worktrees", show=False),
+        Binding("2", "goto_section('memory')", "Memory", show=False),
+        Binding("3", "goto_section('agents')", "Agents", show=False),
+        Binding("4", "goto_section('commands')", "Commands", show=False),
+        Binding("5", "goto_section('plugins')", "Plugins", show=False),
+        Binding("6", "goto_section('hooks')", "Hooks", show=False),
+        Binding("7", "goto_section('settings')", "Settings", show=False),
         Binding("r", "refresh", "Refresh"),
         Binding("space", "toggle_plugin", "Toggle", show=False),
         Binding("e", "edit_selected", "Edit"),
@@ -383,7 +383,7 @@ class SynthiaDashboard(App):
 
     def __init__(self):
         super().__init__()
-        self.current_section: Section = Section.MEMORY
+        self.current_section: Section = Section.WORKTREES
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -391,13 +391,13 @@ class SynthiaDashboard(App):
             with Vertical(id="sidebar"):
                 yield Label("Sections", id="sidebar-title")
                 yield ListView(
-                    SidebarItem(Section.MEMORY, 1),
-                    SidebarItem(Section.AGENTS, 2),
-                    SidebarItem(Section.COMMANDS, 3),
-                    SidebarItem(Section.PLUGINS, 4),
-                    SidebarItem(Section.HOOKS, 5),
-                    SidebarItem(Section.SETTINGS, 6),
-                    SidebarItem(Section.WORKTREES, 7),
+                    SidebarItem(Section.WORKTREES, 1),
+                    SidebarItem(Section.MEMORY, 2),
+                    SidebarItem(Section.AGENTS, 3),
+                    SidebarItem(Section.COMMANDS, 4),
+                    SidebarItem(Section.PLUGINS, 5),
+                    SidebarItem(Section.HOOKS, 6),
+                    SidebarItem(Section.SETTINGS, 7),
                     id="sidebar-list",
                 )
             with Vertical(id="main-content"):
@@ -416,8 +416,8 @@ class SynthiaDashboard(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        """Initialize with Memory section."""
-        self._switch_section(Section.MEMORY)
+        """Initialize with Worktrees section."""
+        self._switch_section(Section.WORKTREES)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle sidebar selection."""
