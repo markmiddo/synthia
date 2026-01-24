@@ -249,13 +249,11 @@ class WorktreeListItem(ListItem):
 class SynthiaDashboard(App):
     """Unified TUI Dashboard for Claude Code configuration."""
 
-    CSS = """
-    * {
-        background: initial;
-    }
+    ENABLE_COMMAND_PALETTE = False
 
+    CSS = """
     Screen {
-        background: initial;
+        background: ansi_default;
     }
 
     #sidebar {
@@ -263,6 +261,7 @@ class SynthiaDashboard(App):
         height: 100%;
         border: solid $primary;
         padding: 1;
+        background: ansi_default;
     }
 
     #sidebar-title {
@@ -273,11 +272,12 @@ class SynthiaDashboard(App):
 
     #sidebar ListView {
         height: 1fr;
-        background: initial;
+        background: ansi_default;
     }
 
     #sidebar ListItem {
         padding: 0 1;
+        background: ansi_default;
     }
 
     #sidebar ListItem:hover {
@@ -288,6 +288,7 @@ class SynthiaDashboard(App):
         width: 1fr;
         height: 100%;
         padding: 1;
+        background: ansi_default;
     }
 
     #content-title {
@@ -300,13 +301,14 @@ class SynthiaDashboard(App):
         height: 1fr;
         border: solid $secondary;
         padding: 1;
+        background: ansi_default;
     }
 
     #content-list {
         height: 1fr;
         border: solid $secondary;
         display: none;
-        background: initial;
+        background: ansi_default;
     }
 
     #content-list.visible {
@@ -317,6 +319,7 @@ class SynthiaDashboard(App):
         height: 1;
         color: $text;
         padding: 0 1;
+        background: ansi_default;
     }
 
     .toolbar {
@@ -357,27 +360,27 @@ class SynthiaDashboard(App):
         border: solid $accent;
         margin-top: 1;
         padding: 1;
-        background: initial;
+        background: ansi_default;
     }
 
     Header {
-        background: initial;
+        background: ansi_default;
     }
 
     Footer {
-        background: initial;
+        background: ansi_default;
     }
 
     Static {
-        background: initial;
+        background: ansi_default;
     }
 
     ListView {
-        background: initial;
+        background: ansi_default;
     }
 
     ListItem {
-        background: initial;
+        background: ansi_default;
     }
 
     ListItem.-highlight {
@@ -1049,13 +1052,13 @@ class SynthiaDashboard(App):
             if index is not None and 0 <= index < len(self._worktrees):
                 wt = self._worktrees[index]
                 import subprocess
-                # Open new pane below and resume claude session
+                # Open new pane to the left and start claude session
                 subprocess.Popen([
                     'flatpak', 'run', 'org.wezfurlong.wezterm', 'cli',
-                    'split-pane', '--bottom', '--percent', '60', '--',
-                    'bash', '-l', '-c', f'cd {wt.path} && claude --continue'
+                    'split-pane', '--left', '--percent', '50', '--',
+                    'bash', '-l', '-c', f'cd {wt.path} && claude-us'
                 ])
-                self._set_status(f"Resuming session in {Path(wt.path).name}...")
+                self._set_status(f"Opening Claude in {Path(wt.path).name}...")
         except Exception:
             pass
 
