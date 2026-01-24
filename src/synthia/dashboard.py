@@ -250,8 +250,12 @@ class SynthiaDashboard(App):
     """Unified TUI Dashboard for Claude Code configuration."""
 
     CSS = """
+    * {
+        background: initial;
+    }
+
     Screen {
-        background: transparent;
+        background: initial;
     }
 
     #sidebar {
@@ -259,7 +263,6 @@ class SynthiaDashboard(App):
         height: 100%;
         border: solid $primary;
         padding: 1;
-        background: transparent;
     }
 
     #sidebar-title {
@@ -270,6 +273,7 @@ class SynthiaDashboard(App):
 
     #sidebar ListView {
         height: 1fr;
+        background: initial;
     }
 
     #sidebar ListItem {
@@ -277,14 +281,13 @@ class SynthiaDashboard(App):
     }
 
     #sidebar ListItem:hover {
-        background: $primary-darken-2;
+        background: $primary 30%;
     }
 
     #main-content {
         width: 1fr;
         height: 100%;
         padding: 1;
-        background: transparent;
     }
 
     #content-title {
@@ -303,7 +306,7 @@ class SynthiaDashboard(App):
         height: 1fr;
         border: solid $secondary;
         display: none;
-        background: transparent;
+        background: initial;
     }
 
     #content-list.visible {
@@ -312,7 +315,6 @@ class SynthiaDashboard(App):
 
     #status-bar {
         height: 1;
-        background: transparent;
         color: $text;
         padding: 0 1;
     }
@@ -355,6 +357,31 @@ class SynthiaDashboard(App):
         border: solid $accent;
         margin-top: 1;
         padding: 1;
+        background: initial;
+    }
+
+    Header {
+        background: initial;
+    }
+
+    Footer {
+        background: initial;
+    }
+
+    Static {
+        background: initial;
+    }
+
+    ListView {
+        background: initial;
+    }
+
+    ListItem {
+        background: initial;
+    }
+
+    ListItem.-highlight {
+        background: $primary 30%;
     }
     """
 
