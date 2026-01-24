@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 
 from textual import work
@@ -52,6 +53,7 @@ from synthia.dashboard_screens import (
     EditMemoryScreen,
     HelpScreen,
 )
+from synthia.worktrees import WorktreeInfo, WorktreeTask, scan_worktrees
 
 
 class Section(Enum):
@@ -62,6 +64,7 @@ class Section(Enum):
     PLUGINS = "plugins"
     HOOKS = "hooks"
     SETTINGS = "settings"
+    WORKTREES = "worktrees"
 
 
 class SidebarItem(ListItem):
@@ -201,6 +204,48 @@ class SettingListItem(ListItem):
         yield Label(text)
 
 
+class WorktreeListItem(ListItem):
+    """List item for worktree entries."""
+
+    def __init__(self, worktree: WorktreeInfo, expanded: bool = False):
+        super().__init__()
+        self.worktree = worktree
+        self.expanded = expanded
+
+    def compose(self) -> ComposeResult:
+        # Get progress
+        completed, total = self.worktree.progress
+        if total > 0:
+            # Create progress bar: ████░░░░ 4/5
+            filled = int((completed / total) * 8)
+            progress_bar = "█" * filled + "░" * (8 - filled)
+            progress_str = f"{progress_bar} {completed}/{total}"
+        else:
+            progress_str = "No tasks"
+
+        # Get issue display
+        issue_str = f"#{self.worktree.issue_number}" if self.worktree.issue_number else ""
+
+        # Get short path (just the worktree folder name)
+        short_path = Path(self.worktree.path).name
+
+        if self.expanded:
+            # Full details
+            lines = [f"📁 {short_path}"]
+            lines.append(f"   Branch: {self.worktree.branch}")
+            if self.worktree.issue_number:
+                lines.append(f"   Issue: #{self.worktree.issue_number}")
+            if self.worktree.session_summary:
+                lines.append(f"   Session: \"{self.worktree.session_summary[:40]}...\"")
+            lines.append(f"   Tasks: {progress_str}")
+            text = "\n".join(lines)
+        else:
+            # Collapsed: 📁 issue-295  ████░░░░ 4/5  #295
+            text = f"📁 {short_path}  {progress_str}  {issue_str}"
+
+        yield Label(text, markup=False)
+
+
 class SynthiaDashboard(App):
     """Unified TUI Dashboard for Claude Code configuration."""
 
@@ -318,12 +363,17 @@ class SynthiaDashboard(App):
         Binding("4", "goto_section('plugins')", "Plugins", show=False),
         Binding("5", "goto_section('hooks')", "Hooks", show=False),
         Binding("6", "goto_section('settings')", "Settings", show=False),
+        Binding("7", "goto_section('worktrees')", "Worktrees", show=False),
+        Binding("w", "goto_section('worktrees')", "Worktrees", show=False),
         Binding("r", "refresh", "Refresh"),
         Binding("space", "toggle_plugin", "Toggle", show=False),
         Binding("e", "edit_selected", "Edit"),
         Binding("d", "delete_selected", "Delete"),
         Binding("n", "new_item", "New"),
         Binding("?", "show_help", "Help"),
+        Binding("g", "open_github", "GitHub", show=False),
+        Binding("o", "open_terminal", "Terminal", show=False),
+        Binding("c", "resume_session", "Resume", show=False),
     ]
 
     TITLE = "Synthia Dashboard"
@@ -344,6 +394,7 @@ class SynthiaDashboard(App):
                     SidebarItem(Section.PLUGINS, 4),
                     SidebarItem(Section.HOOKS, 5),
                     SidebarItem(Section.SETTINGS, 6),
+                    SidebarItem(Section.WORKTREES, 7),
                     id="sidebar-list",
                 )
             with Vertical(id="main-content"):
@@ -358,7 +409,7 @@ class SynthiaDashboard(App):
                 yield Static("Select a section from the sidebar", id="content-area")
                 yield ListView(id="content-list")
                 yield Static("Select an item to view details", id="detail-panel")
-        yield Static("[1-6] Section | [r] Refresh | [q] Quit", id="status-bar")
+        yield Static("[1-7] Section | [r] Refresh | [q] Quit", id="status-bar")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -401,6 +452,20 @@ class SynthiaDashboard(App):
                 detail.update(f"Topic: {entry.data.get('topic', 'N/A')}\nPattern: {entry.data.get('pattern', 'N/A')}")
             else:
                 detail.update(str(entry.data))
+        elif isinstance(event.item, WorktreeListItem):
+            wt = event.item.worktree
+            lines = [f"Path: {wt.path}", f"Branch: {wt.branch}"]
+            if wt.issue_number:
+                lines.append(f"Issue: #{wt.issue_number}")
+            if wt.session_summary:
+                lines.append(f"Session: {wt.session_summary}")
+            completed, total = wt.progress
+            if total > 0:
+                lines.append(f"\nTasks ({completed}/{total}):")
+                for task in wt.tasks:
+                    status = "✓" if task.status == "completed" else "○" if task.status == "pending" else "▶"
+                    lines.append(f"  {status} {task.content[:50]}")
+            detail.update("\n".join(lines))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses for memory filter."""
@@ -477,13 +542,15 @@ class SynthiaDashboard(App):
                 self._show_hooks_section()
             elif section == Section.SETTINGS:
                 self._show_settings_section()
+            elif section == Section.WORKTREES:
+                self._show_worktrees_section()
 
         self._set_status(f"Viewing {section.value.title()}")
 
     def _set_status(self, text: str) -> None:
         """Update status bar."""
         status = self.query_one("#status-bar", Static)
-        status.update(f"{text} | [1-6] Section | [r] Refresh | [q] Quit")
+        status.update(f"{text} | [1-7] Section | [r] Refresh | [q] Quit")
 
     def _show_memory_section(self) -> None:
         """Show the memory section content."""
@@ -674,6 +741,28 @@ class SynthiaDashboard(App):
         except Exception:
             pass
 
+    def _show_worktrees_section(self) -> None:
+        """Show the worktrees section content."""
+        self._load_worktrees()
+
+    @work(thread=True)
+    def _load_worktrees(self) -> None:
+        """Load all worktrees."""
+        worktrees = scan_worktrees()
+        self.call_from_thread(self._display_worktrees, worktrees)
+
+    def _display_worktrees(self, worktrees: list[WorktreeInfo]) -> None:
+        """Display worktrees in list."""
+        self._worktrees = worktrees
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            list_view.clear()
+            for wt in worktrees:
+                list_view.append(WorktreeListItem(wt))
+            self._set_status(f"Worktrees | {len(worktrees)} found | [c] Resume [g] GitHub [o] Path [d] Delete")
+        except Exception:
+            pass
+
     def action_edit_selected(self) -> None:
         """Edit the selected item."""
         if self.current_section == Section.MEMORY:
@@ -785,6 +874,8 @@ class SynthiaDashboard(App):
             self._delete_selected_agent()
         elif self.current_section == Section.COMMANDS:
             self._delete_selected_command()
+        elif self.current_section == Section.WORKTREES:
+            self._delete_selected_worktree()
 
     def _delete_selected_agent(self) -> None:
         """Delete selected agent."""
@@ -879,6 +970,85 @@ class SynthiaDashboard(App):
     def action_show_help(self) -> None:
         """Show help overlay."""
         self.push_screen(HelpScreen())
+
+    def action_open_github(self) -> None:
+        """Open GitHub issue for selected worktree."""
+        if self.current_section != Section.WORKTREES:
+            return
+        if not hasattr(self, '_worktrees') or not self._worktrees:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._worktrees):
+                wt = self._worktrees[index]
+                if wt.issue_number:
+                    import subprocess
+                    subprocess.Popen(["gh", "issue", "view", str(wt.issue_number), "--web"])
+                    self._set_status(f"Opening issue #{wt.issue_number} in browser...")
+                else:
+                    self._set_status("No issue linked to this worktree")
+        except Exception:
+            pass
+
+    def action_open_terminal(self) -> None:
+        """Open terminal at worktree path."""
+        if self.current_section != Section.WORKTREES:
+            return
+        if not hasattr(self, '_worktrees') or not self._worktrees:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._worktrees):
+                wt = self._worktrees[index]
+                # Show path in status - user can cd to it
+                self._set_status(f"Path: {wt.path}")
+        except Exception:
+            pass
+
+    def action_resume_session(self) -> None:
+        """Resume Claude session in selected worktree."""
+        if self.current_section != Section.WORKTREES:
+            return
+        if not hasattr(self, '_worktrees') or not self._worktrees:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._worktrees):
+                wt = self._worktrees[index]
+                # Show the command to run
+                self._set_status(f"Run: cd {wt.path} && claude --continue")
+        except Exception:
+            pass
+
+    def _delete_selected_worktree(self) -> None:
+        """Delete selected worktree."""
+        if not hasattr(self, '_worktrees') or not self._worktrees:
+            return
+        try:
+            list_view = self.query_one("#content-list", ListView)
+            index = list_view.index
+            if index is not None and 0 <= index < len(self._worktrees):
+                wt = self._worktrees[index]
+                short_name = Path(wt.path).name
+                self.push_screen(
+                    ConfirmDeleteScreen(f"worktree '{short_name}'"),
+                    lambda confirmed: self._do_delete_worktree(wt.path) if confirmed else None
+                )
+        except Exception:
+            pass
+
+    def _do_delete_worktree(self, path: str) -> None:
+        """Actually delete the worktree."""
+        import subprocess
+        try:
+            subprocess.run(["git", "worktree", "remove", path], check=True)
+            self._set_status("Worktree deleted")
+            self._load_worktrees()  # Refresh
+        except subprocess.CalledProcessError:
+            self._set_status("Error: Could not delete worktree")
 
 
 def main():
