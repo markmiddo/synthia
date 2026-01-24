@@ -13,9 +13,11 @@
     "windows": [
       {
         "label": "main",
-        "title": "Synthia: AI Powered Voice Assistant",
-        "width": 420,
-        "height": 740,
+        "title": "Synthia",
+        "width": 900,
+        "height": 600,
+        "minWidth": 700,
+        "minHeight": 400,
         "resizable": true,
         "visible": true,
         "center": true
