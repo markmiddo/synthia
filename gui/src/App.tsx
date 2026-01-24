@@ -36,6 +36,25 @@ interface InboxItem {
   opened: boolean;
 }
 
+interface WorktreeTask {
+  id: string;
+  subject: string;
+  status: "pending" | "in_progress" | "completed";
+  active_form?: string;
+  blocked_by: string[];
+}
+
+interface WorktreeInfo {
+  path: string;
+  branch: string;
+  issue_number?: number;
+  session_id?: string;
+  tasks: WorktreeTask[];
+}
+
+type Section = "worktrees" | "voice" | "memory" | "config";
+type VoiceView = "main" | "history" | "words";
+
 function App() {
   const [status, setStatus] = useState<Status>("stopped");
   const [remoteMode, setRemoteMode] = useState(false);
@@ -45,7 +64,10 @@ function App() {
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [currentView, setCurrentView] = useState<"main" | "history" | "words" | "clipboard" | "inbox">("main");
+  const [currentSection, setCurrentSection] = useState<Section>("worktrees");
+  const [voiceView, setVoiceView] = useState<VoiceView>("main");
+  const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
+  const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [wordReplacements, setWordReplacements] = useState<WordReplacement[]>([]);
   const [clipboardHistory, setClipboardHistory] = useState<ClipboardEntry[]>([]);
@@ -87,15 +109,15 @@ function App() {
     loadWordReplacements();
     loadClipboardHistory();
     loadInboxItems();
+    loadWorktrees();
     const interval = setInterval(() => {
       checkStatus();
       checkRemoteStatus();
-      if (currentView === "history") loadHistory();
-      if (currentView === "clipboard") loadClipboardHistory();
-      if (currentView === "inbox") loadInboxItems();
+      if (currentSection === "worktrees") loadWorktrees();
+      if (currentSection === "voice" && voiceView === "history") loadHistory();
     }, 2000);
     return () => clearInterval(interval);
-  }, [currentView]);
+  }, [currentSection, voiceView]);
 
   async function loadWordReplacements() {
     try {
@@ -130,6 +152,15 @@ function App() {
     try {
       const result = await invoke<InboxItem[]>("get_inbox_items");
       setInboxItems(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function loadWorktrees() {
+    try {
+      const result = await invoke<WorktreeInfo[]>("get_worktrees");
+      setWorktrees(result);
     } catch (e) {
       // Ignore errors
     }
@@ -323,6 +354,17 @@ function App() {
     try {
       await invoke("clear_history");
       setHistory([]);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleResumeSession(worktree: WorktreeInfo) {
+    try {
+      await invoke("resume_session", {
+        path: worktree.path,
+        sessionId: worktree.session_id,
+      });
     } catch (e) {
       setError(String(e));
     }
