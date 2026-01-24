@@ -76,6 +76,44 @@ struct InboxItem {
     opened: bool,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct WorktreeTask {
+    id: String,
+    subject: String,
+    status: String,
+    #[serde(rename = "activeForm")]
+    active_form: Option<String>,
+    #[serde(rename = "blockedBy")]
+    blocked_by: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct WorktreeInfo {
+    path: String,
+    branch: String,
+    issue_number: Option<u32>,
+    session_id: Option<String>,
+    tasks: Vec<WorktreeTask>,
+}
+
+#[derive(Deserialize, Debug)]
+struct WorktreesConfig {
+    repos: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Debug)]
+struct SessionEntry {
+    #[serde(rename = "sessionId")]
+    session_id: String,
+    #[serde(rename = "projectPath")]
+    project_path: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct SessionsIndex {
+    entries: Vec<SessionEntry>,
+}
+
 fn get_lock_file() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
         .unwrap_or_else(|_| "/tmp".to_string());
@@ -103,6 +141,16 @@ fn get_clipboard_file() -> PathBuf {
 fn get_inbox_file() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".local/share/synthia/inbox/inbox.json")
+}
+
+fn get_worktrees_config_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/markmiddo".to_string());
+    PathBuf::from(home).join(".config/synthia/worktrees.yaml")
+}
+
+fn get_claude_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/markmiddo".to_string());
+    PathBuf::from(home).join(".claude")
 }
 
 fn is_wayland_env() -> bool {
