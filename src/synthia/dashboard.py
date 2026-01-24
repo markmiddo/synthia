@@ -1052,11 +1052,11 @@ class SynthiaDashboard(App):
             if index is not None and 0 <= index < len(self._worktrees):
                 wt = self._worktrees[index]
                 import subprocess
-                # Open new pane to the left and start claude session
+                # Open new pane below (synthia stays on top) and start claude session
                 subprocess.Popen([
                     'flatpak', 'run', 'org.wezfurlong.wezterm', 'cli',
-                    'split-pane', '--left', '--percent', '50', '--',
-                    'bash', '-l', '-c', f'cd {wt.path} && claude-us'
+                    'split-pane', '--bottom', '--percent', '50', '--',
+                    'bash', '-c', f'cd {wt.path} && /home/markmiddo/.local/bin/claude --dangerously-skip-permissions'
                 ])
                 self._set_status(f"Opening Claude in {Path(wt.path).name}...")
         except Exception:
