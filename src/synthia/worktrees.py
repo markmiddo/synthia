@@ -1,6 +1,7 @@
 """Worktree scanner for Synthia Dashboard.
 
 Scans git worktrees and their associated Claude Code sessions.
+Supports scanning multiple configured repositories.
 """
 
 from __future__ import annotations
@@ -11,6 +12,11 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+import yaml
+
+# Config file location
+CONFIG_PATH = Path.home() / ".config" / "synthia" / "worktrees.yaml"
 
 
 @dataclass
@@ -220,29 +226,121 @@ def _load_tasks_for_session(session_id: str) -> list[WorktreeTask]:
     return tasks
 
 
-def scan_worktrees() -> list[WorktreeInfo]:
-    """Scan for git worktrees and their associated Claude Code sessions.
+def load_config() -> dict:
+    """Load worktree scanner configuration.
 
-    This function:
-    1. Runs `git worktree list --porcelain` to get all worktrees
-    2. For each worktree:
-       - Extracts the branch name
-       - Extracts issue number from branch name using regex patterns
-       - Finds matching Claude Code session in sessions-index.json
-       - Loads tasks from todo files
+    Config file: ~/.config/synthia/worktrees.yaml
+
+    Example config:
+        repos:
+          - /home/user/dev/project1
+          - /home/user/dev/project2
 
     Returns:
-        List of WorktreeInfo objects with session and task data
+        Config dict with 'repos' list, or empty dict if no config
+    """
+    if not CONFIG_PATH.exists():
+        return {}
+
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except (yaml.YAMLError, IOError):
+        return {}
+
+
+def save_config(config: dict) -> bool:
+    """Save worktree scanner configuration.
+
+    Args:
+        config: Config dict to save
+
+    Returns:
+        True if saved successfully, False otherwise
+    """
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, default_flow_style=False)
+        return True
+    except (IOError, OSError):
+        return False
+
+
+def get_configured_repos() -> list[str]:
+    """Get list of configured repository paths.
+
+    Returns:
+        List of repo paths from config, or empty list
+    """
+    config = load_config()
+    repos = config.get("repos", [])
+    return [str(r) for r in repos if r]
+
+
+def add_repo(repo_path: str) -> bool:
+    """Add a repository to the config.
+
+    Args:
+        repo_path: Path to the git repository
+
+    Returns:
+        True if added successfully
+    """
+    config = load_config()
+    repos = config.get("repos", [])
+
+    # Normalize path
+    normalized = str(Path(repo_path).resolve())
+
+    if normalized not in repos:
+        repos.append(normalized)
+        config["repos"] = repos
+        return save_config(config)
+
+    return True  # Already exists
+
+
+def remove_repo(repo_path: str) -> bool:
+    """Remove a repository from the config.
+
+    Args:
+        repo_path: Path to remove
+
+    Returns:
+        True if removed successfully
+    """
+    config = load_config()
+    repos = config.get("repos", [])
+
+    normalized = str(Path(repo_path).resolve())
+
+    if normalized in repos:
+        repos.remove(normalized)
+        config["repos"] = repos
+        return save_config(config)
+
+    return True  # Didn't exist anyway
+
+
+def _scan_repo_worktrees(repo_path: str) -> list[WorktreeInfo]:
+    """Scan worktrees for a specific repository.
+
+    Args:
+        repo_path: Path to the git repository
+
+    Returns:
+        List of WorktreeInfo objects for that repo
     """
     worktrees: list[WorktreeInfo] = []
 
-    # Run git worktree list
     try:
         result = subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
             capture_output=True,
             text=True,
             timeout=10,
+            cwd=repo_path,
         )
 
         if result.returncode != 0:
@@ -253,7 +351,6 @@ def scan_worktrees() -> list[WorktreeInfo]:
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
         return []
 
-    # Process each worktree
     for wt in parsed:
         path = wt["path"]
         branch = wt["branch"]
@@ -264,19 +361,55 @@ def scan_worktrees() -> list[WorktreeInfo]:
             issue_number=extract_issue_number(branch),
         )
 
-        # Find associated Claude Code session
         session = _find_session_for_path(path)
         if session:
             info.session_id = session.get("sessionId")
             info.session_summary = session.get("summary")
 
-            # Load tasks for this session
             if info.session_id:
                 info.tasks = _load_tasks_for_session(info.session_id)
 
         worktrees.append(info)
 
     return worktrees
+
+
+def scan_worktrees() -> list[WorktreeInfo]:
+    """Scan for git worktrees and their associated Claude Code sessions.
+
+    If repos are configured in ~/.config/synthia/worktrees.yaml, scans all
+    configured repos. Otherwise falls back to scanning the current directory.
+
+    This function:
+    1. Loads configured repos (or uses current directory)
+    2. For each repo, runs `git worktree list --porcelain`
+    3. For each worktree:
+       - Extracts the branch name
+       - Extracts issue number from branch name using regex patterns
+       - Finds matching Claude Code session in sessions-index.json
+       - Loads tasks from todo files
+
+    Returns:
+        List of WorktreeInfo objects with session and task data
+    """
+    configured_repos = get_configured_repos()
+
+    # If repos configured, scan all of them
+    if configured_repos:
+        all_worktrees: list[WorktreeInfo] = []
+        seen_paths: set[str] = set()
+
+        for repo in configured_repos:
+            for wt in _scan_repo_worktrees(repo):
+                # Avoid duplicates
+                if wt.path not in seen_paths:
+                    all_worktrees.append(wt)
+                    seen_paths.add(wt.path)
+
+        return all_worktrees
+
+    # Fallback: scan current directory
+    return _scan_repo_worktrees(".")
 
 
 def get_worktree_by_path(path: str) -> Optional[WorktreeInfo]:
