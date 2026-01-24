@@ -251,7 +251,7 @@ class SynthiaDashboard(App):
 
     CSS = """
     Screen {
-        background: $surface;
+        background: transparent;
     }
 
     #sidebar {
@@ -259,6 +259,7 @@ class SynthiaDashboard(App):
         height: 100%;
         border: solid $primary;
         padding: 1;
+        background: transparent;
     }
 
     #sidebar-title {
@@ -283,6 +284,7 @@ class SynthiaDashboard(App):
         width: 1fr;
         height: 100%;
         padding: 1;
+        background: transparent;
     }
 
     #content-title {
@@ -301,6 +303,7 @@ class SynthiaDashboard(App):
         height: 1fr;
         border: solid $secondary;
         display: none;
+        background: transparent;
     }
 
     #content-list.visible {
@@ -309,7 +312,7 @@ class SynthiaDashboard(App):
 
     #status-bar {
         height: 1;
-        background: $primary-darken-2;
+        background: transparent;
         color: $text;
         padding: 0 1;
     }
