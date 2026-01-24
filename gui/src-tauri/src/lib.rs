@@ -222,6 +222,126 @@ fn find_session_for_path(project_path: &str) -> Option<String> {
     None
 }
 
+fn extract_issue_number(branch: &str) -> Option<u32> {
+    use std::str::FromStr;
+
+    let patterns = [
+        r"feature/(\d+)-",
+        r"issue-(\d+)-",
+        r"fix/(\d+)-",
+        r"bugfix/(\d+)-",
+        r"hotfix/(\d+)-",
+        r"(\d+)-",
+    ];
+
+    for pattern in patterns {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            if let Some(caps) = re.captures(branch) {
+                if let Some(m) = caps.get(1) {
+                    if let Ok(num) = u32::from_str(m.as_str()) {
+                        return Some(num);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn get_worktrees() -> Vec<WorktreeInfo> {
+    let config_path = get_worktrees_config_path();
+
+    // Load configured repos
+    let repos: Vec<String> = if let Ok(content) = fs::read_to_string(&config_path) {
+        // Simple YAML parsing for repos list
+        let mut repos = Vec::new();
+        let mut in_repos = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("repos:") {
+                in_repos = true;
+                continue;
+            }
+            if in_repos {
+                if !line.starts_with(' ') && !line.starts_with('\t') && !trimmed.is_empty() {
+                    break;
+                }
+                if trimmed.starts_with('-') {
+                    let path = trimmed.trim_start_matches('-').trim();
+                    if !path.is_empty() {
+                        repos.push(path.to_string());
+                    }
+                }
+            }
+        }
+        repos
+    } else {
+        Vec::new()
+    };
+
+    let mut worktrees = Vec::new();
+
+    for repo in repos {
+        if let Ok(output) = Command::new("git")
+            .args(["worktree", "list", "--porcelain"])
+            .current_dir(&repo)
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut current_path = String::new();
+                let mut current_branch = String::new();
+
+                for line in stdout.lines() {
+                    if line.starts_with("worktree ") {
+                        current_path = line[9..].to_string();
+                    } else if line.starts_with("branch ") {
+                        current_branch = line[7..].to_string();
+                        if current_branch.starts_with("refs/heads/") {
+                            current_branch = current_branch[11..].to_string();
+                        }
+                    } else if line.is_empty() && !current_path.is_empty() {
+                        let session_id = find_session_for_path(&current_path);
+                        let tasks = session_id.as_ref()
+                            .map(|id| load_tasks_for_session(id))
+                            .unwrap_or_default();
+
+                        worktrees.push(WorktreeInfo {
+                            path: current_path.clone(),
+                            branch: current_branch.clone(),
+                            issue_number: extract_issue_number(&current_branch),
+                            session_id,
+                            tasks,
+                        });
+
+                        current_path.clear();
+                        current_branch.clear();
+                    }
+                }
+
+                // Handle last entry
+                if !current_path.is_empty() {
+                    let session_id = find_session_for_path(&current_path);
+                    let tasks = session_id.as_ref()
+                        .map(|id| load_tasks_for_session(id))
+                        .unwrap_or_default();
+
+                    worktrees.push(WorktreeInfo {
+                        path: current_path,
+                        branch: current_branch.clone(),
+                        issue_number: extract_issue_number(&current_branch),
+                        session_id,
+                        tasks,
+                    });
+                }
+            }
+        }
+    }
+
+    worktrees
+}
+
 fn acquire_lock() -> bool {
     let lock_file = get_lock_file();
 
@@ -928,7 +1048,8 @@ pub fn run() {
             get_inbox_items,
             open_inbox_item,
             delete_inbox_item,
-            clear_inbox
+            clear_inbox,
+            get_worktrees
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
