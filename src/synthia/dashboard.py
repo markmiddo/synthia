@@ -319,7 +319,7 @@ class SynthiaDashboard(App):
         height: 1;
         color: $text;
         padding: 0 1;
-        background: ansi_default;
+        background: $surface;
     }
 
     .toolbar {
@@ -368,7 +368,7 @@ class SynthiaDashboard(App):
     }
 
     Footer {
-        background: ansi_default;
+        background: $surface;
     }
 
     Static {
