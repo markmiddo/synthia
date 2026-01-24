@@ -1021,8 +1021,14 @@ class SynthiaDashboard(App):
             index = list_view.index
             if index is not None and 0 <= index < len(self._worktrees):
                 wt = self._worktrees[index]
-                # Show the command to run
-                self._set_status(f"Run: cd {wt.path} && claude --continue")
+                import subprocess
+                # Open new pane to the left and resume claude session
+                subprocess.Popen([
+                    'flatpak', 'run', 'org.wezfurlong.wezterm', 'cli',
+                    'split-pane', '--left', '--percent', '50', '--',
+                    'bash', '-c', f'cd {wt.path} && claude --continue'
+                ])
+                self._set_status(f"Resuming session in {Path(wt.path).name}...")
         except Exception:
             pass
 
