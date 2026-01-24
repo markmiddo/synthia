@@ -861,6 +861,29 @@ fn clear_inbox() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn resume_session(path: String, session_id: Option<String>) -> Result<String, String> {
+    // Build the claude command
+    let mut args = vec!["cli".to_string(), "split-pane".to_string(), "--".to_string()];
+
+    if let Some(sid) = session_id {
+        args.push("claude".to_string());
+        args.push("--resume".to_string());
+        args.push(sid);
+    } else {
+        args.push("claude".to_string());
+    }
+
+    // Use wezterm cli to open a new pane
+    Command::new("wezterm")
+        .args(&args)
+        .current_dir(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to open WezTerm pane: {}", e))?;
+
+    Ok("Session opened in WezTerm".to_string())
+}
+
+#[tauri::command]
 fn resend_to_assistant(text: String) -> Result<String, String> {
     // Use xdotool to type the text into Claude Code terminal
     // First, we'll write to a temp file that the stop hook can check
@@ -1049,7 +1072,8 @@ pub fn run() {
             open_inbox_item,
             delete_inbox_item,
             clear_inbox,
-            get_worktrees
+            get_worktrees,
+            resume_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
