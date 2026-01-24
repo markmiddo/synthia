@@ -17,25 +17,6 @@ interface WordReplacement {
   to: string;
 }
 
-interface ClipboardEntry {
-  id: number;
-  content: string;
-  timestamp: string;
-  hash: string;
-}
-
-interface InboxItem {
-  id: string;
-  type: "file" | "url" | "image";
-  filename: string;
-  path?: string;
-  url?: string;
-  received_at: string;
-  size_bytes?: number;
-  from_user?: string;
-  opened: boolean;
-}
-
 interface WorktreeTask {
   id: string;
   subject: string;
@@ -70,8 +51,7 @@ function App() {
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [wordReplacements, setWordReplacements] = useState<WordReplacement[]>([]);
-  const [clipboardHistory, setClipboardHistory] = useState<ClipboardEntry[]>([]);
-  const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
+  // Note: clipboardHistory and inboxItems removed - features not yet implemented
   const [newWordFrom, setNewWordFrom] = useState("");
   const [newWordTo, setNewWordTo] = useState("");
 
@@ -107,8 +87,6 @@ function App() {
     checkRemoteStatus();
     loadHistory();
     loadWordReplacements();
-    loadClipboardHistory();
-    loadInboxItems();
     loadWorktrees();
     const interval = setInterval(() => {
       checkStatus();
@@ -128,74 +106,12 @@ function App() {
     }
   }
 
-  async function loadClipboardHistory() {
-    try {
-      const result = await invoke<ClipboardEntry[]>("get_clipboard_history");
-      setClipboardHistory(result);
-    } catch (e) {
-      // Ignore errors
-    }
-  }
-
-  async function handleCopyFromHistory(content: string) {
-    try {
-      await invoke("copy_from_clipboard_history", { content });
-      // Show brief feedback by setting copied state
-      setCopiedId(-1); // Use -1 to indicate clipboard copy
-      setTimeout(() => setCopiedId(null), 1500);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function loadInboxItems() {
-    try {
-      const result = await invoke<InboxItem[]>("get_inbox_items");
-      setInboxItems(result);
-    } catch (e) {
-      // Ignore errors
-    }
-  }
-
   async function loadWorktrees() {
     try {
       const result = await invoke<WorktreeInfo[]>("get_worktrees");
       setWorktrees(result);
     } catch (e) {
       // Ignore errors
-    }
-  }
-
-  async function handleOpenInboxItem(item: InboxItem) {
-    try {
-      await invoke("open_inbox_item", {
-        id: item.id,
-        itemType: item.type,
-        path: item.path,
-        url: item.url,
-      });
-      // Reload to reflect opened status
-      loadInboxItems();
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleDeleteInboxItem(id: string) {
-    try {
-      await invoke("delete_inbox_item", { id });
-      setInboxItems(inboxItems.filter((i) => i.id !== id));
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleClearInbox() {
-    try {
-      await invoke("clear_inbox");
-      setInboxItems([]);
-    } catch (e) {
-      setError(String(e));
     }
   }
 
@@ -382,260 +298,277 @@ function App() {
     thinking: "#eab308",
   };
 
-  // Clipboard History View
-  if (currentView === "clipboard") {
+  // === RENDER FUNCTIONS ===
+
+  function renderSidebar() {
     return (
-      <main className="container">
-        <div className="header history-view-header">
-          <button className="back-btn" onClick={() => setCurrentView("main")}>
-            ← Back
+      <div className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-logo">SYNTHIA</div>
+        </div>
+        <nav className="sidebar-nav">
+          <button
+            className={`nav-item ${currentSection === "worktrees" ? "active" : ""}`}
+            onClick={() => setCurrentSection("worktrees")}
+          >
+            <span className="nav-item-icon">&#128193;</span>
+            Worktrees
           </button>
-          <div className="logo-text-small">CLIPBOARD</div>
-        </div>
-
-        <div className="clipboard-view-content">
-          <p className="clipboard-description">
-            Recent clipboard items. Click to copy back to clipboard.
-          </p>
-
-          <div className="clipboard-list">
-            {clipboardHistory.length === 0 ? (
-              <div className="clipboard-empty-state">
-                <p>No clipboard history yet</p>
-                <p className="empty-hint">Copy something to see it here</p>
-              </div>
-            ) : (
-              clipboardHistory.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="clipboard-item"
-                  onClick={() => handleCopyFromHistory(entry.content)}
-                >
-                  <div className="clipboard-content">
-                    {entry.content.length > 100
-                      ? entry.content.substring(0, 100) + "..."
-                      : entry.content}
-                  </div>
-                  <div className="clipboard-meta">
-                    <span className="clipboard-time">{formatTime(entry.timestamp)}</span>
-                    <span className="clipboard-copy-hint">Click to copy</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {error && <div className="error">{error}</div>}
-      </main>
+          <button
+            className={`nav-item ${currentSection === "voice" ? "active" : ""}`}
+            onClick={() => { setCurrentSection("voice"); setVoiceView("main"); }}
+          >
+            <span className="nav-item-icon">&#127908;</span>
+            Voice
+          </button>
+          <button
+            className={`nav-item ${currentSection === "memory" ? "active" : ""}`}
+            onClick={() => setCurrentSection("memory")}
+          >
+            <span className="nav-item-icon">&#128218;</span>
+            Memory
+          </button>
+          <button
+            className={`nav-item ${currentSection === "config" ? "active" : ""}`}
+            onClick={() => setCurrentSection("config")}
+          >
+            <span className="nav-item-icon">&#9881;</span>
+            Config
+          </button>
+        </nav>
+      </div>
     );
   }
 
-  // Phone Inbox View
-  if (currentView === "inbox") {
+  function renderWorktreesSection() {
+    function getProgressInfo(tasks: WorktreeTask[]) {
+      const completed = tasks.filter(t => t.status === "completed").length;
+      const inProgress = tasks.filter(t => t.status === "in_progress").length;
+      const total = tasks.length;
+
+      if (total === 0) return { text: "No tasks", percent: 0, status: "none" as const };
+      if (completed === total) return { text: `${completed}/${total}`, percent: 100, status: "completed" as const };
+      if (inProgress > 0 || completed > 0) return { text: `${completed}/${total}`, percent: (completed / total) * 100, status: "in-progress" as const };
+      return { text: `0/${total}`, percent: 0, status: "none" as const };
+    }
+
+    function getDisplayName(path: string) {
+      return path.split('/').pop() || path;
+    }
+
     return (
-      <main className="container">
-        <div className="header history-view-header">
-          <button className="back-btn" onClick={() => setCurrentView("main")}>
-            ← Back
-          </button>
-          <div className="logo-text-small">PHONE INBOX</div>
-          {inboxItems.length > 0 && (
-            <button className="clear-all-btn" onClick={handleClearInbox}>
-              Clear All
-            </button>
+      <div className="worktrees-layout">
+        <div className="worktrees-list">
+          {worktrees.length === 0 ? (
+            <div className="empty-state">
+              <p>No worktrees configured</p>
+              <p style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+                Add repos to ~/.config/synthia/worktrees.yaml
+              </p>
+            </div>
+          ) : (
+            worktrees.map((wt) => {
+              const progress = getProgressInfo(wt.tasks);
+              return (
+                <div
+                  key={wt.path}
+                  className={`worktree-item ${selectedWorktree?.path === wt.path ? "selected" : ""}`}
+                  onClick={() => setSelectedWorktree(wt)}
+                >
+                  <div className="worktree-branch">{getDisplayName(wt.path)}</div>
+                  <div className="worktree-path">{wt.branch}</div>
+                  <div className="worktree-meta">
+                    {wt.issue_number && (
+                      <span className="worktree-issue">#{wt.issue_number}</span>
+                    )}
+                    <div className="worktree-progress">
+                      <div className="progress-bar">
+                        <div
+                          className={`progress-fill ${progress.status}`}
+                          style={{ width: `${progress.percent}%` }}
+                        />
+                      </div>
+                      <span>{progress.text}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
 
-        <div className="inbox-view-content">
-          <p className="inbox-description">
-            Files and links sent from your phone via Telegram.
-          </p>
+        {selectedWorktree && (
+          <div className="task-panel">
+            <div className="task-panel-header">
+              <span className="task-panel-title">Tasks</span>
+              <div className="task-panel-actions">
+                <button
+                  className="task-panel-btn primary"
+                  onClick={() => handleResumeSession(selectedWorktree)}
+                >
+                  Resume
+                </button>
+              </div>
+            </div>
 
-          <div className="inbox-list">
-            {inboxItems.length === 0 ? (
-              <div className="inbox-empty-state">
-                <p>No items in inbox</p>
-                <p className="empty-hint">Send files or URLs via Telegram to see them here</p>
+            {selectedWorktree.tasks.length === 0 ? (
+              <div className="empty-state">No tasks</div>
+            ) : (
+              <div className="task-list">
+                {selectedWorktree.tasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className={`task-item ${task.blocked_by.length > 0 ? "blocked" : ""}`}
+                  >
+                    <span className={`task-status ${task.status.replace("_", "-")}`}>
+                      {task.status === "completed" ? "✓" : task.status === "in_progress" ? "▶" : "○"}
+                    </span>
+                    <div className="task-content">
+                      <div className="task-subject">{task.subject}</div>
+                      {task.blocked_by.length > 0 && (
+                        <div className="task-blocked-by">
+                          blocked by #{task.blocked_by.join(", #")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderVoiceSection() {
+    // History sub-view
+    if (voiceView === "history") {
+      return (
+        <div className="voice-section">
+          <div className="header history-view-header">
+            <button className="back-btn" onClick={() => setVoiceView("main")}>
+              ← Back
+            </button>
+            <div className="logo-text-small">VOICE HISTORY</div>
+            {history.length > 0 && (
+              <button className="clear-all-btn" onClick={handleClearHistory}>
+                Clear All
+              </button>
+            )}
+          </div>
+
+          <div className="history-view-content">
+            {history.length === 0 ? (
+              <div className="history-empty-state">
+                <p>No transcriptions yet</p>
+                <p className="empty-hint">Use voice dictation or assistant to see history here</p>
               </div>
             ) : (
-              inboxItems.map((item) => (
-                <div
-                  key={item.id}
-                  className={`inbox-item ${item.type} ${item.opened ? "opened" : "unread"}`}
-                >
-                  <div className="inbox-item-icon">
-                    {item.type === "url" ? "🔗" : item.type === "image" ? "🖼️" : "📄"}
+              <div className="history-list-full">
+                {history.map((entry) => (
+                  <div key={entry.id} className={`history-item ${entry.mode}`}>
+                    <div className="history-item-header">
+                      <span className={`history-mode-label ${entry.mode}`}>
+                        {entry.mode === "assistant" ? "ASSISTANT" : "DICTATION"}
+                      </span>
+                      <span className="history-time">{formatTime(entry.timestamp)}</span>
+                    </div>
+                    <p className="history-text">{entry.text}</p>
+                    {entry.response && (
+                      <p className="history-response">→ {entry.response}</p>
+                    )}
+                    <div className="history-item-actions">
+                      <button
+                        className={`history-btn ${copiedId === entry.id ? 'copied' : ''}`}
+                        onClick={() => handleCopy(entry.text, entry.id)}
+                      >
+                        {copiedId === entry.id ? "✓" : "Copy"}
+                      </button>
+                      <button
+                        className="history-btn resend"
+                        onClick={() => handleResend(entry.text)}
+                      >
+                        Re-send
+                      </button>
+                    </div>
                   </div>
-                  <div className="inbox-item-info">
-                    <span className="inbox-filename">{item.filename}</span>
-                    <span className="inbox-meta">
-                      {item.from_user && `From ${item.from_user} • `}
-                      {formatTime(item.received_at)}
-                    </span>
-                  </div>
-                  <div className="inbox-item-actions">
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Words sub-view
+    if (voiceView === "words") {
+      return (
+        <div className="voice-section">
+          <div className="header history-view-header">
+            <button className="back-btn" onClick={() => setVoiceView("main")}>
+              ← Back
+            </button>
+            <div className="logo-text-small">WORD DICTIONARY</div>
+          </div>
+
+          <div className="words-view-content">
+            <p className="words-description">
+              Fix common Whisper misrecognitions. Words on the left get replaced with words on the right.
+            </p>
+
+            <div className="word-add-form">
+              <input
+                type="text"
+                placeholder="Wrong word"
+                value={newWordFrom}
+                onChange={(e) => setNewWordFrom(e.target.value)}
+                className="word-input"
+              />
+              <span className="word-arrow">→</span>
+              <input
+                type="text"
+                placeholder="Correct word"
+                value={newWordTo}
+                onChange={(e) => setNewWordTo(e.target.value)}
+                className="word-input"
+                onKeyDown={(e) => e.key === "Enter" && handleAddWordReplacement()}
+              />
+              <button className="word-add-btn" onClick={handleAddWordReplacement}>
+                Add
+              </button>
+            </div>
+
+            <div className="word-list">
+              {wordReplacements.length === 0 ? (
+                <div className="words-empty-state">
+                  <p>No word replacements yet</p>
+                  <p className="empty-hint">Add words that Whisper commonly gets wrong</p>
+                </div>
+              ) : (
+                wordReplacements.map((r, index) => (
+                  <div key={index} className="word-item">
+                    <span className="word-from">{r.from}</span>
+                    <span className="word-arrow">→</span>
+                    <span className="word-to">{r.to}</span>
                     <button
-                      className="inbox-open-btn"
-                      onClick={() => handleOpenInboxItem(item)}
-                    >
-                      Open
-                    </button>
-                    <button
-                      className="inbox-delete-btn"
-                      onClick={() => handleDeleteInboxItem(item.id)}
+                      className="word-remove-btn"
+                      onClick={() => handleRemoveWordReplacement(index)}
                     >
                       ×
                     </button>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {error && <div className="error">{error}</div>}
-      </main>
-    );
-  }
-
-  // Word Replacements View
-  if (currentView === "words") {
-    return (
-      <main className="container">
-        <div className="header history-view-header">
-          <button className="back-btn" onClick={() => setCurrentView("main")}>
-            ← Back
-          </button>
-          <div className="logo-text-small">WORD DICTIONARY</div>
-        </div>
-
-        <div className="words-view-content">
-          <p className="words-description">
-            Fix common Whisper misrecognitions. Words on the left get replaced with words on the right.
-          </p>
-
-          <div className="word-add-form">
-            <input
-              type="text"
-              placeholder="Wrong word"
-              value={newWordFrom}
-              onChange={(e) => setNewWordFrom(e.target.value)}
-              className="word-input"
-            />
-            <span className="word-arrow">→</span>
-            <input
-              type="text"
-              placeholder="Correct word"
-              value={newWordTo}
-              onChange={(e) => setNewWordTo(e.target.value)}
-              className="word-input"
-              onKeyDown={(e) => e.key === "Enter" && handleAddWordReplacement()}
-            />
-            <button className="word-add-btn" onClick={handleAddWordReplacement}>
-              Add
-            </button>
-          </div>
-
-          <div className="word-list">
-            {wordReplacements.length === 0 ? (
-              <div className="words-empty-state">
-                <p>No word replacements yet</p>
-                <p className="empty-hint">Add words that Whisper commonly gets wrong</p>
-              </div>
-            ) : (
-              wordReplacements.map((r, index) => (
-                <div key={index} className="word-item">
-                  <span className="word-from">{r.from}</span>
-                  <span className="word-arrow">→</span>
-                  <span className="word-to">{r.to}</span>
-                  <button
-                    className="word-remove-btn"
-                    onClick={() => handleRemoveWordReplacement(index)}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {error && <div className="error">{error}</div>}
-      </main>
-    );
-  }
-
-  // History View
-  if (currentView === "history") {
-    return (
-      <main className="container">
-        <div className="header history-view-header">
-          <button className="back-btn" onClick={() => setCurrentView("main")}>
-            ← Back
-          </button>
-          <div className="logo-text-small">VOICE HISTORY</div>
-          {history.length > 0 && (
-            <button className="clear-all-btn" onClick={handleClearHistory}>
-              Clear All
-            </button>
-          )}
-        </div>
-
-        <div className="history-view-content">
-          {history.length === 0 ? (
-            <div className="history-empty-state">
-              <p>No transcriptions yet</p>
-              <p className="empty-hint">Use voice dictation or assistant to see history here</p>
+                ))
+              )}
             </div>
-          ) : (
-            <div className="history-list-full">
-              {history.map((entry) => (
-                <div key={entry.id} className={`history-item ${entry.mode}`}>
-                  <div className="history-item-header">
-                    <span className={`history-mode-label ${entry.mode}`}>
-                      {entry.mode === "assistant" ? "ASSISTANT" : "DICTATION"}
-                    </span>
-                    <span className="history-time">{formatTime(entry.timestamp)}</span>
-                  </div>
-                  <p className="history-text">{entry.text}</p>
-                  {entry.response && (
-                    <p className="history-response">→ {entry.response}</p>
-                  )}
-                  <div className="history-item-actions">
-                    <button
-                      className={`history-btn ${copiedId === entry.id ? 'copied' : ''}`}
-                      onClick={() => handleCopy(entry.text, entry.id)}
-                    >
-                      {copiedId === entry.id ? "✓" : "Copy"}
-                    </button>
-                    <button
-                      className="history-btn resend"
-                      onClick={() => handleResend(entry.text)}
-                    >
-                      Re-send
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          </div>
         </div>
+      );
+    }
 
-        {error && <div className="error">{error}</div>}
-      </main>
-    );
-  }
-
-  // Main View
-  return (
-    <main className="container">
-      <div className="header">
-        <div className="logo-text">SYNTHIA</div>
-        <div className="tagline">AI Voice Assistant</div>
-      </div>
-
-      <div className="content">
+    // Main voice view
+    return (
+      <div className="voice-section">
         <div className="status-section">
           <div
             className={`status-indicator ${status === "running" ? "running" : ""}`}
@@ -695,7 +628,7 @@ function App() {
 
         <button
           className="history-nav-btn"
-          onClick={() => { setCurrentView("history"); loadHistory(); }}
+          onClick={() => { setVoiceView("history"); loadHistory(); }}
         >
           <span>Voice History</span>
           {history.length > 0 && <span className="history-count">{history.length}</span>}
@@ -703,33 +636,45 @@ function App() {
 
         <button
           className="history-nav-btn"
-          onClick={() => { setCurrentView("words"); loadWordReplacements(); }}
+          onClick={() => { setVoiceView("words"); loadWordReplacements(); }}
         >
           <span>Word Dictionary</span>
           {wordReplacements.length > 0 && <span className="history-count">{wordReplacements.length}</span>}
         </button>
 
-        <button
-          className="history-nav-btn"
-          onClick={() => { setCurrentView("clipboard"); loadClipboardHistory(); }}
-        >
-          <span>Clipboard</span>
-          {clipboardHistory.length > 0 && <span className="history-count">{clipboardHistory.length}</span>}
-        </button>
-
-        <button
-          className="history-nav-btn"
-          onClick={() => { setCurrentView("inbox"); loadInboxItems(); }}
-        >
-          <span>Phone Inbox</span>
-          {inboxItems.filter((i) => !i.opened).length > 0 && (
-            <span className="history-count unread">{inboxItems.filter((i) => !i.opened).length}</span>
-          )}
-        </button>
-
         {error && <div className="error">{error}</div>}
       </div>
-    </main>
+    );
+  }
+
+  function renderMemorySection() {
+    return (
+      <div className="empty-state" style={{ marginTop: "4rem" }}>
+        <p style={{ fontSize: "1.2rem", marginBottom: "0.5rem" }}>Memory</p>
+        <p>Coming soon - manage bugs, patterns, gotchas, and stack knowledge</p>
+      </div>
+    );
+  }
+
+  function renderConfigSection() {
+    return (
+      <div className="empty-state" style={{ marginTop: "4rem" }}>
+        <p style={{ fontSize: "1.2rem", marginBottom: "0.5rem" }}>Config</p>
+        <p>Coming soon - agents, commands, plugins, hooks, settings</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-layout">
+      {renderSidebar()}
+      <main className="main-content">
+        {currentSection === "worktrees" && renderWorktreesSection()}
+        {currentSection === "voice" && renderVoiceSection()}
+        {currentSection === "memory" && renderMemorySection()}
+        {currentSection === "config" && renderConfigSection()}
+      </main>
+    </div>
   );
 }
 
