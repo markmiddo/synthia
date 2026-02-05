@@ -7,9 +7,13 @@ Reads hook JSON from stdin and extracts the response to speak.
 import sys
 import os
 import json
+import time
 
 # Add synthia to path
 sys.path.insert(0, '/home/markmiddo/dev/misc/synthia/src')
+
+# Track last spoken message to avoid repeats
+LAST_MESSAGE_FILE = '/tmp/synthia-last-spoken-hash'
 
 
 def get_last_assistant_message(transcript_path: str) -> str:
@@ -77,8 +81,57 @@ def main():
     if not transcript_path or not os.path.exists(transcript_path):
         sys.exit(0)
 
+    # Wait for transcript to be fully written
+    # The hook fires before Claude finishes writing, so we need to wait
+    initial_delay = 1.5  # seconds
+    time.sleep(initial_delay)
+
+    with open('/tmp/stop-hook-debug.log', 'a') as f:
+        f.write(f"Waited {initial_delay}s for transcript to settle\n")
+
+    # Check freshness - wait for file to be recently modified
+    max_retries = 3
+    retry_delay = 0.5
+    for attempt in range(max_retries):
+        mtime = os.path.getmtime(transcript_path)
+        age = time.time() - mtime
+
+        with open('/tmp/stop-hook-debug.log', 'a') as f:
+            f.write(f"Attempt {attempt + 1}: File age = {age:.2f}s\n")
+
+        # If file was modified in last 5 seconds, it's probably fresh enough
+        if age < 5:
+            break
+
+        # File seems stale, wait and retry
+        if attempt < max_retries - 1:
+            time.sleep(retry_delay)
+
     # Get the last assistant message
     message = get_last_assistant_message(transcript_path)
+
+    # Check if we already spoke this exact message (deduplication)
+    if message:
+        import hashlib
+        msg_hash = hashlib.md5(message[:500].encode()).hexdigest()
+
+        try:
+            if os.path.exists(LAST_MESSAGE_FILE):
+                with open(LAST_MESSAGE_FILE, 'r') as f:
+                    last_hash = f.read().strip()
+                if last_hash == msg_hash:
+                    with open('/tmp/stop-hook-debug.log', 'a') as f:
+                        f.write(f"Skipping duplicate message (hash: {msg_hash[:8]})\n")
+                    sys.exit(0)
+        except Exception:
+            pass
+
+        # Save this hash for next time
+        try:
+            with open(LAST_MESSAGE_FILE, 'w') as f:
+                f.write(msg_hash)
+        except Exception:
+            pass
 
     with open('/tmp/stop-hook-debug.log', 'a') as f:
         f.write(f"Extracted message: {message[:200] if message else 'NONE'}...\n")
