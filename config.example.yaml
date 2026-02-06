@@ -28,6 +28,36 @@ anthropic_api_key: "~/.config/synthia/anthropic-key.txt"
 show_notifications: true
 play_sound_on_record: true
 
+# Local model options
+use_local_stt: false             # Use local Whisper instead of Google Cloud
+use_local_llm: false             # Use local Ollama instead of Anthropic
+use_local_tts: false             # Use local Piper instead of Google Cloud
+local_stt_model: "small"         # Whisper model: tiny, base, small, medium, large
+local_llm_model: "qwen2.5:7b-instruct-q4_0"  # Ollama model name
+local_tts_voice: "~/.local/share/piper-voices/en_US-amy-medium.onnx"
+ollama_url: "http://localhost:11434"
+
+# Telegram remote access (must be configured by user)
+telegram_bot_token: ""           # Get from @BotFather
+telegram_allowed_users: []       # List of Telegram user IDs
+
+# Web search (Tavily)
+tavily_api_key: ""               # Get from tavily.com
+
+# LLM Polish for dictation accuracy
+use_llm_polish: true             # Enable LLM review of transcriptions
+llm_polish_model: "qwen2.5:7b-instruct-q4_0"  # Model for polishing
+llm_polish_timeout: 3.0          # Timeout in seconds (fail-safe to original)
+
+# Clipboard Manager
+clipboard_history_enabled: true  # Enable clipboard history tracking
+clipboard_history_max_items: 5   # Number of items to remember
+
+# Memory System
+memory_enabled: true             # Enable memory system integration
+memory_auto_retrieve: false      # Auto-retrieve relevant memories in dev mode
+memory_dir: "~/.claude/memory"   # Memory storage directory
+
 # Word replacements for dictation
 # Fixes common Whisper misrecognitions by replacing words after transcription
 # Add your own corrections here (case-sensitive)

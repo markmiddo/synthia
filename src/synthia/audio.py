@@ -10,6 +10,11 @@ from scipy import signal
 
 logger = logging.getLogger(__name__)
 
+# Audio level threshold below which input is considered silence
+AUDIO_QUIET_THRESHOLD = 100
+# Default sample rate when device info unavailable
+DEFAULT_FALLBACK_SAMPLE_RATE = 44100
+
 
 class AudioRecorder:
     """Records audio from the microphone while a key is held."""
@@ -58,7 +63,7 @@ class AudioRecorder:
         if self.device is not None:
             device_info = sd.query_devices(self.device)
             return int(device_info["default_samplerate"])
-        return 44100  # Default fallback
+        return DEFAULT_FALLBACK_SAMPLE_RATE
 
     def _resample(self, audio_data: np.ndarray, orig_rate: int, target_rate: int) -> np.ndarray:
         """Resample audio from one sample rate to another."""
@@ -128,7 +133,7 @@ class AudioRecorder:
         mean_level = np.abs(audio_data).mean()
         logger.debug("Audio levels - max: %s, mean: %.0f", max_level, mean_level)
 
-        if max_level < 100:
+        if max_level < AUDIO_QUIET_THRESHOLD:
             logger.warning("Audio levels very low - check microphone")
 
         # Resample to target rate for Google STT

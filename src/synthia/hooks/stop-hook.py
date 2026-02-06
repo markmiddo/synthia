@@ -17,6 +17,13 @@ _RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 LAST_MESSAGE_FILE = os.path.join(_RUNTIME_DIR, 'synthia-last-spoken-hash')
 DEBUG_LOG_FILE = os.path.join(_RUNTIME_DIR, 'synthia-stop-hook-debug.log')
 
+# Message length limits
+TTS_MAX_CHARS = 500          # Max chars to speak locally
+TTS_SEARCH_WINDOW = 600      # Window to search for sentence boundary
+TTS_MIN_CUTOFF = 300         # Minimum chars before allowing cutoff
+TELEGRAM_MAX_CHARS = 1000    # Max chars to send via Telegram
+HASH_PREFIX_LEN = 500        # Chars to hash for dedup
+
 
 def _debug_log(message: str):
     """Write to debug log with restrictive permissions."""
@@ -109,7 +116,7 @@ def main():
     # Check if we already spoke this exact message (deduplication)
     if message:
         import hashlib
-        msg_hash = hashlib.sha256(message[:500].encode()).hexdigest()
+        msg_hash = hashlib.sha256(message[:HASH_PREFIX_LEN].encode()).hexdigest()
 
         try:
             if os.path.exists(LAST_MESSAGE_FILE):
@@ -155,11 +162,11 @@ def main():
 
     # Limit message length - speak first ~500 chars (2-3 sentences)
     full_message = message  # Keep full for Telegram
-    if len(message) > 500:
-        cutoff = 500
+    if len(message) > TTS_MAX_CHARS:
+        cutoff = TTS_MAX_CHARS
         for end in ['. ', '! ', '? ']:
-            pos = message[:600].rfind(end)
-            if pos > 300:
+            pos = message[:TTS_SEARCH_WINDOW].rfind(end)
+            if pos > TTS_MIN_CUTOFF:
                 cutoff = pos + 1
                 break
         message = message[:cutoff] + " Check the full response for more."
@@ -186,8 +193,8 @@ def main():
                 if re.search(r'\d\.\s+\w', full_message) or re.search(r'(?:first|then|next|finally)', lower_msg):
                     is_plan = True
 
-            telegram_message = full_message[:1000]
-            if len(full_message) > 1000:
+            telegram_message = full_message[:TELEGRAM_MAX_CHARS]
+            if len(full_message) > TELEGRAM_MAX_CHARS:
                 telegram_message += "...\n\n_(truncated - check Claude Code for full response)_"
 
             if is_plan:

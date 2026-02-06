@@ -5,8 +5,12 @@ import subprocess
 
 logger = logging.getLogger(__name__)
 
+# Notification timeout defaults (milliseconds)
+DEFAULT_TIMEOUT = 3000
+ERROR_TIMEOUT = 5000
 
-def notify(title: str, message: str, icon: str = "audio-input-microphone", timeout: int = 3000):
+
+def notify(title: str, message: str, icon: str = "audio-input-microphone", timeout: int = DEFAULT_TIMEOUT):
     """Show a desktop notification.
 
     Args:
@@ -60,4 +64,4 @@ def notify_assistant(response: str):
 
 def notify_error(message: str):
     """Notify of an error."""
-    notify("Synthia Error", message, "dialog-error", timeout=5000)
+    notify("Synthia Error", message, "dialog-error", timeout=ERROR_TIMEOUT)

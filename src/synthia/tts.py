@@ -7,6 +7,11 @@ import tempfile
 
 logger = logging.getLogger(__name__)
 
+# Maximum characters per TTS chunk for streaming effect
+MAX_CHUNK_CHARS = 200
+# Piper TTS native output sample rate
+PIPER_SAMPLE_RATE = 22050
+
 
 class TextToSpeech:
     """Converts text to speech using Google Cloud TTS or local Piper."""
@@ -40,7 +45,7 @@ class TextToSpeech:
         self.language_code = "-".join(voice_name.split("-")[:2])
         logger.info("Google TTS initialized with voice: %s", voice_name)
 
-    def _split_into_chunks(self, text: str, max_chars: int = 200) -> list:
+    def _split_into_chunks(self, text: str, max_chars: int = MAX_CHUNK_CHARS) -> list:
         """Split text into smaller chunks for streaming effect."""
         sentences = []
         current = ""
@@ -124,7 +129,7 @@ class TextToSpeech:
             )
 
             aplay_proc = subprocess.Popen(
-                ["aplay", "-r", "22050", "-f", "S16_LE", "-t", "raw", "-q"],
+                ["aplay", "-r", str(PIPER_SAMPLE_RATE), "-f", "S16_LE", "-t", "raw", "-q"],
                 stdin=piper_proc.stdout,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

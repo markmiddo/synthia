@@ -8,8 +8,19 @@ import tempfile
 
 logger = logging.getLogger(__name__)
 
-# Simple beep sounds encoded as base64 WAV
-# These are tiny sine wave beeps generated programmatically
+# Audio constants
+BEEP_SAMPLE_RATE = 44100
+BEEP_VOLUME = 0.3
+MAX_TEMP_FILES = 10
+
+# Beep frequencies (Hz)
+FREQ_HIGH = 880    # Recording start
+FREQ_LOW = 440     # Recording stop
+FREQ_ERROR = 220   # Error notification
+
+# Beep durations (ms)
+DURATION_SHORT = 100
+DURATION_LONG = 200
 
 
 def _generate_beep(frequency: int, duration_ms: int, volume: float = 0.5) -> bytes:
@@ -17,7 +28,7 @@ def _generate_beep(frequency: int, duration_ms: int, volume: float = 0.5) -> byt
     import math
     import struct
 
-    sample_rate = 44100
+    sample_rate = BEEP_SAMPLE_RATE
     num_samples = int(sample_rate * duration_ms / 1000)
 
     # Generate sine wave
@@ -61,9 +72,9 @@ class SoundEffects:
         atexit.register(self.cleanup)
 
         # Pre-generate sounds
-        self._start_sound = _generate_beep(880, 100, 0.3)  # High beep
-        self._stop_sound = _generate_beep(440, 100, 0.3)  # Low beep
-        self._error_sound = _generate_beep(220, 200, 0.3)  # Very low beep
+        self._start_sound = _generate_beep(FREQ_HIGH, DURATION_SHORT, BEEP_VOLUME)
+        self._stop_sound = _generate_beep(FREQ_LOW, DURATION_SHORT, BEEP_VOLUME)
+        self._error_sound = _generate_beep(FREQ_ERROR, DURATION_LONG, BEEP_VOLUME)
 
     def _play_wav(self, wav_data: bytes):
         """Play WAV data using paplay."""
@@ -82,7 +93,7 @@ class SoundEffects:
 
             # Clean up after a delay (let it play first)
             self._temp_files.append(temp_path)
-            if len(self._temp_files) > 10:
+            if len(self._temp_files) > MAX_TEMP_FILES:
                 old_file = self._temp_files.pop(0)
                 try:
                     os.unlink(old_file)
