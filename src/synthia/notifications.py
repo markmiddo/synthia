@@ -1,6 +1,9 @@
 """Desktop notifications for Synthia."""
 
+import logging
 import subprocess
+
+logger = logging.getLogger(__name__)
 
 
 def notify(title: str, message: str, icon: str = "audio-input-microphone", timeout: int = 3000):
@@ -30,7 +33,7 @@ def notify(title: str, message: str, icon: str = "audio-input-microphone", timeo
         # notify-send not installed
         pass
     except Exception as e:
-        print(f"Notification error: {e}")
+        logger.debug("Notification error: %s", e)
 
 
 def notify_ready():

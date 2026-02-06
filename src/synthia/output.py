@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import time
 
 from .display import is_wayland
+
+logger = logging.getLogger(__name__)
 
 # Timeout for typing operations (seconds)
 _TYPING_TIMEOUT = 10
@@ -96,7 +99,7 @@ def _type_with_wezterm_cli(text: str) -> bool:
             check=True,
             timeout=_TYPING_TIMEOUT,
         )
-        print(f"⌨️  Typed (wezterm cli): {text[:50]}{'...' if len(text) > 50 else ''}")
+        logger.info("Typed (wezterm cli): %s%s", text[:50], "..." if len(text) > 50 else "")
         return True
     except FileNotFoundError:
         return False
@@ -104,7 +107,7 @@ def _type_with_wezterm_cli(text: str) -> bool:
         # Wezterm CLI not available or no active pane
         return False
     except subprocess.TimeoutExpired:
-        print("❌ wezterm cli timed out")
+        logger.error("wezterm cli timed out")
         return False
 
 
@@ -144,7 +147,7 @@ def _type_with_clipboard_paste(text: str) -> bool:
             timeout=_TYPING_TIMEOUT,
         )
 
-        print(f"⌨️  Typed (clipboard paste): {text[:50]}{'...' if len(text) > 50 else ''}")
+        logger.info("Typed (clipboard paste): %s%s", text[:50], "..." if len(text) > 50 else "")
 
         # Restore previous clipboard after a brief delay
         if old_clipboard is not None:
@@ -159,10 +162,10 @@ def _type_with_clipboard_paste(text: str) -> bool:
     except FileNotFoundError:
         return False
     except subprocess.CalledProcessError as e:
-        print(f"❌ Clipboard paste error: {e}")
+        logger.error("Clipboard paste error: %s", e)
         return False
     except subprocess.TimeoutExpired:
-        print("❌ Clipboard paste timed out")
+        logger.error("Clipboard paste timed out")
         return False
 
 
@@ -170,15 +173,15 @@ def _type_with_wtype(text: str) -> bool:
     """Type text using wtype (Wayland-native)."""
     try:
         subprocess.run(["wtype", "--", text], check=True, timeout=_TYPING_TIMEOUT)
-        print(f"⌨️  Typed (wtype): {text[:50]}{'...' if len(text) > 50 else ''}")
+        logger.info("Typed (wtype): %s%s", text[:50], "..." if len(text) > 50 else "")
         return True
     except FileNotFoundError:
         return False
     except subprocess.CalledProcessError as e:
-        print(f"❌ wtype error: {e}")
+        logger.error("wtype error: %s", e)
         return False
     except subprocess.TimeoutExpired:
-        print("❌ wtype timed out")
+        logger.error("wtype timed out")
         return False
 
 
@@ -186,15 +189,15 @@ def _type_with_ydotool(text: str) -> bool:
     """Type text using ydotool (works on both Wayland and X11)."""
     try:
         subprocess.run(["ydotool", "type", "--", text], check=True, timeout=_TYPING_TIMEOUT)
-        print(f"⌨️  Typed (ydotool): {text[:50]}{'...' if len(text) > 50 else ''}")
+        logger.info("Typed (ydotool): %s%s", text[:50], "..." if len(text) > 50 else "")
         return True
     except FileNotFoundError:
         return False
     except subprocess.CalledProcessError as e:
-        print(f"❌ ydotool error: {e}")
+        logger.error("ydotool error: %s", e)
         return False
     except subprocess.TimeoutExpired:
-        print("❌ ydotool timed out")
+        logger.error("ydotool timed out")
         return False
 
 
@@ -206,14 +209,14 @@ def _type_with_xdotool(text: str) -> bool:
             check=True,
             timeout=_TYPING_TIMEOUT,
         )
-        print(f"⌨️  Typed (xdotool): {text[:50]}{'...' if len(text) > 50 else ''}")
+        logger.info("Typed (xdotool): %s%s", text[:50], "..." if len(text) > 50 else "")
         return True
     except FileNotFoundError:
-        print("❌ No typing tool found. Install wtype (Wayland) or xdotool (X11)")
+        logger.error("No typing tool found. Install wtype (Wayland) or xdotool (X11)")
         return False
     except subprocess.CalledProcessError as e:
-        print(f"❌ xdotool error: {e}")
+        logger.error("xdotool error: %s", e)
         return False
     except subprocess.TimeoutExpired:
-        print("❌ xdotool timed out")
+        logger.error("xdotool timed out")
         return False

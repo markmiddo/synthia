@@ -15,6 +15,8 @@ Hotkey: Right Ctrl (hold to record, release to transcribe)
     - Shows notification
 """
 
+import logging
+
 from pynput import keyboard
 from pynput.keyboard import Key
 
@@ -24,6 +26,8 @@ from synthia.notifications import notify
 from synthia.output import type_text
 from synthia.sounds import SoundEffects
 from synthia.transcribe import Transcriber
+
+logger = logging.getLogger(__name__)
 
 
 class VoiceDaemon:
@@ -67,14 +71,14 @@ class VoiceDaemon:
                 text = self.transcriber.transcribe(audio_data)
 
                 if text:
-                    print(f"📝 You said: {text}")
+                    logger.info("You said: %s", text)
 
                     if type_text(text):
                         notify("Voice Input", f"Typed: {text[:50]}...", timeout=2000)
                     else:
-                        print(f"⚠️ Auto-type failed. Your text: {text}\n")
+                        logger.warning("Auto-type failed. Your text: %s", text)
                 else:
-                    print("⚠️ No speech detected\n")
+                    logger.debug("No speech detected")
 
     def run(self):
         with keyboard.Listener(on_press=self.on_press, on_release=self.on_release) as listener:
@@ -82,11 +86,15 @@ class VoiceDaemon:
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
     try:
         daemon = VoiceDaemon()
         daemon.run()
     except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
+        print("\nGoodbye!")
 
 
 if __name__ == "__main__":

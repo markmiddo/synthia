@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import subprocess
 from typing import Any
 
 from synthia.display import is_wayland
+
+logger = logging.getLogger(__name__)
 from synthia.output import type_text
 from synthia.web_search import web_search
 
@@ -75,7 +78,7 @@ def open_app(app: str) -> bool:
     # SECURITY: Only allow known apps to prevent arbitrary command execution
     allowed_apps = set(APP_ALIASES.values()) | set(FLATPAK_APPS.keys())
     if app_cmd not in allowed_apps:
-        print(f"❌ App not in allowlist: {app_cmd}")
+        logger.warning("App not in allowlist: %s", app_cmd)
         return False
 
     # Check if it's a Flatpak app
@@ -88,10 +91,10 @@ def open_app(app: str) -> bool:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            print(f"✅ Opened (Flatpak): {flatpak_id}")
+            logger.info("Opened (Flatpak): %s", flatpak_id)
             return True
         except Exception as e:
-            print(f"❌ Error opening Flatpak {flatpak_id}: {e}")
+            logger.error("Error opening Flatpak %s: %s", flatpak_id, e)
             return False
 
     # Try regular command
@@ -102,13 +105,13 @@ def open_app(app: str) -> bool:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        print(f"✅ Opened: {app_cmd}")
+        logger.info("Opened: %s", app_cmd)
         return True
     except FileNotFoundError:
-        print(f"❌ App not found: {app_cmd}")
+        logger.warning("App not found: %s", app_cmd)
         return False
     except Exception as e:
-        print(f"❌ Error opening {app_cmd}: {e}")
+        logger.error("Error opening %s: %s", app_cmd, e)
         return False
 
 
@@ -123,7 +126,7 @@ def open_url(url: str, browser: str = "google-chrome") -> bool:
 
     # SECURITY: Reject non-http(s) schemes that could have been prepended
     if not url.startswith(("http://", "https://")):
-        print(f"❌ Invalid URL scheme: {url}")
+        logger.warning("Invalid URL scheme: %s", url)
         return False
 
     # Use Chrome Flatpak
@@ -134,10 +137,10 @@ def open_url(url: str, browser: str = "google-chrome") -> bool:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        print(f"✅ Opened URL in Chrome: {url}")
+        logger.info("Opened URL in Chrome: %s", url)
         return True
     except Exception as e:
-        print(f"❌ Error opening URL: {e}")
+        logger.error("Error opening URL: %s", e)
         return False
 
 
@@ -152,15 +155,15 @@ def close_app(app: str) -> bool:
     # SECURITY: Only allow closing known apps
     allowed_apps = set(APP_ALIASES.values()) | set(FLATPAK_APPS.keys())
     if app_cmd not in allowed_apps:
-        print(f"❌ Cannot close unknown app: {app_cmd}")
+        logger.warning("Cannot close unknown app: %s", app_cmd)
         return False
 
     try:
         subprocess.run(["pkill", "-f", app_cmd], check=False)
-        print(f"✅ Closed: {app_cmd}")
+        logger.info("Closed: %s", app_cmd)
         return True
     except Exception as e:
-        print(f"❌ Error closing {app_cmd}: {e}")
+        logger.error("Error closing %s: %s", app_cmd, e)
         return False
 
 
@@ -251,7 +254,7 @@ def run_command(command: str) -> str:
     command_lower = command.lower()
     for pattern in DANGEROUS_PATTERNS:
         if pattern.lower() in command_lower:
-            print(f"❌ Blocked dangerous command pattern: {pattern}")
+            logger.warning("Blocked dangerous command pattern: %s", pattern)
             return f"Command blocked for security: contains '{pattern}'"
 
     # Extract the base command (first word)
@@ -259,7 +262,7 @@ def run_command(command: str) -> str:
 
     # Check if base command is in allowlist
     if base_cmd not in SAFE_COMMANDS:
-        print(f"❌ Command not in allowlist: {base_cmd}")
+        logger.warning("Command not in allowlist: %s", base_cmd)
         return f"Command '{base_cmd}' is not allowed. Allowed commands: {', '.join(sorted(SAFE_COMMANDS))}"
 
     try:
@@ -274,13 +277,13 @@ def run_command(command: str) -> str:
             timeout=30,
         )
         output = result.stdout or result.stderr
-        print(f"✅ Command output: {output[:100]}...")
+        logger.info("Command output: %s...", output[:100])
         return output.strip()
     except subprocess.TimeoutExpired:
-        print("❌ Command timed out")
+        logger.warning("Command timed out")
         return "Command timed out"
     except Exception as e:
-        print(f"❌ Command error: {e}")
+        logger.error("Command error: %s", e)
         return str(e)
 
 
@@ -292,10 +295,10 @@ def set_volume(level: int) -> bool:
     level = max(0, min(100, level))
     try:
         subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%"], check=True)
-        print(f"✅ Volume set to {level}%")
+        logger.info("Volume set to %d%%", level)
         return True
     except Exception as e:
-        print(f"❌ Volume error: {e}")
+        logger.error("Volume error: %s", e)
         return False
 
 
@@ -306,10 +309,10 @@ def change_volume(delta: int) -> bool:
         subprocess.run(
             ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{sign}{delta}%"], check=True
         )
-        print(f"✅ Volume changed by {sign}{delta}%")
+        logger.info("Volume changed by %s%d%%", sign, delta)
         return True
     except Exception as e:
-        print(f"❌ Volume error: {e}")
+        logger.error("Volume error: %s", e)
         return False
 
 
@@ -318,10 +321,10 @@ def mute(state: bool = True) -> bool:
     try:
         value = "1" if state else "0"
         subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", value], check=True)
-        print(f"✅ {'Muted' if state else 'Unmuted'}")
+        logger.info("Muted" if state else "Unmuted")
         return True
     except Exception as e:
-        print(f"❌ Mute error: {e}")
+        logger.error("Mute error: %s", e)
         return False
 
 
@@ -329,10 +332,10 @@ def toggle_mute() -> bool:
     """Toggle mute state."""
     try:
         subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"], check=True)
-        print("✅ Toggled mute")
+        logger.info("Toggled mute")
         return True
     except Exception as e:
-        print(f"❌ Mute toggle error: {e}")
+        logger.error("Mute toggle error: %s", e)
         return False
 
 
@@ -345,26 +348,26 @@ def maximize_window() -> bool:
         # On Wayland, use keyboard shortcut (works on most compositors including Cosmic)
         try:
             subprocess.run(["wtype", "-M", "logo", "-k", "Up", "-m", "logo"], check=True)
-            print("✅ Window maximized (Wayland)")
+            logger.info("Window maximized (Wayland)")
             return True
         except FileNotFoundError:
-            print("❌ wtype not found - install with: sudo apt install wtype")
+            logger.warning("wtype not found - install with: sudo apt install wtype")
             return False
         except Exception as e:
-            print(f"❌ Window error: {e}")
+            logger.error("Window error: %s", e)
             return False
     else:
         try:
             subprocess.run(
                 ["wmctrl", "-r", ":ACTIVE:", "-b", "add,maximized_vert,maximized_horz"], check=True
             )
-            print("✅ Window maximized")
+            logger.info("Window maximized")
             return True
         except FileNotFoundError:
-            print("❌ wmctrl not found - install with: sudo apt install wmctrl")
+            logger.warning("wmctrl not found - install with: sudo apt install wmctrl")
             return False
         except Exception as e:
-            print(f"❌ Window error: {e}")
+            logger.error("Window error: %s", e)
             return False
 
 
@@ -374,21 +377,21 @@ def minimize_window() -> bool:
         # On Wayland, use keyboard shortcut
         try:
             subprocess.run(["wtype", "-M", "logo", "-k", "h", "-m", "logo"], check=True)
-            print("✅ Window minimized (Wayland)")
+            logger.info("Window minimized (Wayland)")
             return True
         except FileNotFoundError:
-            print("❌ wtype not found")
+            logger.warning("wtype not found")
             return False
         except Exception as e:
-            print(f"❌ Window error: {e}")
+            logger.error("Window error: %s", e)
             return False
     else:
         try:
             subprocess.run(["xdotool", "getactivewindow", "windowminimize"], check=True)
-            print("✅ Window minimized")
+            logger.info("Window minimized")
             return True
         except Exception as e:
-            print(f"❌ Window error: {e}")
+            logger.error("Window error: %s", e)
             return False
 
 
@@ -398,21 +401,21 @@ def close_window() -> bool:
         # On Wayland, use keyboard shortcut (Alt+F4 is universal)
         try:
             subprocess.run(["wtype", "-M", "alt", "-k", "F4", "-m", "alt"], check=True)
-            print("✅ Window closed (Wayland)")
+            logger.info("Window closed (Wayland)")
             return True
         except FileNotFoundError:
-            print("❌ wtype not found")
+            logger.warning("wtype not found")
             return False
         except Exception as e:
-            print(f"❌ Window error: {e}")
+            logger.error("Window error: %s", e)
             return False
     else:
         try:
             subprocess.run(["xdotool", "getactivewindow", "windowclose"], check=True)
-            print("✅ Window closed")
+            logger.info("Window closed")
             return True
         except Exception as e:
-            print(f"❌ Window error: {e}")
+            logger.error("Window error: %s", e)
             return False
 
 
@@ -422,24 +425,24 @@ def switch_workspace(number: int) -> bool:
         # On Cosmic/Wayland, use Super+number
         try:
             subprocess.run(["wtype", "-M", "logo", "-k", str(number), "-m", "logo"], check=True)
-            print(f"✅ Switched to workspace {number} (Wayland)")
+            logger.info("Switched to workspace %d (Wayland)", number)
             return True
         except FileNotFoundError:
-            print("❌ wtype not found")
+            logger.warning("wtype not found")
             return False
         except Exception as e:
-            print(f"❌ Workspace error: {e}")
+            logger.error("Workspace error: %s", e)
             return False
     else:
         try:
             subprocess.run(["wmctrl", "-s", str(number - 1)], check=True)
-            print(f"✅ Switched to workspace {number}")
+            logger.info("Switched to workspace %d", number)
             return True
         except FileNotFoundError:
-            print("❌ wmctrl not found")
+            logger.warning("wmctrl not found")
             return False
         except Exception as e:
-            print(f"❌ Workspace error: {e}")
+            logger.error("Workspace error: %s", e)
             return False
 
 
@@ -449,21 +452,21 @@ def move_to_workspace(number: int) -> bool:
         # On Cosmic/Wayland, use Super+Shift+number
         try:
             subprocess.run(["wtype", "-M", "logo", "-M", "shift", "-k", str(number), "-m", "shift", "-m", "logo"], check=True)
-            print(f"✅ Moved window to workspace {number} (Wayland)")
+            logger.info("Moved window to workspace %d (Wayland)", number)
             return True
         except FileNotFoundError:
-            print("❌ wtype not found")
+            logger.warning("wtype not found")
             return False
         except Exception as e:
-            print(f"❌ Move error: {e}")
+            logger.error("Move error: %s", e)
             return False
     else:
         try:
             subprocess.run(["wmctrl", "-r", ":ACTIVE:", "-t", str(number - 1)], check=True)
-            print(f"✅ Moved window to workspace {number}")
+            logger.info("Moved window to workspace %d", number)
             return True
         except Exception as e:
-            print(f"❌ Move error: {e}")
+            logger.error("Move error: %s", e)
             return False
 
 
@@ -477,7 +480,7 @@ def copy_to_clipboard(text: str) -> bool:
         try:
             process = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
             process.communicate(text.encode())
-            print(f"✅ Copied to clipboard (wl-copy): {text[:50]}...")
+            logger.info("Copied to clipboard (wl-copy): %s...", text[:50])
             return True
         except FileNotFoundError:
             pass  # Fall through to xclip
@@ -486,13 +489,13 @@ def copy_to_clipboard(text: str) -> bool:
     try:
         process = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE)
         process.communicate(text.encode())
-        print(f"✅ Copied to clipboard (xclip): {text[:50]}...")
+        logger.info("Copied to clipboard (xclip): %s...", text[:50])
         return True
     except FileNotFoundError:
-        print("❌ No clipboard tool found. Install wl-clipboard (Wayland) or xclip (X11)")
+        logger.warning("No clipboard tool found. Install wl-clipboard (Wayland) or xclip (X11)")
         return False
     except Exception as e:
-        print(f"❌ Clipboard error: {e}")
+        logger.error("Clipboard error: %s", e)
         return False
 
 
@@ -503,7 +506,7 @@ def get_clipboard() -> str:
         try:
             result = subprocess.run(["wl-paste"], capture_output=True, text=True)
             content = result.stdout.strip()
-            print(f"✅ Clipboard content (wl-paste): {content[:50]}...")
+            logger.info("Clipboard content (wl-paste): %s...", content[:50])
             return content
         except FileNotFoundError:
             pass  # Fall through to xclip
@@ -514,7 +517,7 @@ def get_clipboard() -> str:
             ["xclip", "-selection", "clipboard", "-o"], capture_output=True, text=True
         )
         content = result.stdout.strip()
-        print(f"✅ Clipboard content (xclip): {content[:50]}...")
+        logger.info("Clipboard content (xclip): %s...", content[:50])
         return content
     except FileNotFoundError:
         return "No clipboard tool found"
@@ -528,7 +531,7 @@ def paste_clipboard() -> bool:
     if is_wayland():
         try:
             subprocess.run(["wtype", "-M", "ctrl", "v", "-m", "ctrl"], check=True)
-            print("✅ Pasted from clipboard (wtype)")
+            logger.info("Pasted from clipboard (wtype)")
             return True
         except FileNotFoundError:
             pass  # Fall through to xdotool
@@ -536,13 +539,13 @@ def paste_clipboard() -> bool:
     # Fallback to xdotool (X11 or XWayland)
     try:
         subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=True)
-        print("✅ Pasted from clipboard (xdotool)")
+        logger.info("Pasted from clipboard (xdotool)")
         return True
     except FileNotFoundError:
-        print("❌ No paste tool found. Install wtype (Wayland) or xdotool (X11)")
+        logger.warning("No paste tool found. Install wtype (Wayland) or xdotool (X11)")
         return False
     except Exception as e:
-        print(f"❌ Paste error: {e}")
+        logger.error("Paste error: %s", e)
         return False
 
 
@@ -564,7 +567,7 @@ def take_screenshot(region: str = "full") -> str:
         else:
             subprocess.run(["gnome-screenshot", "-f", filename], check=True)
 
-        print(f"✅ Screenshot saved: {filename}")
+        logger.info("Screenshot saved: %s", filename)
         return filename
     except FileNotFoundError:
         # Try scrot as fallback
@@ -575,13 +578,13 @@ def take_screenshot(region: str = "full") -> str:
                 subprocess.run(["scrot", "-s", filename], check=True)
             else:
                 subprocess.run(["scrot", filename], check=True)
-            print(f"✅ Screenshot saved: {filename}")
+            logger.info("Screenshot saved: %s", filename)
             return filename
         except (FileNotFoundError, subprocess.CalledProcessError):
-            print("❌ No screenshot tool found")
+            logger.warning("No screenshot tool found")
             return ""
     except subprocess.CalledProcessError as e:
-        print(f"❌ Screenshot error: {e}")
+        logger.error("Screenshot error: %s", e)
         return ""
 
 
@@ -606,7 +609,7 @@ def enable_remote_mode() -> bool:
     """Enable remote mode - send updates to Telegram."""
     chat_id = _get_telegram_chat_id()
     if not chat_id:
-        print("❌ Remote mode error: No telegram_allowed_users configured in config.yaml")
+        logger.error("Remote mode error: No telegram_allowed_users configured in config.yaml")
         return False
 
     try:
@@ -614,10 +617,10 @@ def enable_remote_mode() -> bool:
             f.write(str(chat_id))
         # Set restrictive permissions (owner read/write only)
         os.chmod(REMOTE_MODE_FILE, 0o600)
-        print("✅ Remote mode enabled")
+        logger.info("Remote mode enabled")
         return True
     except Exception as e:
-        print(f"❌ Remote mode error: {e}")
+        logger.error("Remote mode error: %s", e)
         return False
 
 
@@ -626,10 +629,10 @@ def disable_remote_mode() -> bool:
     try:
         if os.path.exists(REMOTE_MODE_FILE):
             os.remove(REMOTE_MODE_FILE)
-        print("✅ Remote mode disabled")
+        logger.info("Remote mode disabled")
         return True
     except Exception as e:
-        print(f"❌ Remote mode error: {e}")
+        logger.error("Remote mode error: %s", e)
         return False
 
 
@@ -694,14 +697,14 @@ def lock_screen() -> bool:
         ]:
             try:
                 subprocess.run(cmd, check=True)
-                print("✅ Screen locked")
+                logger.info("Screen locked")
                 return True
             except (FileNotFoundError, subprocess.CalledProcessError):
                 continue
-        print("❌ No lock command found")
+        logger.warning("No lock command found")
         return False
     except Exception as e:
-        print(f"❌ Lock error: {e}")
+        logger.error("Lock error: %s", e)
         return False
 
 
@@ -709,10 +712,10 @@ def suspend_system() -> bool:
     """Suspend/sleep the system."""
     try:
         subprocess.run(["systemctl", "suspend"], check=True)
-        print("✅ System suspended")
+        logger.info("System suspended")
         return True
     except Exception as e:
-        print(f"❌ Suspend error: {e}")
+        logger.error("Suspend error: %s", e)
         return False
 
 
@@ -818,7 +821,7 @@ def execute_actions(actions: list[dict[str, Any]]) -> tuple[list[bool], str | No
             results.append(_ACTION_HANDLERS[action_type](action))
 
         else:
-            print(f"⚠️  Unknown action type: {action_type}")
+            logger.warning("Unknown action type: %s", action_type)
             results.append(False)
 
     return results, command_output

@@ -1,8 +1,11 @@
 """System tray indicator for Synthia."""
 
+import logging
 import os
 import threading
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 import pystray
 from PIL import Image
@@ -49,7 +52,7 @@ class TrayIndicator:
             # Resize to standard tray size
             return img.resize((22, 22), Image.Resampling.LANCZOS)
         except Exception as e:
-            print(f"Icon error: {e}")
+            logger.warning("Icon error: %s", e)
             # Fallback to simple colored square
             return self._create_fallback(STATUS_ICONS.get(self.status, "gray"))
 

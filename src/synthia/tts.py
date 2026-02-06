@@ -1,8 +1,11 @@
 """Text-to-Speech integration with Google Cloud and local Piper options."""
 
+import logging
 import os
 import subprocess
 import tempfile
+
+logger = logging.getLogger(__name__)
 
 
 class TextToSpeech:
@@ -23,7 +26,7 @@ class TextToSpeech:
         self.client = None
 
         if use_local:
-            print(f"Piper TTS initialized with voice: {os.path.basename(self.local_voice)}")
+            logger.info("Piper TTS initialized with voice: %s", os.path.basename(self.local_voice))
         else:
             self._init_google(credentials_path, voice_name)
 
@@ -35,7 +38,7 @@ class TextToSpeech:
         self.client = texttospeech.TextToSpeechClient()
         self.voice_name = voice_name
         self.language_code = "-".join(voice_name.split("-")[:2])
-        print(f"Google TTS initialized with voice: {voice_name}")
+        logger.info("Google TTS initialized with voice: %s", voice_name)
 
     def _split_into_chunks(self, text: str, max_chars: int = 200) -> list:
         """Split text into smaller chunks for streaming effect."""
@@ -77,7 +80,7 @@ class TextToSpeech:
             return False
 
         try:
-            print(f"Speaking: {text[:50]}{'...' if len(text) > 50 else ''}")
+            logger.debug("Speaking: %s%s", text[:50], "..." if len(text) > 50 else "")
 
             if self.use_local:
                 return self._speak_piper(text)
@@ -93,7 +96,7 @@ class TextToSpeech:
             return True
 
         except Exception as e:
-            print(f"TTS error: {e}")
+            logger.error("TTS error: %s", e)
             return False
 
     def _speak_piper(self, text: str) -> bool:
@@ -139,10 +142,10 @@ class TextToSpeech:
             return True
 
         except FileNotFoundError as e:
-            print(f"Piper TTS error: piper or aplay not found - {e}")
+            logger.error("Piper TTS error: piper or aplay not found - %s", e)
             return False
         except Exception as e:
-            print(f"Piper TTS error: {e}")
+            logger.error("Piper TTS error: %s", e)
             return False
 
     def _speak_google_chunk(self, text: str) -> bool:
@@ -182,7 +185,7 @@ class TextToSpeech:
             return True
 
         except Exception as e:
-            print(f"Google TTS error: {e}")
+            logger.error("Google TTS error: %s", e)
             return False
 
     def stop(self):

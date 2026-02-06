@@ -37,11 +37,11 @@ class Synthia:
     """Main Synthia application."""
 
     def __init__(self):
-        print("🚀 Starting Synthia...")
+        logger.info("Starting Synthia...")
 
         # Load configuration
         self.config = load_config()
-        print("✅ Configuration loaded")
+        logger.info("Configuration loaded")
 
         # Get credentials paths
         credentials_path = get_google_credentials_path(self.config)
@@ -58,7 +58,7 @@ class Synthia:
 
         # Initialize audio recorder
         self.recorder = AudioRecorder(target_sample_rate=self.config["sample_rate"])
-        print("✅ Audio recorder initialized")
+        logger.info("Audio recorder initialized")
 
         # Initialize transcriber (local Whisper or Google Cloud)
         use_local_stt = self.config.get("use_local_stt", False)
@@ -69,8 +69,8 @@ class Synthia:
             use_local=use_local_stt,
             local_model=self.config.get("local_stt_model", "small"),
         )
-        print(
-            f"✅ Transcriber initialized ({'local Whisper' if use_local_stt else 'Google Cloud'})"
+        logger.info(
+            "Transcriber initialized (%s)", "local Whisper" if use_local_stt else "Google Cloud"
         )
 
         # Initialize TTS (local Piper or Google Cloud)
@@ -84,7 +84,7 @@ class Synthia:
                 "local_tts_voice", "~/.local/share/piper-voices/en_US-amy-medium.onnx"
             ),
         )
-        print(f"✅ TTS initialized ({'local Piper' if use_local_tts else 'Google Cloud'})")
+        logger.info("TTS initialized (%s)", "local Piper" if use_local_tts else "Google Cloud")
 
         # Initialize Assistant (local Ollama or Claude API)
         use_local_llm = self.config.get("use_local_llm", False)
@@ -98,9 +98,9 @@ class Synthia:
             ollama_url=self.config.get("ollama_url", "http://localhost:11434"),
             dev_mode=dev_mode,
         )
-        print(f"✅ Assistant initialized ({'local Ollama' if use_local_llm else 'Claude API'})")
+        logger.info("Assistant initialized (%s)", "local Ollama" if use_local_llm else "Claude API")
         if dev_mode:
-            print("✅ Memory auto-retrieval enabled (dev mode)")
+            logger.info("Memory auto-retrieval enabled (dev mode)")
 
         # Initialize LLM polisher for dictation accuracy (if enabled)
         use_llm_polish = self.config.get("use_llm_polish", True)
@@ -111,7 +111,7 @@ class Synthia:
                 timeout=self.config.get("llm_polish_timeout", 3.0),
                 enabled=True,
             )
-            print("✅ LLM polish for dictation: enabled")
+            logger.info("LLM polish for dictation: enabled")
         else:
             self.polisher = None
 
@@ -163,10 +163,10 @@ class Synthia:
         dictation_display = self.config["dictation_key"].replace("Key.", "").replace("_", " ").title()
         assistant_display = self.config["assistant_key"].replace("Key.", "").replace("_", " ").title()
 
-        print(f"\n🖥️  Display server: {get_display_server()}")
-        print(f"📌 Dictation key: {dictation_display} (hold to dictate)")
-        print(f"📌 Assistant key: {assistant_display} (hold to ask AI)")
-        print("\n✨ Synthia ready!\n")
+        logger.info("Display server: %s", get_display_server())
+        logger.info("Dictation key: %s (hold to dictate)", dictation_display)
+        logger.info("Assistant key: %s (hold to ask AI)", assistant_display)
+        logger.info("Synthia ready!")
 
         # Show notification
         if self.config.get("show_notifications", True):
@@ -246,9 +246,9 @@ class Synthia:
                     # Update our stored config
                     self.config = new_config
 
-                    print(f"✅ Hotkeys updated dynamically!")
+                    logger.info("Hotkeys updated dynamically")
             except Exception as e:
-                print(f"⚠️ Config reload error: {e}")
+                logger.warning("Config reload error: %s", e)
 
             time.sleep(0.5)  # Check twice per second
 
@@ -265,7 +265,7 @@ class Synthia:
                 self.tray.set_status(Status.RECORDING)
             self.sounds.play_start()
         except Exception as e:
-            print(f"❌ Could not start recording: {e}")
+            logger.error("Could not start recording: %s", e)
             self.sounds.play_error()
 
     def _on_dictation_release(self):
@@ -300,7 +300,7 @@ class Synthia:
                 self.tray.set_status(Status.READY)
 
         except Exception as e:
-            print(f"❌ Error: {e}")
+            logger.error("Error: %s", e)
             self.sounds.play_error()
             if self.config.get("show_notifications", True):
                 notify_error(str(e))
@@ -320,7 +320,7 @@ class Synthia:
                 self.tray.set_status(Status.ASSISTANT)
             self.sounds.play_start()
         except Exception as e:
-            print(f"❌ Could not start recording: {e}")
+            logger.error("Could not start recording: %s", e)
             self.sounds.play_error()
 
     def _on_assistant_release(self):
@@ -342,7 +342,7 @@ class Synthia:
                 text = self.transcriber.transcribe(audio_data)
 
                 if text:
-                    print(f"\n🎯 Command: {text}")
+                    logger.info("Command: %s", text)
 
                     # Process with Claude
                     response = self.assistant.process(text)
@@ -355,23 +355,21 @@ class Synthia:
                             notify_assistant(response["speech"])
 
                     # Execute any actions
-                    print(f"🔧 Actions received: {response.get('actions')}")
+                    logger.debug("Actions received: %s", response.get("actions"))
                     if response.get("actions"):
                         results, command_output = execute_actions(response["actions"])
-                        print(f"🔧 Action results: {results}")
+                        logger.debug("Action results: %s", results)
 
                         # If a command returned output, speak it
                         if command_output:
                             self.tts.speak(command_output)
-
-                    print()
 
             self._update_state("ready")
             if self.tray:
                 self.tray.set_status(Status.READY)
 
         except Exception as e:
-            print(f"❌ Error: {e}")
+            logger.error("Error: %s", e)
             self.sounds.play_error()
             if self.config.get("show_notifications", True):
                 notify_error(str(e))
@@ -380,11 +378,11 @@ class Synthia:
 
     def run(self):
         """Run the main keyboard listener loop."""
-        print("Use Ctrl+C to exit\n")
+        logger.info("Use Ctrl+C to exit")
 
         # Handle Ctrl+C gracefully
         def signal_handler(sig, frame):
-            print("\n👋 Interrupted, exiting...")
+            logger.info("Interrupted, exiting...")
             self.running = False
             self.hotkey_listener.stop()
 
@@ -397,7 +395,7 @@ class Synthia:
         # Start clipboard monitor (if enabled)
         if self.clipboard_monitor:
             self.clipboard_monitor.start()
-            print("✅ Clipboard monitor started")
+            logger.info("Clipboard monitor started")
 
         # Start the hotkey listener (auto-detects Wayland vs X11)
         self.hotkey_listener.start()
@@ -529,9 +527,9 @@ def main():
         app = Synthia()
         app.run()
     except KeyboardInterrupt:
-        print("\n👋 Interrupted, exiting...")
+        logger.info("Interrupted, exiting...")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        logger.error("Error: %s", e)
         raise
 
 

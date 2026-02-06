@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-import requests
+import logging
 from typing import Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
 
 POLISH_PROMPT = """You are a transcription correction assistant. Your ONLY job is to fix speech recognition errors in the following transcription.
 
@@ -53,7 +57,7 @@ class TranscriptionPolisher:
         try:
             return self._call_ollama(transcription)
         except Exception as e:
-            print(f"LLM polish error (using original): {e}")
+            logger.debug("LLM polish error (using original): %s", e)
             return transcription
 
     def _call_ollama(self, transcription: str) -> str:

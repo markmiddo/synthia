@@ -11,11 +11,14 @@ This module provides a tag-based JSONL memory system for storing:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # Default memory location (can be overridden in config)
 DEFAULT_MEMORY_DIR = Path.home() / ".claude" / "memory"
@@ -133,7 +136,7 @@ class MemorySystem:
         # Determine which files to search
         if category:
             if category not in MEMORY_CATEGORIES:
-                print(f"Unknown category: {category}")
+                logger.warning("Unknown category: %s", category)
                 return []
             files = [self.memory_dir / MEMORY_CATEGORIES[category]]
         else:
@@ -192,8 +195,8 @@ class MemorySystem:
             True if successful, False otherwise
         """
         if category not in MEMORY_CATEGORIES:
-            print(f"Unknown category: {category}")
-            print(f"Valid categories: {', '.join(MEMORY_CATEGORIES.keys())}")
+            logger.warning("Unknown category: %s", category)
+            logger.warning("Valid categories: %s", ", ".join(MEMORY_CATEGORIES.keys()))
             return False
 
         # Validate required fields
@@ -207,7 +210,7 @@ class MemorySystem:
 
         missing = [f for f in required_fields[category] if f not in data]
         if missing:
-            print(f"Missing required fields for {category}: {', '.join(missing)}")
+            logger.warning("Missing required fields for %s: %s", category, ", ".join(missing))
             return False
 
         # Create entry
@@ -218,7 +221,7 @@ class MemorySystem:
         with open(filepath, "a") as f:
             f.write(json.dumps(entry.to_dict()) + "\n")
 
-        print(f"Added {category} entry with tags: {', '.join(tags)}")
+        logger.info("Added %s entry with tags: %s", category, ", ".join(tags))
         return True
 
     def list_categories(self) -> Dict[str, int]:

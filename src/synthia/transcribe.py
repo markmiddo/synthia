@@ -1,10 +1,13 @@
 """Speech-to-Text integration with Google Cloud and local Whisper options."""
 
+import logging
 import os
 import sys
 import tempfile
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Add cuDNN libraries to path for GPU support
 _cudnn_path = os.path.join(
@@ -57,7 +60,7 @@ class Transcriber:
                 interaction_type=speech.RecognitionMetadata.InteractionType.DICTATION,
             ),
         )
-        print(f"Google STT initialized")
+        logger.info("Google STT initialized")
 
     def _init_whisper(self):
         """Initialize local Whisper model using faster-whisper."""
@@ -69,20 +72,20 @@ class Transcriber:
         from faster_whisper import WhisperModel
 
         model_name = "tiny"
-        print(f"Loading faster-whisper model: {model_name}...")
+        logger.info("Loading faster-whisper model: %s...", model_name)
 
         # Always use CPU - CUDA has library issues on this system
         self.whisper_model = WhisperModel(
             model_name, device="cpu", compute_type="int8", cpu_threads=4
         )
-        print(f"Faster-whisper {model_name} loaded (CPU int8)")
+        logger.info("Faster-whisper %s loaded (CPU int8)", model_name)
 
     def transcribe(self, audio_data: bytes) -> str:
         """Transcribe audio bytes to text."""
         if not audio_data:
             return ""
 
-        print("Transcribing...")
+        logger.debug("Transcribing...")
 
         try:
             if self.use_local:
@@ -90,7 +93,7 @@ class Transcriber:
             else:
                 return self._transcribe_google(audio_data)
         except Exception as e:
-            print(f"Transcription error: {e}")
+            logger.error("Transcription error: %s", e)
             return ""
 
     def _transcribe_google(self, audio_data: bytes) -> str:
@@ -102,7 +105,7 @@ class Transcriber:
         response = self.client.recognize(config=self.config, audio=audio)
 
         if not response.results:
-            print("No transcription results")
+            logger.debug("No transcription results")
             return ""
 
         # Concatenate all transcription results
@@ -112,7 +115,7 @@ class Transcriber:
 
         # Remove filler words
         cleaned = self._clean_transcript(transcript)
-        print(f"Transcribed: {cleaned}")
+        logger.info("Transcribed: %s", cleaned)
         return cleaned
 
     def _transcribe_whisper(self, audio_data: bytes) -> str:
@@ -133,7 +136,7 @@ class Transcriber:
 
         # Remove filler words
         cleaned = self._clean_transcript(transcript)
-        print(f"Transcribed: {cleaned}")
+        logger.info("Transcribed: %s", cleaned)
         return cleaned
 
     def _clean_transcript(self, transcript: str) -> str:

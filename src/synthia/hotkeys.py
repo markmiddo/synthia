@@ -98,13 +98,13 @@ class EvdevHotkeyListener(HotkeyListener):
                         keys = capabilities[ecodes.EV_KEY]
                         if self.dictation_key_code in keys or self.assistant_key_code in keys:
                             keyboards.append(device)
-                            print(f"📎 Found keyboard: {device.name} ({device.path})")
+                            logger.info("Found keyboard: %s (%s)", device.name, device.path)
                 except (PermissionError, OSError) as e:
                     continue
 
             return keyboards
         except ImportError:
-            print("❌ evdev not installed. Install with: pip install evdev")
+            logger.error("evdev not installed. Install with: pip install evdev")
             return []
 
     def _listen(self):
@@ -140,7 +140,7 @@ class EvdevHotkeyListener(HotkeyListener):
 
             selector.close()
         except Exception as e:
-            print(f"❌ evdev listener error: {e}")
+            logger.error("evdev listener error: %s", e)
 
     def start(self):
         """Start the evdev listener in a background thread."""
@@ -174,7 +174,13 @@ class EvdevHotkeyListener(HotkeyListener):
         """Update hotkeys without restarting the listener."""
         self.dictation_key_code = self.get_key_code(dictation_key_string)
         self.assistant_key_code = self.get_key_code(assistant_key_string)
-        print(f"🔄 Hotkeys updated: dictation={dictation_key_string} (code {self.dictation_key_code}), assistant={assistant_key_string} (code {self.assistant_key_code})")
+        logger.info(
+            "Hotkeys updated: dictation=%s (code %s), assistant=%s (code %s)",
+            dictation_key_string,
+            self.dictation_key_code,
+            assistant_key_string,
+            self.assistant_key_code,
+        )
 
 
 class PynputHotkeyListener(HotkeyListener):
@@ -262,7 +268,7 @@ class PynputHotkeyListener(HotkeyListener):
 
         self.dictation_key = parse_key(dictation_key_string)
         self.assistant_key = parse_key(assistant_key_string)
-        print(f"🔄 Hotkeys updated: dictation={dictation_key_string}, assistant={assistant_key_string}")
+        logger.info("Hotkeys updated: dictation=%s, assistant=%s", dictation_key_string, assistant_key_string)
 
 
 def create_hotkey_listener(
@@ -291,11 +297,11 @@ def create_hotkey_listener(
         HotkeyListener instance appropriate for the display server
     """
     if is_wayland():
-        print("🔧 Wayland detected - using evdev for hotkeys")
+        logger.info("Wayland detected - using evdev for hotkeys")
         dictation_code = EvdevHotkeyListener.get_key_code(dictation_key_string)
         assistant_code = EvdevHotkeyListener.get_key_code(assistant_key_string)
-        print(f"   Dictation key: {dictation_key_string} (code {dictation_code})")
-        print(f"   Assistant key: {assistant_key_string} (code {assistant_code})")
+        logger.info("Dictation key: %s (code %s)", dictation_key_string, dictation_code)
+        logger.info("Assistant key: %s (code %s)", assistant_key_string, assistant_code)
         return EvdevHotkeyListener(
             on_dictation_press=on_dictation_press,
             on_dictation_release=on_dictation_release,
@@ -305,7 +311,7 @@ def create_hotkey_listener(
             assistant_key_code=assistant_code,
         )
     else:
-        print("🔧 X11 detected - using pynput for hotkeys")
+        logger.info("X11 detected - using pynput for hotkeys")
         return PynputHotkeyListener(
             on_dictation_press=on_dictation_press,
             on_dictation_release=on_dictation_release,

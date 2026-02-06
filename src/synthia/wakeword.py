@@ -4,12 +4,15 @@ Uses a simple approach: continuously listen and check transcription for wake wor
 For production, you'd want something like Porcupine or Snowboy for offline detection.
 """
 
+import logging
 import threading
 import time
 from typing import Callable, Optional
 
 import numpy as np
 import sounddevice as sd
+
+logger = logging.getLogger(__name__)
 
 
 class WakeWordDetector:
@@ -44,7 +47,7 @@ class WakeWordDetector:
 
     def _listen_loop(self):
         """Main listening loop - runs in background thread."""
-        print("👂 Wake word detection active...")
+        logger.info("Wake word detection active")
 
         while self.running:
             try:
@@ -70,7 +73,7 @@ class WakeWordDetector:
 
                     for wake_word in self.wake_words:
                         if wake_word in text_lower:
-                            print(f"🎤 Wake word detected: '{wake_word}'")
+                            logger.info("Wake word detected: '%s'", wake_word)
                             if self.on_wake:
                                 self.on_wake()
                             # Brief pause after detection
@@ -78,7 +81,7 @@ class WakeWordDetector:
                             break
 
             except Exception as e:
-                print(f"Wake word error: {e}")
+                logger.error("Wake word error: %s", e)
                 time.sleep(1)
 
     def start(self):
@@ -96,4 +99,4 @@ class WakeWordDetector:
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
-        print("👂 Wake word detection stopped")
+        logger.info("Wake word detection stopped")

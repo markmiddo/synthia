@@ -1,10 +1,13 @@
 """Web search integration for Synthia using Tavily API."""
 
+import logging
 from typing import Optional
 
 from tavily import TavilyClient
 
 from synthia.config import load_config
+
+logger = logging.getLogger(__name__)
 
 
 class WebSearch:
@@ -61,7 +64,7 @@ class WebSearch:
             }
 
         except Exception as e:
-            print(f"Web search error: {e}")
+            logger.error("Web search error: %s", e)
             return {
                 "answer": f"Search failed: {str(e)}",
                 "sources": [],

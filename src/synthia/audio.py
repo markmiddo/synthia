@@ -1,11 +1,14 @@
 """Audio capture for Synthia."""
 
+import logging
 import queue
 from typing import Optional, Tuple
 
 import numpy as np
 import sounddevice as sd
 from scipy import signal
+
+logger = logging.getLogger(__name__)
 
 
 class AudioRecorder:
@@ -27,8 +30,10 @@ class AudioRecorder:
 
         # Get the device's native sample rate
         self.device_sample_rate = self._get_device_sample_rate()
-        print(
-            f"📊 Device sample rate: {self.device_sample_rate}Hz, target: {self.target_sample_rate}Hz"
+        logger.debug(
+            "Device sample rate: %sHz, target: %sHz",
+            self.device_sample_rate,
+            self.target_sample_rate,
         )
 
     def _find_usb_mic(self) -> Optional[int]:
@@ -39,12 +44,12 @@ class AudioRecorder:
             if device["max_input_channels"] > 0:
                 # Prefer USB microphone
                 if "usb" in name and "microphone" in name:
-                    print(f"🎙️  Found USB Microphone: {device['name']} (device {i})")
+                    logger.info("Found USB Microphone: %s (device %s)", device["name"], i)
                     return i
         # Fallback to pulse
         for i, device in enumerate(devices):
             if device["name"] == "pulse" and device["max_input_channels"] > 0:
-                print(f"🎙️  Using PulseAudio: {device['name']} (device {i})")
+                logger.info("Using PulseAudio: %s (device %s)", device["name"], i)
                 return i
         return None
 
@@ -68,7 +73,7 @@ class AudioRecorder:
     def _audio_callback(self, indata, frames, time, status):
         """Callback for audio stream - adds audio chunks to queue."""
         if status:
-            print(f"Audio status: {status}")
+            logger.debug("Audio status: %s", status)
         if self.recording:
             self.audio_queue.put(indata.copy())
 
@@ -90,7 +95,7 @@ class AudioRecorder:
             callback=self._audio_callback,
         )
         self.stream.start()
-        print("🎤 Recording...")
+        logger.info("Recording...")
 
     def stop_recording(self) -> bytes:
         """Stop recording and return the audio data as bytes (resampled to target rate)."""
@@ -110,25 +115,25 @@ class AudioRecorder:
                 break
 
         if not chunks:
-            print("⚠️  No audio recorded")
+            logger.warning("No audio recorded")
             return b""
 
         # Concatenate all chunks
         audio_data = np.concatenate(chunks, axis=0).flatten()
         duration = len(audio_data) / self.device_sample_rate
-        print(f"🔇 Stopped recording ({duration:.1f}s)")
+        logger.info("Stopped recording (%.1fs)", duration)
 
         # Check audio levels
         max_level = np.abs(audio_data).max()
         mean_level = np.abs(audio_data).mean()
-        print(f"📊 Audio levels - max: {max_level}, mean: {mean_level:.0f}")
+        logger.debug("Audio levels - max: %s, mean: %.0f", max_level, mean_level)
 
         if max_level < 100:
-            print("⚠️  Audio levels very low - check microphone")
+            logger.warning("Audio levels very low - check microphone")
 
         # Resample to target rate for Google STT
         if self.device_sample_rate != self.target_sample_rate:
-            print(f"🔄 Resampling {self.device_sample_rate}Hz → {self.target_sample_rate}Hz...")
+            logger.debug("Resampling %sHz -> %sHz", self.device_sample_rate, self.target_sample_rate)
             audio_data = self._resample(
                 audio_data, self.device_sample_rate, self.target_sample_rate
             )

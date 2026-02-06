@@ -1,10 +1,13 @@
 """AI Assistant integration for Synthia - supports Claude API and local Ollama."""
 
 import json
+import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are Synthia, a friendly voice assistant on a Linux system. Today is {date}.
 
@@ -107,12 +110,12 @@ class Assistant:
         self.dev_mode = dev_mode  # Auto-retrieve memory context in dev mode
 
         if use_local:
-            print(f"Assistant initialized with local model: {self.model}")
+            logger.info("Assistant initialized with local model: %s", self.model)
         else:
             import anthropic
 
             self.client = anthropic.Anthropic(api_key=api_key)
-            print(f"Assistant initialized with Claude: {model}")
+            logger.info("Assistant initialized with Claude: %s", model)
 
     def _add_to_history(self, role: str, content: str):
         """Add a message to conversation history, maintaining memory limit."""
@@ -134,7 +137,7 @@ class Assistant:
             mem = get_memory_system()
             return mem.get_context_for_task(text)
         except Exception as e:
-            print(f"Memory context error: {e}")
+            logger.debug("Memory context error: %s", e)
             return ""
 
     def process(self, user_input: str) -> Dict[str, Any]:
@@ -147,7 +150,7 @@ class Assistant:
         if self.dev_mode:
             memory_context = self._get_memory_context(user_input)
             if memory_context:
-                print(f"Auto-retrieved memory context for: {user_input[:50]}...")
+                logger.debug("Auto-retrieved memory context for: %s...", user_input[:50])
 
         # Combine memory context with user input if available
         enriched_input = user_input
@@ -163,7 +166,7 @@ class Assistant:
             else:
                 return self._process_claude(enriched_input)
         except Exception as e:
-            print(f"Assistant error: {e}")
+            logger.error("Assistant error: %s", e)
             return {"speech": f"Sorry, I encountered an error: {str(e)}", "actions": []}
 
     def _process_claude(self, user_input: str) -> Dict[str, Any]:
@@ -272,21 +275,21 @@ class Assistant:
                 result["actions"] = []
 
         except json.JSONDecodeError as e:
-            print(f"JSON parse error: {e}")
-            print(f"Raw response: {response_text[:200]}")
+            logger.warning("JSON parse error: %s", e)
+            logger.debug("Raw response: %s", response_text[:200])
             # If JSON parsing fails, treat the whole response as speech
             result = {"speech": response_text, "actions": []}
 
         # Add assistant response to history
         self._add_to_history("assistant", json.dumps(result))
 
-        print(f"Response: {result['speech']}")
+        logger.debug("Response: %s", result["speech"])
         if result["actions"]:
-            print(f"Actions: {result['actions']}")
+            logger.debug("Actions: %s", result["actions"])
 
         return result
 
     def clear_history(self):
         """Clear conversation history."""
         self.conversation_history = []
-        print("Conversation history cleared")
+        logger.debug("Conversation history cleared")

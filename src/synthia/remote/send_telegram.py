@@ -67,7 +67,7 @@ def send_telegram(message: str, parse_mode: str = None):
         response = requests.post(url, json=data, timeout=10)
         return response.status_code == 200
     except Exception as e:
-        print(f"Telegram send error: {e}", file=sys.stderr)
+        logger.error("Telegram send error: %s", e)
         return False
 
 
