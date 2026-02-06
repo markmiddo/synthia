@@ -1,7 +1,89 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Markdown from "react-markdown";
 import "./App.css";
+
+function DatePicker({ value, onChange }: { value: string; onChange: (val: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const today = new Date();
+  const selected = value ? new Date(value + "T00:00:00") : null;
+  const [viewYear, setViewYear] = useState(selected?.getFullYear() ?? today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(selected?.getMonth() ?? today.getMonth());
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const fmt = (y: number, m: number, d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
+  const todayStr = fmt(today.getFullYear(), today.getMonth(), today.getDate());
+
+  const prevMonth = () => {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); }
+    else setViewMonth(viewMonth - 1);
+  };
+  const nextMonth = () => {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); }
+    else setViewMonth(viewMonth + 1);
+  };
+
+  const displayValue = selected
+    ? `${selected.getDate()} ${monthNames[selected.getMonth()]} ${selected.getFullYear()}`
+    : "";
+
+  return (
+    <div className="date-picker" ref={ref}>
+      <div className="date-picker-input" onClick={() => setOpen(!open)}>
+        <span className={displayValue ? "date-picker-value" : "date-picker-placeholder"}>
+          {displayValue || "Select date..."}
+        </span>
+        {value && (
+          <span className="date-picker-clear" onClick={(e) => { e.stopPropagation(); onChange(""); }}>×</span>
+        )}
+      </div>
+      {open && (
+        <div className="date-picker-dropdown">
+          <div className="date-picker-header">
+            <button onClick={prevMonth}>&lsaquo;</button>
+            <span>{monthNames[viewMonth]} {viewYear}</span>
+            <button onClick={nextMonth}>&rsaquo;</button>
+          </div>
+          <div className="date-picker-weekdays">
+            {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(d => <span key={d}>{d}</span>)}
+          </div>
+          <div className="date-picker-days">
+            {Array.from({ length: firstDay }, (_, i) => <span key={`e${i}`} className="date-picker-empty" />)}
+            {Array.from({ length: daysInMonth }, (_, i) => {
+              const day = i + 1;
+              const dateStr = fmt(viewYear, viewMonth, day);
+              const isSelected = dateStr === value;
+              const isToday = dateStr === todayStr;
+              return (
+                <button
+                  key={day}
+                  className={`date-picker-day${isSelected ? " selected" : ""}${isToday ? " today" : ""}`}
+                  onClick={() => { onChange(dateStr); setOpen(false); }}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type Status = "stopped" | "running" | "recording" | "thinking";
 
@@ -2225,10 +2307,9 @@ function App() {
               <div className="task-field-row">
                 <div className="task-field">
                   <label>Due Date</label>
-                  <input
-                    type="date"
+                  <DatePicker
                     value={due}
-                    onChange={(e) => isEditing ? setEditingTask({ ...editingTask, due_date: e.target.value }) : setNewTaskDue(e.target.value)}
+                    onChange={(val) => isEditing ? setEditingTask({ ...editingTask, due_date: val }) : setNewTaskDue(val)}
                   />
                 </div>
                 <div className="task-field">
