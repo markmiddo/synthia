@@ -2,8 +2,9 @@
 # Launch Synthia with cuDNN libraries in path
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CUDNN_LIB="$SCRIPT_DIR/venv/lib/python3.10/site-packages/nvidia/cudnn/lib"
-CUBLAS_LIB="$SCRIPT_DIR/venv/lib/python3.10/site-packages/nvidia/cublas/lib"
+PYTHON_VERSION=$(./venv/bin/python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+CUDNN_LIB="$SCRIPT_DIR/venv/lib/python${PYTHON_VERSION}/site-packages/nvidia/cudnn/lib"
+CUBLAS_LIB="$SCRIPT_DIR/venv/lib/python${PYTHON_VERSION}/site-packages/nvidia/cublas/lib"
 
 export LD_LIBRARY_PATH="$CUDNN_LIB:$CUBLAS_LIB:$LD_LIBRARY_PATH"
 export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"

@@ -101,6 +101,10 @@ echo -e "  ${GREEN}✓${NC} Virtual environment created"
 # ============================================================================
 echo -e "${BLUE}Installing Synthia...${NC}"
 pip install -e "$SCRIPT_DIR" -q
+
+# Fix broken piper-tts packaging (missing pathvalidate dependency)
+pip install pathvalidate -q
+
 echo -e "  ${GREEN}✓${NC} Synthia package installed"
 
 # ============================================================================
