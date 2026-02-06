@@ -45,16 +45,18 @@ class ClipboardMonitor:
             self.history = []
 
     def _save_history(self):
-        """Save history to file."""
+        """Save history to file with restrictive permissions."""
         try:
             with open(self.history_file, "w") as f:
                 json.dump(self.history, f, indent=2)
+            # SECURITY: Clipboard may contain sensitive data (passwords, tokens)
+            os.chmod(self.history_file, 0o600)
         except Exception as e:
             print(f"Failed to save clipboard history: {e}")
 
     def _content_hash(self, content: str) -> str:
         """Generate hash of content for deduplication."""
-        return hashlib.md5(content.encode()).hexdigest()
+        return hashlib.sha256(content.encode()).hexdigest()
 
     def _add_item(self, content: str):
         """Add item to history (deduplicated)."""

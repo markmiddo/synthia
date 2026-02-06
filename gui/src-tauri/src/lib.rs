@@ -13,6 +13,35 @@ use std::thread;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
+/// Get the Synthia project root directory.
+/// Resolves from the executable path (gui/src-tauri/target/release/synthia-gui)
+/// or falls back to finding run.sh relative to the binary.
+fn get_synthia_root() -> PathBuf {
+    // Try to find the root by looking for run.sh relative to the executable
+    if let Ok(exe) = std::env::current_exe() {
+        // The binary is at gui/src-tauri/target/release/synthia-gui
+        // So root is 4 levels up: release -> target -> src-tauri -> gui -> root
+        let mut path = exe.clone();
+        for _ in 0..5 {
+            path = path.parent().unwrap_or(&path).to_path_buf();
+            if path.join("run.sh").exists() {
+                return path;
+            }
+        }
+    }
+    // Fallback: check if SYNTHIA_ROOT env var is set
+    if let Ok(root) = std::env::var("SYNTHIA_ROOT") {
+        return PathBuf::from(root);
+    }
+    // Last resort: current directory
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Get the XDG runtime directory for temp files (not world-readable /tmp).
+fn get_runtime_dir() -> PathBuf {
+    PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string()))
+}
+
 fn load_icon_from_path(path: &PathBuf) -> Option<Image<'static>> {
     let img = image::open(path).ok()?.to_rgba8();
     let (width, height) = img.dimensions();
@@ -254,12 +283,12 @@ fn get_inbox_file() -> PathBuf {
 }
 
 fn get_worktrees_config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/markmiddo".to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/synthia/worktrees.yaml")
 }
 
 fn get_claude_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/markmiddo".to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".claude")
 }
 
@@ -822,8 +851,9 @@ fn start_synthia() -> Result<String, String> {
         return Ok("Already running".to_string());
     }
 
-    let child = Command::new("/home/markmiddo/dev/misc/synthia/run.sh")
-        .current_dir("/home/markmiddo/dev/misc/synthia")
+    let root = get_synthia_root();
+    let child = Command::new(root.join("run.sh"))
+        .current_dir(&root)
         .spawn()
         .map_err(|e| format!("Failed to start: {}", e))?;
 
@@ -859,26 +889,31 @@ fn start_remote_mode() -> Result<String, String> {
         return Ok("Remote mode already running".to_string());
     }
 
-    // Create the remote mode flag file with chat ID (enables response forwarding to Telegram)
-    // Chat ID is needed by send_telegram.py to know where to send messages
-    let _ = fs::write("/tmp/synthia-remote-mode", "537808338");
+    let root = get_synthia_root();
+    let runtime_dir = get_runtime_dir();
+    let remote_mode_file = runtime_dir.join("synthia-remote-mode");
+
+    // Create the remote mode flag file (chat ID is read from config by telegram_bot.py)
+    let _ = fs::write(&remote_mode_file, "remote");
 
     // Start the telegram bot with CUDA disabled
-    Command::new("/home/markmiddo/dev/misc/synthia/venv/bin/python")
-        .args(["/home/markmiddo/dev/misc/synthia/src/synthia/remote/telegram_bot.py"])
-        .current_dir("/home/markmiddo/dev/misc/synthia")
+    let python = root.join("venv/bin/python");
+    let bot_script = root.join("src/synthia/remote/telegram_bot.py");
+    Command::new(&python)
+        .args([bot_script.to_str().unwrap_or("")])
+        .current_dir(&root)
         .env("CUDA_VISIBLE_DEVICES", "")
         .spawn()
         .map_err(|e| format!("Failed to start remote mode: {}", e))?;
 
     // Send notification in background (don't block UI)
-    let _ = Command::new("/home/markmiddo/dev/misc/synthia/venv/bin/python")
+    let _ = Command::new(&python)
         .args([
-            "/home/markmiddo/dev/misc/synthia/src/synthia/remote/telegram_bot.py",
+            bot_script.to_str().unwrap_or(""),
             "--notify",
             "🟢 *Remote Mode ENABLED*\n\nYou can now control Claude Code via Telegram."
         ])
-        .current_dir("/home/markmiddo/dev/misc/synthia")
+        .current_dir(&root)
         .spawn();
 
     Ok("Remote mode started".to_string())
@@ -886,8 +921,12 @@ fn start_remote_mode() -> Result<String, String> {
 
 #[tauri::command]
 fn stop_remote_mode() -> Result<String, String> {
+    let root = get_synthia_root();
+    let runtime_dir = get_runtime_dir();
+    let remote_mode_file = runtime_dir.join("synthia-remote-mode");
+
     // Remove the remote mode flag file (stops response forwarding to Telegram)
-    let _ = fs::remove_file("/tmp/synthia-remote-mode");
+    let _ = fs::remove_file(&remote_mode_file);
 
     // Kill the bot immediately for instant UI response
     let _ = Command::new("pkill")
@@ -895,13 +934,15 @@ fn stop_remote_mode() -> Result<String, String> {
         .output();
 
     // Send notification in background (after bot is killed, uses --notify which is standalone)
-    let _ = Command::new("/home/markmiddo/dev/misc/synthia/venv/bin/python")
+    let python = root.join("venv/bin/python");
+    let bot_script = root.join("src/synthia/remote/telegram_bot.py");
+    let _ = Command::new(&python)
         .args([
-            "/home/markmiddo/dev/misc/synthia/src/synthia/remote/telegram_bot.py",
+            bot_script.to_str().unwrap_or(""),
             "--notify",
             "🔴 *Remote Mode DISABLED*\n\nTelegram bot stopped."
         ])
-        .current_dir("/home/markmiddo/dev/misc/synthia")
+        .current_dir(&root)
         .spawn();
 
     Ok("Remote mode stopped".to_string())
@@ -958,7 +999,7 @@ fn clear_history() -> Result<String, String> {
 }
 
 fn get_config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/markmiddo".to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/synthia/config.yaml")
 }
 
@@ -1048,7 +1089,7 @@ fn save_hotkeys(dictation_key: String, assistant_key: String) -> Result<String, 
 
     // Signal Synthia to reload config by touching a signal file
     // Synthia watches for this file and updates hotkeys dynamically (no restart needed!)
-    let signal_file = PathBuf::from("/tmp/synthia-reload-config");
+    let signal_file = get_runtime_dir().join("synthia-reload-config");
     fs::write(&signal_file, "reload").ok();
 
     Ok("Hotkeys saved".to_string())
@@ -1525,7 +1566,7 @@ fn save_synthia_config(config: SynthiaConfig) -> Result<String, String> {
         .map_err(|e| format!("Failed to write config: {}", e))?;
 
     // Signal Synthia to reload config
-    let signal_file = PathBuf::from("/tmp/synthia-reload-config");
+    let signal_file = get_runtime_dir().join("synthia-reload-config");
     fs::write(&signal_file, "reload").ok();
 
     Ok("Config saved".to_string())
@@ -2160,7 +2201,14 @@ fn get_usage_stats() -> UsageStats {
 
 // === NOTES COMMANDS ===
 
-const NOTES_BASE_PATH: &str = "/home/markmiddo/dev/eventflo/docs";
+fn get_notes_base_path() -> PathBuf {
+    // Check NOTES_PATH env var first, then fall back to ~/dev/eventflo/docs
+    if let Ok(path) = std::env::var("SYNTHIA_NOTES_PATH") {
+        return PathBuf::from(path);
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join("dev/eventflo/docs")
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 struct NoteEntry {
@@ -2171,7 +2219,7 @@ struct NoteEntry {
 
 #[tauri::command]
 fn list_notes(subpath: Option<String>) -> Result<Vec<NoteEntry>, String> {
-    let base = PathBuf::from(NOTES_BASE_PATH);
+    let base = get_notes_base_path();
     let target = match &subpath {
         Some(p) if !p.is_empty() => base.join(p),
         _ => base.clone(),
@@ -2230,7 +2278,7 @@ fn list_notes(subpath: Option<String>) -> Result<Vec<NoteEntry>, String> {
 
 #[tauri::command]
 fn read_note(path: String) -> Result<String, String> {
-    let base = PathBuf::from(NOTES_BASE_PATH);
+    let base = get_notes_base_path();
     let full_path = base.join(&path);
 
     if !full_path.starts_with(&base) {
@@ -2243,7 +2291,7 @@ fn read_note(path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn save_note(path: String, content: String) -> Result<String, String> {
-    let base = PathBuf::from(NOTES_BASE_PATH);
+    let base = get_notes_base_path();
     let full_path = base.join(&path);
 
     if !full_path.starts_with(&base) {
@@ -2258,7 +2306,7 @@ fn save_note(path: String, content: String) -> Result<String, String> {
 
 #[tauri::command]
 fn rename_note(old_path: String, new_path: String) -> Result<String, String> {
-    let base = PathBuf::from(NOTES_BASE_PATH);
+    let base = get_notes_base_path();
     let old_full = base.join(&old_path);
     let new_full = base.join(&new_path);
 
@@ -2284,7 +2332,7 @@ fn rename_note(old_path: String, new_path: String) -> Result<String, String> {
 fn resend_to_assistant(text: String) -> Result<String, String> {
     // Use xdotool to type the text into Claude Code terminal
     // First, we'll write to a temp file that the stop hook can check
-    let prompt_file = PathBuf::from("/tmp/synthia-resend-prompt");
+    let prompt_file = get_runtime_dir().join("synthia-resend-prompt");
     fs::write(&prompt_file, &text).map_err(|e| e.to_string())?;
 
     // Use xdotool to focus Claude Code window and type the text
@@ -2320,7 +2368,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Clean up any stale remote mode state from previous sessions
-            let _ = fs::remove_file("/tmp/synthia-remote-mode");
+            let _ = fs::remove_file(get_runtime_dir().join("synthia-remote-mode"));
             let _ = Command::new("pkill")
                 .args(["-f", "telegram_bot.py"])
                 .output();
@@ -2387,7 +2435,7 @@ pub fn run() {
 
             // Load tray icons - try bundled resources first, then fall back to dev path
             let resource_dir = app.path().resource_dir().unwrap_or_default();
-            let dev_icons_dir = PathBuf::from("/home/markmiddo/dev/misc/synthia/gui/src-tauri/icons");
+            let dev_icons_dir = get_synthia_root().join("gui/src-tauri/icons");
 
             let normal_icon_path = if resource_dir.join("icons/tray-icon.png").exists() {
                 resource_dir.join("icons/tray-icon.png")

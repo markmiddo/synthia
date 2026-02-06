@@ -1056,7 +1056,7 @@ class SynthiaDashboard(App):
                 subprocess.Popen([
                     'flatpak', 'run', 'org.wezfurlong.wezterm', 'cli',
                     'split-pane', '--bottom', '--percent', '50', '--',
-                    'bash', '-c', f'cd {wt.path} && /home/markmiddo/.local/bin/claude --dangerously-skip-permissions'
+                    'bash', '-c', f'cd {wt.path} && claude --dangerously-skip-permissions'
                 ])
                 self._set_status(f"Opening Claude in {Path(wt.path).name}...")
         except Exception:

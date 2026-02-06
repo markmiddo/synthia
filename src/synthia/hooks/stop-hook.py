@@ -9,11 +9,23 @@ import os
 import json
 import time
 
-# Add synthia to path
-sys.path.insert(0, '/home/markmiddo/dev/misc/synthia/src')
+# Add synthia to path (resolve relative to this file's location)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Track last spoken message to avoid repeats
-LAST_MESSAGE_FILE = '/tmp/synthia-last-spoken-hash'
+# Use XDG_RUNTIME_DIR for temp files (not world-readable /tmp)
+_RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+LAST_MESSAGE_FILE = os.path.join(_RUNTIME_DIR, 'synthia-last-spoken-hash')
+DEBUG_LOG_FILE = os.path.join(_RUNTIME_DIR, 'synthia-stop-hook-debug.log')
+
+
+def _debug_log(message: str):
+    """Write to debug log with restrictive permissions."""
+    try:
+        with open(DEBUG_LOG_FILE, 'a') as f:
+            f.write(message)
+        os.chmod(DEBUG_LOG_FILE, 0o600)
+    except Exception:
+        pass
 
 
 def get_last_assistant_message(transcript_path: str) -> str:
@@ -48,46 +60,35 @@ def get_last_assistant_message(transcript_path: str) -> str:
 
         return ""
     except Exception as e:
-        with open('/tmp/stop-hook-debug.log', 'a') as f:
-            f.write(f"Error reading transcript: {e}\n")
+        _debug_log(f"Error reading transcript: {e}\n")
         return ""
 
 
 def main():
-    # Log that hook was called
-    with open('/tmp/stop-hook-debug.log', 'a') as f:
-        f.write(f"Hook called at {__import__('datetime').datetime.now()}\n")
+    _debug_log(f"Hook called at {__import__('datetime').datetime.now()}\n")
 
     # Read hook input from stdin
     try:
         raw_input = sys.stdin.read()
-        with open('/tmp/stop-hook-debug.log', 'a') as f:
-            f.write(f"Raw input: {raw_input}\n")
+        _debug_log(f"Raw input length: {len(raw_input)}\n")
         hook_input = json.loads(raw_input)
     except json.JSONDecodeError as e:
-        with open('/tmp/stop-hook-debug.log', 'a') as f:
-            f.write(f"JSON decode error: {e}\n")
+        _debug_log(f"JSON decode error: {e}\n")
         sys.exit(0)
 
-    with open('/tmp/stop-hook-debug.log', 'a') as f:
-        f.write(f"Parsed input keys: {hook_input.keys()}\n")
+    _debug_log(f"Parsed input keys: {list(hook_input.keys())}\n")
 
     transcript_path = hook_input.get('transcript_path', '')
-
-    with open('/tmp/stop-hook-debug.log', 'a') as f:
-        f.write(f"Transcript path: {transcript_path}\n")
-        f.write(f"Exists: {os.path.exists(transcript_path)}\n")
+    _debug_log(f"Transcript path: {transcript_path}\n")
+    _debug_log(f"Exists: {os.path.exists(transcript_path)}\n")
 
     if not transcript_path or not os.path.exists(transcript_path):
         sys.exit(0)
 
     # Wait for transcript to be fully written
-    # The hook fires before Claude finishes writing, so we need to wait
-    initial_delay = 1.5  # seconds
+    initial_delay = 1.5
     time.sleep(initial_delay)
-
-    with open('/tmp/stop-hook-debug.log', 'a') as f:
-        f.write(f"Waited {initial_delay}s for transcript to settle\n")
+    _debug_log(f"Waited {initial_delay}s for transcript to settle\n")
 
     # Check freshness - wait for file to be recently modified
     max_retries = 3
@@ -95,15 +96,10 @@ def main():
     for attempt in range(max_retries):
         mtime = os.path.getmtime(transcript_path)
         age = time.time() - mtime
+        _debug_log(f"Attempt {attempt + 1}: File age = {age:.2f}s\n")
 
-        with open('/tmp/stop-hook-debug.log', 'a') as f:
-            f.write(f"Attempt {attempt + 1}: File age = {age:.2f}s\n")
-
-        # If file was modified in last 5 seconds, it's probably fresh enough
         if age < 5:
             break
-
-        # File seems stale, wait and retry
         if attempt < max_retries - 1:
             time.sleep(retry_delay)
 
@@ -113,15 +109,14 @@ def main():
     # Check if we already spoke this exact message (deduplication)
     if message:
         import hashlib
-        msg_hash = hashlib.md5(message[:500].encode()).hexdigest()
+        msg_hash = hashlib.sha256(message[:500].encode()).hexdigest()
 
         try:
             if os.path.exists(LAST_MESSAGE_FILE):
                 with open(LAST_MESSAGE_FILE, 'r') as f:
                     last_hash = f.read().strip()
                 if last_hash == msg_hash:
-                    with open('/tmp/stop-hook-debug.log', 'a') as f:
-                        f.write(f"Skipping duplicate message (hash: {msg_hash[:8]})\n")
+                    _debug_log(f"Skipping duplicate message (hash: {msg_hash[:8]})\n")
                     sys.exit(0)
         except Exception:
             pass
@@ -130,11 +125,11 @@ def main():
         try:
             with open(LAST_MESSAGE_FILE, 'w') as f:
                 f.write(msg_hash)
+            os.chmod(LAST_MESSAGE_FILE, 0o600)
         except Exception:
             pass
 
-    with open('/tmp/stop-hook-debug.log', 'a') as f:
-        f.write(f"Extracted message: {message[:200] if message else 'NONE'}...\n")
+    _debug_log(f"Extracted message: {message[:200] if message else 'NONE'}...\n")
 
     if not message:
         sys.exit(0)
@@ -161,7 +156,6 @@ def main():
     # Limit message length - speak first ~500 chars (2-3 sentences)
     full_message = message  # Keep full for Telegram
     if len(message) > 500:
-        # Find a good cutoff point (end of sentence)
         cutoff = 500
         for end in ['. ', '! ', '? ']:
             pos = message[:600].rfind(end)
@@ -170,11 +164,10 @@ def main():
                 break
         message = message[:cutoff] + " Check the full response for more."
 
-    # Check if we're in remote mode
-    remote_mode = os.path.exists('/tmp/synthia-remote-mode')
-
-    with open('/tmp/stop-hook-debug.log', 'a') as f:
-        f.write(f"Remote mode: {remote_mode}\n")
+    # Check if we're in remote mode (use XDG_RUNTIME_DIR, consistent with telegram_bot.py)
+    remote_mode_file = os.path.join(_RUNTIME_DIR, "synthia-remote-mode")
+    remote_mode = os.path.exists(remote_mode_file)
+    _debug_log(f"Remote mode: {remote_mode}\n")
 
     if remote_mode:
         # Send to Telegram instead of speaking
@@ -190,34 +183,29 @@ def main():
             ]
             lower_msg = full_message.lower()
             if any(indicator in lower_msg for indicator in plan_indicators):
-                # Check if it looks like a plan (has multiple numbered items)
                 if re.search(r'\d\.\s+\w', full_message) or re.search(r'(?:first|then|next|finally)', lower_msg):
                     is_plan = True
 
-            # Send longer message to Telegram (up to 1000 chars)
             telegram_message = full_message[:1000]
             if len(full_message) > 1000:
                 telegram_message += "...\n\n_(truncated - check Claude Code for full response)_"
 
             if is_plan:
-                # This is a plan - ask for approval
-                with open('/tmp/synthia-waiting-approval', 'w') as f:
+                waiting_file = os.path.join(_RUNTIME_DIR, "synthia-waiting-approval")
+                with open(waiting_file, 'w') as f:
                     f.write('waiting')
+                os.chmod(waiting_file, 0o600)
                 send_telegram(f"📋 *Plan:*\n\n{telegram_message}\n\n---\n✋ *Reply 'yes' or 'go' to approve*", "Markdown")
-                with open('/tmp/stop-hook-debug.log', 'a') as f:
-                    f.write(f"Sent plan to Telegram, waiting for approval\n")
+                _debug_log("Sent plan to Telegram, waiting for approval\n")
             else:
                 send_telegram(f"🤖 *Claude:*\n\n{telegram_message}", "Markdown")
-                with open('/tmp/stop-hook-debug.log', 'a') as f:
-                    f.write(f"Sent to Telegram\n")
+                _debug_log("Sent to Telegram\n")
         except Exception as e:
-            with open('/tmp/stop-hook-debug.log', 'a') as f:
-                f.write(f"Telegram Error: {e}\n")
+            _debug_log(f"Telegram Error: {e}\n")
     else:
         # Speak using local Piper
         try:
-            with open('/tmp/stop-hook-debug.log', 'a') as f:
-                f.write(f"About to speak: {message[:100]}...\n")
+            _debug_log(f"About to speak: {message[:100]}...\n")
 
             from synthia.tts import TextToSpeech
             from synthia.config import load_config
@@ -229,12 +217,9 @@ def main():
             )
 
             tts.speak(message)
-
-            with open('/tmp/stop-hook-debug.log', 'a') as f:
-                f.write(f"Spoke successfully\n")
+            _debug_log("Spoke successfully\n")
         except Exception as e:
-            with open('/tmp/stop-hook-debug.log', 'a') as f:
-                f.write(f"TTS Error: {e}\n")
+            _debug_log(f"TTS Error: {e}\n")
 
 
 if __name__ == "__main__":

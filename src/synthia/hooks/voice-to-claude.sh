@@ -4,11 +4,11 @@
 # Usage: ./voice-to-claude.sh [duration_seconds]
 
 DURATION=${1:-5}
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-LINUXVOICE_DIR="/home/markmiddo/Misc/linuxvoice"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SYNTHIA_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-cd "$LINUXVOICE_DIR"
+cd "$SYNTHIA_ROOT"
 source venv/bin/activate
 
 # Record and transcribe
-python claude-hooks/voice-input.py --duration "$DURATION"
+python -m synthia.hooks.voice-input --duration "$DURATION"

@@ -135,7 +135,9 @@ class Synthia:
             os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "synthia-history.json"
         )
         # Signal file for config reload (used by GUI to trigger live hotkey updates)
-        self.reload_signal_file = "/tmp/synthia-reload-config"
+        self.reload_signal_file = os.path.join(
+            os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "synthia-reload-config"
+        )
         self._update_state("ready")
 
         # Parse hotkeys from config (for X11/pynput)

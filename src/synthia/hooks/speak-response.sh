@@ -30,19 +30,19 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
         # Truncate very long messages for TTS (max ~500 chars)
         SPEAK_TEXT=$(echo "$LAST_MESSAGE" | head -c 500)
 
-        # Use LinuxVoice TTS to speak the response
-        cd /home/markmiddo/Misc/linuxvoice
-        source venv/bin/activate
+        # Use Synthia TTS to speak the response
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        SYNTHIA_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+        source "$SYNTHIA_ROOT/venv/bin/activate"
         python -c "
-from tts import TextToSpeech
-from config import load_config, get_google_credentials_path
+from synthia.tts import TextToSpeech
+from synthia.config import load_config
 import sys
 
 config = load_config()
 tts = TextToSpeech(
-    get_google_credentials_path(config),
-    config['tts_voice'],
-    config['tts_speed']
+    use_local=config.get('use_local_tts', True),
+    local_voice=config.get('local_tts_voice', '')
 )
 tts.speak('''$SPEAK_TEXT''')
 " 2>/dev/null

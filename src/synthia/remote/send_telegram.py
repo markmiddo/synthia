@@ -10,12 +10,15 @@ import sys
 import os
 import requests
 
-# Add parent directory to path
+# Add synthia src to path (resolve relative to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import load_config
+from synthia.config import load_config
 
-REMOTE_MODE_FILE = '/tmp/synthia-remote-mode'
+# Use XDG_RUNTIME_DIR for secure temp files (not world-readable /tmp)
+REMOTE_MODE_FILE = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "synthia-remote-mode"
+)
 
 
 def is_remote_mode():

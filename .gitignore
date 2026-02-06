@@ -15,6 +15,14 @@ dist/
 
 # Config with secrets
 config.yaml
+*.credentials
+*.credentials.json
+*-creds.json
+*-key.txt
+*.pem
+*.key
+.env
+.env.*
 
 # Temp files
 *.mp3

@@ -14,9 +14,11 @@ import sys
 import asyncio
 import subprocess
 import tempfile
+import time
 import logging
 import re
 from datetime import datetime
+from pathlib import Path
 
 # Add src to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -69,6 +71,12 @@ from telegram.ext import (
 from synthia.config import load_config
 from synthia.assistant import Assistant
 from synthia.transcribe import Transcriber
+
+# Use XDG_RUNTIME_DIR for secure temp files (user-only access, not world-readable /tmp)
+_RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+REMOTE_MODE_FILE = os.path.join(_RUNTIME_DIR, "synthia-remote-mode")
+WAITING_APPROVAL_FILE = os.path.join(_RUNTIME_DIR, "synthia-waiting-approval")
+PLAN_APPROVED_FILE = os.path.join(_RUNTIME_DIR, "synthia-plan-approved")
 
 # Set up logging
 logging.basicConfig(
@@ -220,7 +228,7 @@ class SynthiaBot:
             await update.message.reply_text("Taking screenshot...")
 
             # Take screenshot using gnome-screenshot or scrot
-            screenshot_path = '/tmp/synthia_screenshot.png'
+            screenshot_path = os.path.join(_RUNTIME_DIR, 'synthia_screenshot.png')
 
             # Try gnome-screenshot first, fall back to scrot
             try:
@@ -300,19 +308,23 @@ class SynthiaBot:
 
             # Download file
             files_dir = get_files_dir()
-            file_path = files_dir / doc.file_name
+            # SECURITY: Sanitize filename to prevent path traversal (e.g., "../../.bashrc")
+            safe_name = Path(doc.file_name).name  # Strips directory components
+            if not safe_name or safe_name.startswith('.'):
+                safe_name = f"upload_{int(time.time())}"
+            file_path = files_dir / safe_name
             await file.download_to_drive(str(file_path))
 
             # Add to inbox
             add_inbox_item(
                 item_type="file",
-                filename=doc.file_name,
+                filename=safe_name,
                 path=str(file_path),
                 size_bytes=doc.file_size,
                 from_user=update.effective_user.first_name,
             )
 
-            await update.message.reply_text(f"Saved to inbox: {doc.file_name}")
+            await update.message.reply_text(f"Saved to inbox: {safe_name}")
         except Exception as e:
             await update.message.reply_text(f"Error saving file: {e}")
 
@@ -381,15 +393,15 @@ class SynthiaBot:
             import random
 
             # Check if Claude is waiting for approval
-            waiting_for_approval = os.path.exists('/tmp/synthia-waiting-approval')
+            waiting_for_approval = os.path.exists(WAITING_APPROVAL_FILE)
 
             if waiting_for_approval:
                 # Check if this is an approval message
                 approval_words = ['yes', 'go', 'approved', 'proceed', 'do it', 'ok', 'okay', 'yep', 'yeah', 'sure', 'continue', 'execute', 'run it', 'go ahead']
                 if text.lower().strip() in approval_words or text.lower().strip().rstrip('!.') in approval_words:
                     # Send approval signal
-                    os.remove('/tmp/synthia-waiting-approval')
-                    with open('/tmp/synthia-plan-approved', 'w') as f:
+                    os.remove(WAITING_APPROVAL_FILE)
+                    with open(PLAN_APPROVED_FILE, 'w') as f:
                         f.write('approved')
                     await update.message.reply_text("✅ Approved! Executing plan...")
                     # Send "proceed" to Claude Code
@@ -397,7 +409,7 @@ class SynthiaBot:
                     return
                 else:
                     # New request while waiting - cancel old plan
-                    os.remove('/tmp/synthia-waiting-approval')
+                    os.remove(WAITING_APPROVAL_FILE)
                     await update.message.reply_text("📝 New request received, cancelling previous plan...")
 
             # Varied processing messages
@@ -443,7 +455,7 @@ class SynthiaBot:
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return display
-            except:
+            except Exception:
                 pass
         return os.environ.get('DISPLAY', ':0')
 
@@ -644,14 +656,14 @@ class SynthiaBot:
 
     def _is_remote_mode(self) -> bool:
         """Check if remote mode is enabled."""
-        return os.path.exists('/tmp/synthia-remote-mode')
+        return os.path.exists(REMOTE_MODE_FILE)
 
     def _get_remote_chat_id(self) -> int:
         """Get the chat ID for remote notifications."""
         try:
-            with open('/tmp/synthia-remote-mode', 'r') as f:
+            with open(REMOTE_MODE_FILE, 'r') as f:
                 return int(f.read().strip())
-        except:
+        except Exception:
             return None
 
     async def enable_dev_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -661,9 +673,10 @@ class SynthiaBot:
 
         chat_id = update.effective_chat.id
 
-        # Save mode state with chat_id
-        with open('/tmp/synthia-remote-mode', 'w') as f:
+        # Save mode state with chat_id (restrictive permissions)
+        with open(REMOTE_MODE_FILE, 'w') as f:
             f.write(str(chat_id))
+        os.chmod(REMOTE_MODE_FILE, 0o600)
 
         await update.message.reply_text(
             "🟢 *Dev Mode ENABLED*\n\n"
@@ -680,7 +693,7 @@ class SynthiaBot:
 
         # Remove dev mode file
         try:
-            os.remove('/tmp/synthia-remote-mode')
+            os.remove(REMOTE_MODE_FILE)
         except FileNotFoundError:
             pass
 

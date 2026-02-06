@@ -65,8 +65,18 @@ def _resolve_app_name(app: str) -> str:
 
 
 def open_app(app: str) -> bool:
-    """Launch an application."""
+    """Launch an application.
+
+    SECURITY: Only allows apps in APP_ALIASES or FLATPAK_APPS to prevent
+    arbitrary command execution from LLM output.
+    """
     app_cmd = _resolve_app_name(app)
+
+    # SECURITY: Only allow known apps to prevent arbitrary command execution
+    allowed_apps = set(APP_ALIASES.values()) | set(FLATPAK_APPS.keys())
+    if app_cmd not in allowed_apps:
+        print(f"❌ App not in allowlist: {app_cmd}")
+        return False
 
     # Check if it's a Flatpak app
     if app_cmd in FLATPAK_APPS:
@@ -103,9 +113,18 @@ def open_app(app: str) -> bool:
 
 
 def open_url(url: str, browser: str = "google-chrome") -> bool:
-    """Open a URL in Chrome (Flatpak)."""
+    """Open a URL in Chrome (Flatpak).
+
+    SECURITY: Only allows http/https URLs to prevent javascript:, file:,
+    data:, or other dangerous URI schemes.
+    """
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+
+    # SECURITY: Reject non-http(s) schemes that could have been prepended
+    if not url.startswith(("http://", "https://")):
+        print(f"❌ Invalid URL scheme: {url}")
+        return False
 
     # Use Chrome Flatpak
     try:
@@ -123,8 +142,18 @@ def open_url(url: str, browser: str = "google-chrome") -> bool:
 
 
 def close_app(app: str) -> bool:
-    """Close an application by name."""
+    """Close an application by name.
+
+    SECURITY: Only allows closing apps in APP_ALIASES or FLATPAK_APPS to prevent
+    pkill -f from matching unintended processes via LLM-crafted input.
+    """
     app_cmd = _resolve_app_name(app)
+
+    # SECURITY: Only allow closing known apps
+    allowed_apps = set(APP_ALIASES.values()) | set(FLATPAK_APPS.keys())
+    if app_cmd not in allowed_apps:
+        print(f"❌ Cannot close unknown app: {app_cmd}")
+        return False
 
     try:
         subprocess.run(["pkill", "-f", app_cmd], check=False)
@@ -136,8 +165,12 @@ def close_app(app: str) -> bool:
 
 
 # Allowlist of safe commands that can be executed
+# SECURITY: Only include commands that cannot exfiltrate data or modify the system.
+# Excluded: curl/wget (can exfiltrate data or download payloads),
+#           cat/head/tail (can read sensitive files like ~/.ssh/id_rsa),
+#           find (can enumerate filesystem), echo (can write via redirection)
 SAFE_COMMANDS = {
-    # System info (read-only)
+    # System info (read-only, no file access)
     "date",
     "uptime",
     "whoami",
@@ -145,26 +178,17 @@ SAFE_COMMANDS = {
     "uname",
     "free",
     "df",
-    "top",
-    "htop",
     "ps",
     # Network info (read-only)
     "ip",
     "ifconfig",
     "ping",
-    "curl",
-    "wget",
-    # File listing (read-only)
+    # File listing (directory only, not file contents)
     "ls",
     "pwd",
-    "cat",
-    "head",
-    "tail",
     "wc",
-    "find",
     "which",
     # System utilities
-    "echo",
     "cal",
     "bc",
 }
