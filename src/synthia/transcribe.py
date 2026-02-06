@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 # Add cuDNN libraries to path for GPU support
 _cudnn_path = os.path.join(
-    os.path.dirname(__file__), "venv/lib/python3.10/site-packages/nvidia/cudnn/lib"
+    os.path.dirname(__file__),
+    f"venv/lib/python{sys.version_info.major}.{sys.version_info.minor}"
+    "/site-packages/nvidia/cudnn/lib",
 )
 if os.path.exists(_cudnn_path):
     os.environ["LD_LIBRARY_PATH"] = _cudnn_path + ":" + os.environ.get("LD_LIBRARY_PATH", "")
