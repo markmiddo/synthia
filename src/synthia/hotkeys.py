@@ -4,12 +4,15 @@ On Wayland: Uses evdev to read directly from input devices.
 On X11: Uses pynput for global keyboard hooks.
 """
 
+import logging
 import os
 import threading
 from abc import ABC, abstractmethod
 from typing import Callable, Optional
 
 from .display import is_wayland
+
+logger = logging.getLogger(__name__)
 
 
 class HotkeyListener(ABC):
@@ -159,8 +162,8 @@ class EvdevHotkeyListener(HotkeyListener):
         for device in self.devices:
             try:
                 device.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to close device: %s", e)
 
     def join(self):
         """Wait for the listener thread to finish."""

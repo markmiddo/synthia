@@ -9,10 +9,13 @@ Handles reading/writing:
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 CLAUDE_DIR = Path.home() / ".claude"
 SETTINGS_FILE = CLAUDE_DIR / "settings.json"
@@ -106,8 +109,8 @@ def list_agents() -> List[AgentConfig]:
     for filepath in sorted(AGENTS_DIR.glob("*.md")):
         try:
             agents.append(AgentConfig.from_file(filepath))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Skipping malformed agent file %s: %s", filepath.name, e)
     return agents
 
 
@@ -175,8 +178,8 @@ def list_commands() -> List[CommandConfig]:
     for filepath in sorted(COMMANDS_DIR.glob("*.md")):
         try:
             commands.append(CommandConfig.from_file(filepath))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Skipping malformed command file %s: %s", filepath.name, e)
     return commands
 
 

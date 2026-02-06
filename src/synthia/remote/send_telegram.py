@@ -6,9 +6,13 @@ Called by Claude Code hooks to notify user of updates.
 Usage: python send_telegram.py "Your message here"
 """
 
-import sys
+import logging
 import os
+import sys
+
 import requests
+
+logger = logging.getLogger(__name__)
 
 # Add synthia src to path (resolve relative to this file)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,7 +35,8 @@ def get_chat_id():
     try:
         with open(REMOTE_MODE_FILE, 'r') as f:
             return int(f.read().strip())
-    except:
+    except (IOError, ValueError) as e:
+        logger.debug("Could not read remote mode file: %s", e)
         return None
 
 

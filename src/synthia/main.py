@@ -8,6 +8,7 @@ Usage:
 """
 
 import json
+import logging
 import os
 import signal
 import sys
@@ -28,6 +29,8 @@ from synthia.transcribe import Transcriber
 from synthia.tts import TextToSpeech
 from synthia.llm_polish import TranscriptionPolisher
 from synthia.clipboard_monitor import ClipboardMonitor
+
+logger = logging.getLogger(__name__)
 
 
 class Synthia:
@@ -184,8 +187,8 @@ class Synthia:
             state = {"status": status, "recording": status == "recording"}
             with open(self.state_file, "w") as f:
                 json.dump(state, f)
-        except Exception:
-            pass  # Non-critical, don't crash if state file can't be written
+        except Exception as e:
+            logger.debug("Could not update state file: %s", e)
 
     def _save_to_history(self, text: str, mode: str, response: str = None):
         """Save transcription to history file for GUI display."""
@@ -218,7 +221,7 @@ class Synthia:
             with open(self.history_file, "w") as f:
                 json.dump(history, f, indent=2)
         except Exception as e:
-            print(f"Warning: Could not save history: {e}")
+            logger.debug("Could not save history: %s", e)
 
     def _on_quit(self):
         """Handle quit from tray icon."""
@@ -499,6 +502,11 @@ def handle_memory_command(args: list[str]):
 
 def main():
     """Entry point."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
     # Show audio devices for debugging
     if "--list-devices" in sys.argv:
         list_audio_devices()

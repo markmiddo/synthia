@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import threading
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Optional
 
 from synthia.display import is_wayland
+
+logger = logging.getLogger(__name__)
 
 
 class ClipboardMonitor:
@@ -41,7 +44,8 @@ class ClipboardMonitor:
             if os.path.exists(self.history_file):
                 with open(self.history_file) as f:
                     self.history = json.load(f)
-        except Exception:
+        except Exception as e:
+            logger.debug("Could not load clipboard history: %s", e)
             self.history = []
 
     def _save_history(self):
@@ -52,7 +56,7 @@ class ClipboardMonitor:
             # SECURITY: Clipboard may contain sensitive data (passwords, tokens)
             os.chmod(self.history_file, 0o600)
         except Exception as e:
-            print(f"Failed to save clipboard history: {e}")
+            logger.warning("Failed to save clipboard history: %s", e)
 
     def _content_hash(self, content: str) -> str:
         """Generate hash of content for deduplication."""
@@ -88,7 +92,7 @@ class ClipboardMonitor:
         self.history = self.history[:self.max_items]
 
         self._save_history()
-        print(f"Clipboard captured: {content[:50]}...")
+        logger.debug("Clipboard captured: %s...", content[:50])
 
     def _get_clipboard_content(self) -> Optional[str]:
         """Get current clipboard content."""
@@ -109,8 +113,8 @@ class ClipboardMonitor:
                 )
             if result.returncode == 0:
                 return result.stdout
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Clipboard read failed: %s", e)
         return None
 
     def _run_wayland_monitor(self):
@@ -134,7 +138,7 @@ class ClipboardMonitor:
                         self._add_item(content)
 
             except Exception as e:
-                print(f"Wayland clipboard monitor error: {e}")
+                logger.warning("Wayland clipboard monitor error: %s", e)
                 time.sleep(1)
 
     def _run_x11_monitor(self):
@@ -146,7 +150,7 @@ class ClipboardMonitor:
                     self._add_item(content)
                 time.sleep(0.5)  # Poll every 500ms
             except Exception as e:
-                print(f"X11 clipboard monitor error: {e}")
+                logger.warning("X11 clipboard monitor error: %s", e)
                 time.sleep(1)
 
     def start(self):
@@ -157,10 +161,10 @@ class ClipboardMonitor:
         self.running = True
 
         if is_wayland():
-            print("Starting Wayland clipboard monitor (wl-paste --watch)")
+            logger.info("Starting Wayland clipboard monitor (wl-paste --watch)")
             self._thread = threading.Thread(target=self._run_wayland_monitor, daemon=True)
         else:
-            print("Starting X11 clipboard monitor (polling)")
+            logger.info("Starting X11 clipboard monitor (polling)")
             self._thread = threading.Thread(target=self._run_x11_monitor, daemon=True)
 
         self._thread.start()
@@ -211,5 +215,5 @@ class ClipboardMonitor:
                 process.communicate(input=content)
             return True
         except Exception as e:
-            print(f"Failed to copy to clipboard: {e}")
+            logger.warning("Failed to copy to clipboard: %s", e)
             return False

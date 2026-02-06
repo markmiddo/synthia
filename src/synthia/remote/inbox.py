@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def get_inbox_dir() -> Path:
@@ -37,8 +40,8 @@ def load_inbox() -> list[dict]:
             with open(inbox_file) as f:
                 data = json.load(f)
                 return data.get("items", [])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to load inbox: %s", e)
     return []
 
 
@@ -49,7 +52,7 @@ def save_inbox(items: list[dict]):
         with open(inbox_file, "w") as f:
             json.dump({"items": items}, f, indent=2)
     except Exception as e:
-        print(f"Failed to save inbox: {e}")
+        logger.warning("Failed to save inbox: %s", e)
 
 
 def add_inbox_item(
@@ -106,8 +109,8 @@ def delete_inbox_item(item_id: str) -> bool:
             if item.get("path") and os.path.exists(item["path"]):
                 try:
                     os.remove(item["path"])
-                except Exception:
-                    pass
+                except OSError as e:
+                    logger.debug("Failed to delete inbox file %s: %s", item["path"], e)
             deleted = True
         else:
             new_items.append(item)
@@ -125,8 +128,8 @@ def clear_inbox():
         if item.get("path") and os.path.exists(item["path"]):
             try:
                 os.remove(item["path"])
-            except Exception:
-                pass
+            except OSError as e:
+                logger.debug("Failed to delete inbox file %s: %s", item["path"], e)
 
     save_inbox([])
 

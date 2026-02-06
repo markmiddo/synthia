@@ -1,9 +1,12 @@
 """Sound effects for Synthia."""
 
-import base64
+import atexit
+import logging
 import os
 import subprocess
 import tempfile
+
+logger = logging.getLogger(__name__)
 
 # Simple beep sounds encoded as base64 WAV
 # These are tiny sine wave beeps generated programmatically
@@ -55,6 +58,7 @@ class SoundEffects:
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
         self._temp_files = []
+        atexit.register(self.cleanup)
 
         # Pre-generate sounds
         self._start_sound = _generate_beep(880, 100, 0.3)  # High beep
@@ -82,11 +86,11 @@ class SoundEffects:
                 old_file = self._temp_files.pop(0)
                 try:
                     os.unlink(old_file)
-                except:
-                    pass
+                except OSError as e:
+                    logger.debug("Failed to cleanup temp file %s: %s", old_file, e)
 
         except Exception as e:
-            print(f"Sound error: {e}")
+            logger.error("Sound error: %s", e)
 
     def play_start(self):
         """Play recording start sound."""
@@ -105,6 +109,6 @@ class SoundEffects:
         for f in self._temp_files:
             try:
                 os.unlink(f)
-            except:
-                pass
+            except OSError as e:
+                logger.debug("Failed to cleanup temp file %s: %s", f, e)
         self._temp_files = []

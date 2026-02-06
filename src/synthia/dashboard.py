@@ -14,9 +14,12 @@ Features:
 from __future__ import annotations
 
 import json
+import logging
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -699,8 +702,8 @@ class SynthiaDashboard(App):
                 new_state = not plugin.enabled
                 set_plugin_enabled(plugin.name, new_state)
                 self._load_plugins()  # Refresh
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("toggle_plugin error: %s", e)
 
     def _show_hooks_section(self) -> None:
         """Show hooks section."""
