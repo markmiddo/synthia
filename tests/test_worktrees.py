@@ -1,16 +1,17 @@
 """Tests for worktrees.py pure-logic functions."""
 
-import pytest
-import yaml
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+import yaml
+
 from synthia.worktrees import (
-    extract_issue_number,
-    _parse_worktree_list,
-    load_config,
     WorktreeInfo,
     WorktreeTask,
+    _parse_worktree_list,
+    extract_issue_number,
+    load_config,
 )
 
 

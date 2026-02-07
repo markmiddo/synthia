@@ -10,8 +10,10 @@ try:
     from textual.containers import Horizontal, Vertical
     from textual.screen import ModalScreen
     from textual.widgets import Button, Input, Label, Select, Static, TextArea
-except ImportError:
-    ModalScreen = None
+except ImportError as _textual_err:
+    raise ImportError(
+        "textual is required for the dashboard. Install with: pip install synthia[tui]"
+    ) from _textual_err
 
 from synthia.config_manager import AgentConfig, CommandConfig, HookConfig
 from synthia.memory import MemoryEntry
@@ -205,8 +207,8 @@ class EditAgentScreen(ModalScreen[Optional[AgentConfig]]):
             return
 
         desc = self.query_one("#desc-input", Input).value
-        model = self.query_one("#model-select", Select).value
-        color = self.query_one("#color-select", Select).value
+        model = str(self.query_one("#model-select", Select).value)
+        color = str(self.query_one("#color-select", Select).value)
         body = self.query_one("#body-area", TextArea).text
 
         filename = f"{name}.md" if self.is_new else self.agent.filename
@@ -461,12 +463,14 @@ class EditMemoryScreen(ModalScreen[Optional[dict]]):
         except Exception:
             tags = self.entry.tags
 
-        self.dismiss({
-            "category": self.entry.category,
-            "data": data,
-            "tags": tags,
-            "line_number": self.line_number,
-        })
+        self.dismiss(
+            {
+                "category": self.entry.category,
+                "data": data,
+                "tags": tags,
+                "line_number": self.line_number,
+            }
+        )
 
 
 class HelpScreen(ModalScreen[None]):

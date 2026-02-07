@@ -27,30 +27,37 @@ try:
     from textual.binding import Binding
     from textual.containers import Horizontal, Vertical
     from textual.screen import ModalScreen
-    from textual.widgets import Button, Footer, Header, Input, Label, ListItem, ListView, Static, TextArea
-except ImportError:
-    App = None
+    from textual.widgets import (
+        Button,
+        Footer,
+        Header,
+        Input,
+        Label,
+        ListItem,
+        ListView,
+        Static,
+        TextArea,
+    )
+except ImportError as _textual_err:
+    raise ImportError(
+        "textual is required for the dashboard. Install with: pip install synthia[tui]"
+    ) from _textual_err
 
-from synthia.memory import (
-    MEMORY_CATEGORIES,
-    MemoryEntry,
-    get_memory_system,
-)
 from synthia.config_manager import (
     AgentConfig,
+    CommandConfig,
+    HookConfig,
+    PluginInfo,
+    delete_agent,
+    delete_command,
     list_agents,
+    list_commands,
+    list_hooks,
+    list_plugins,
     load_agent,
     save_agent,
-    delete_agent,
-    PluginInfo,
-    list_plugins,
-    set_plugin_enabled,
-    HookConfig,
-    list_hooks,
-    CommandConfig,
-    list_commands,
     save_command,
-    delete_command,
+    set_plugin_enabled,
 )
 from synthia.dashboard_screens import (
     ConfirmDeleteScreen,
@@ -59,11 +66,17 @@ from synthia.dashboard_screens import (
     EditMemoryScreen,
     HelpScreen,
 )
+from synthia.memory import (
+    MEMORY_CATEGORIES,
+    MemoryEntry,
+    get_memory_system,
+)
 from synthia.worktrees import WorktreeInfo, WorktreeTask, scan_worktrees
 
 
 class Section(Enum):
     """Dashboard sections."""
+
     WORKTREES = "worktrees"
     MEMORY = "memory"
     AGENTS = "agents"
@@ -97,15 +110,15 @@ class MemoryListItem(ListItem):
     def compose(self) -> ComposeResult:
         cat = self.entry.category.upper()
         if self.entry.category == "bug":
-            content = self.entry.data.get('error', 'N/A')[:50]
+            content = self.entry.data.get("error", "N/A")[:50]
         elif self.entry.category == "pattern":
-            content = self.entry.data.get('topic', 'N/A')[:50]
+            content = self.entry.data.get("topic", "N/A")[:50]
         elif self.entry.category == "arch":
-            content = self.entry.data.get('decision', 'N/A')[:50]
+            content = self.entry.data.get("decision", "N/A")[:50]
         elif self.entry.category == "gotcha":
-            content = self.entry.data.get('area', 'N/A')[:50]
+            content = self.entry.data.get("area", "N/A")[:50]
         elif self.entry.category == "stack":
-            content = self.entry.data.get('tool', 'N/A')[:50]
+            content = self.entry.data.get("tool", "N/A")[:50]
         else:
             content = "Unknown"
         text = f"[{cat}] {content}"
@@ -182,7 +195,7 @@ class CommandListItem(ListItem):
 
     def compose(self) -> ComposeResult:
         # Show filename (without .md) and description preview
-        name = self.command.filename.replace('.md', '')
+        name = self.command.filename.replace(".md", "")
         desc = self.command.description[:40] if self.command.description else "No description"
         text = f"/{name} - {desc}"
         yield Label(text)
@@ -242,7 +255,7 @@ class WorktreeListItem(ListItem):
             if self.worktree.issue_number:
                 lines.append(f"   Issue: #{self.worktree.issue_number}")
             if self.worktree.session_summary:
-                lines.append(f"   Session: \"{self.worktree.session_summary[:40]}...\"")
+                lines.append(f'   Session: "{self.worktree.session_summary[:40]}..."')
             lines.append(f"   Tasks: {progress_str}")
             text = "\n".join(lines)
         else:
@@ -469,14 +482,18 @@ class SynthiaDashboard(App):
 
         if isinstance(event.item, AgentListItem):
             agent = event.item.agent
-            detail.update(f"Name: {agent.name}\nModel: {agent.model}\nColor: {agent.color}\n\n{agent.description}")
+            detail.update(
+                f"Name: {agent.name}\nModel: {agent.model}\nColor: {agent.color}\n\n{agent.description}"
+            )
         elif isinstance(event.item, CommandListItem):
             cmd = event.item.command
             detail.update(f"Command: /{cmd.filename.replace('.md', '')}\n\n{cmd.description}")
         elif isinstance(event.item, PluginListItem):
             plugin = event.item.plugin
             status = "Enabled" if plugin.enabled else "Disabled"
-            detail.update(f"Plugin: {plugin.display_name}\nVersion: {plugin.version}\nStatus: {status}")
+            detail.update(
+                f"Plugin: {plugin.display_name}\nVersion: {plugin.version}\nStatus: {status}"
+            )
         elif isinstance(event.item, HookListItem):
             hook = event.item.hook
             detail.update(f"Event: {hook.event}\nCommand: {hook.command}\nTimeout: {hook.timeout}s")
@@ -486,9 +503,13 @@ class SynthiaDashboard(App):
             entry = event.item.entry
             # Show memory entry details based on category
             if entry.category == "bug":
-                detail.update(f"Error: {entry.data.get('error', 'N/A')}\nFix: {entry.data.get('fix', 'N/A')}")
+                detail.update(
+                    f"Error: {entry.data.get('error', 'N/A')}\nFix: {entry.data.get('fix', 'N/A')}"
+                )
             elif entry.category == "pattern":
-                detail.update(f"Topic: {entry.data.get('topic', 'N/A')}\nPattern: {entry.data.get('pattern', 'N/A')}")
+                detail.update(
+                    f"Topic: {entry.data.get('topic', 'N/A')}\nPattern: {entry.data.get('pattern', 'N/A')}"
+                )
             else:
                 detail.update(str(entry.data))
         elif isinstance(event.item, WorktreeListItem):
@@ -502,7 +523,11 @@ class SynthiaDashboard(App):
             if total > 0:
                 lines.append(f"\nTasks ({completed}/{total}):")
                 for task in wt.tasks:
-                    status = "✓" if task.status == "completed" else "○" if task.status == "pending" else "▶"
+                    status = (
+                        "✓"
+                        if task.status == "completed"
+                        else "○" if task.status == "pending" else "▶"
+                    )
                     lines.append(f"  {status} {task.content[:50]}")
             detail.update("\n".join(lines))
 
@@ -515,7 +540,7 @@ class SynthiaDashboard(App):
             self._filter_memory(category)
             # Update button variants to show active filter
             for btn in self.query("#memory-toolbar Button"):
-                btn.variant = "primary" if btn.id == button_id else "default"
+                btn.variant = "primary" if btn.id == button_id else "default"  # type: ignore[attr-defined]
 
     def _filter_memory(self, category: str) -> None:
         """Filter memory entries by category."""
@@ -700,7 +725,9 @@ class SynthiaDashboard(App):
             return
         try:
             list_view = self.query_one("#content-list", ListView)
-            if list_view.highlighted_child and isinstance(list_view.highlighted_child, PluginListItem):
+            if list_view.highlighted_child and isinstance(
+                list_view.highlighted_child, PluginListItem
+            ):
                 plugin = list_view.highlighted_child.plugin
                 new_state = not plugin.enabled
                 set_plugin_enabled(plugin.name, new_state)
@@ -760,11 +787,11 @@ class SynthiaDashboard(App):
     def _load_settings(self) -> None:
         """Load settings."""
         from synthia.config_manager import load_settings
+
         settings = load_settings()
         # Filter out complex nested objects for display
         display_settings = {
-            k: v for k, v in settings.items()
-            if k not in ("hooks", "enabledPlugins")
+            k: v for k, v in settings.items() if k not in ("hooks", "enabledPlugins")
         }
         self.call_from_thread(self._display_settings, display_settings)
 
@@ -798,7 +825,9 @@ class SynthiaDashboard(App):
             list_view.clear()
             for wt in worktrees:
                 list_view.append(WorktreeListItem(wt))
-            self._set_status(f"Worktrees | {len(worktrees)} found | [c] Resume [g] GitHub [o] Path [d] Delete")
+            self._set_status(
+                f"Worktrees | {len(worktrees)} found | [c] Resume [g] GitHub [o] Path [d] Delete"
+            )
         except Exception:
             pass
 
@@ -813,7 +842,7 @@ class SynthiaDashboard(App):
 
     def _edit_selected_agent(self) -> None:
         """Edit selected agent."""
-        if not hasattr(self, '_agents') or not self._agents:
+        if not hasattr(self, "_agents") or not self._agents:
             return
         try:
             list_view = self.query_one("#content-list", ListView)
@@ -833,7 +862,7 @@ class SynthiaDashboard(App):
 
     def _edit_selected_command(self) -> None:
         """Edit selected command."""
-        if not hasattr(self, '_commands') or not self._commands:
+        if not hasattr(self, "_commands") or not self._commands:
             return
         try:
             list_view = self.query_one("#content-list", ListView)
@@ -853,7 +882,7 @@ class SynthiaDashboard(App):
 
     def _edit_selected_memory(self) -> None:
         """Edit selected memory entry."""
-        if not hasattr(self, '_memory_entries') or not self._memory_entries:
+        if not hasattr(self, "_memory_entries") or not self._memory_entries:
             self._set_status("No memory entry selected")
             return
         try:
@@ -918,7 +947,7 @@ class SynthiaDashboard(App):
 
     def _delete_selected_agent(self) -> None:
         """Delete selected agent."""
-        if not hasattr(self, '_agents') or not self._agents:
+        if not hasattr(self, "_agents") or not self._agents:
             return
         try:
             list_view = self.query_one("#content-list", ListView)
@@ -927,7 +956,7 @@ class SynthiaDashboard(App):
                 agent = self._agents[index]
                 self.push_screen(
                     ConfirmDeleteScreen(agent.name),
-                    lambda confirmed: self._do_delete_agent(agent.filename) if confirmed else None
+                    lambda confirmed: self._do_delete_agent(agent.filename) if confirmed else None,
                 )
         except Exception:
             pass
@@ -940,7 +969,7 @@ class SynthiaDashboard(App):
 
     def _delete_selected_command(self) -> None:
         """Delete selected command."""
-        if not hasattr(self, '_commands') or not self._commands:
+        if not hasattr(self, "_commands") or not self._commands:
             return
         try:
             list_view = self.query_one("#content-list", ListView)
@@ -950,7 +979,7 @@ class SynthiaDashboard(App):
                 name = cmd.filename.replace(".md", "")
                 self.push_screen(
                     ConfirmDeleteScreen(f"/{name}"),
-                    lambda confirmed: self._do_delete_command(cmd.filename) if confirmed else None
+                    lambda confirmed: self._do_delete_command(cmd.filename) if confirmed else None,
                 )
         except Exception:
             pass
@@ -963,7 +992,7 @@ class SynthiaDashboard(App):
 
     def _delete_selected_memory(self) -> None:
         """Delete selected memory entry."""
-        if not hasattr(self, '_memory_entries') or not self._memory_entries:
+        if not hasattr(self, "_memory_entries") or not self._memory_entries:
             self._set_status("No memory entry selected")
             return
         try:
@@ -975,17 +1004,18 @@ class SynthiaDashboard(App):
                 self._pending_memory_delete = (entry.category, line_num)
                 self.push_screen(
                     ConfirmDeleteScreen(f"{entry.category.upper()} entry"),
-                    self._on_memory_delete_confirm
+                    self._on_memory_delete_confirm,  # type: ignore[arg-type]
                 )
         except Exception:
             pass
 
     def _on_memory_delete_confirm(self, confirmed: bool) -> None:
         """Callback when memory delete confirmation is dismissed."""
-        if confirmed and hasattr(self, '_pending_memory_delete'):
-            category, line_num = self._pending_memory_delete
+        pending = getattr(self, "_pending_memory_delete", None)
+        if confirmed and pending is not None:
+            category, line_num = pending
             self._do_delete_memory(category, line_num)
-        self._pending_memory_delete = None
+        self._pending_memory_delete = None  # type: ignore[assignment]
 
     def _do_delete_memory(self, category: str, line_number: int) -> None:
         """Actually delete the memory entry."""
@@ -1014,7 +1044,7 @@ class SynthiaDashboard(App):
         """Open GitHub issue for selected worktree."""
         if self.current_section != Section.WORKTREES:
             return
-        if not hasattr(self, '_worktrees') or not self._worktrees:
+        if not hasattr(self, "_worktrees") or not self._worktrees:
             return
         try:
             list_view = self.query_one("#content-list", ListView)
@@ -1023,6 +1053,7 @@ class SynthiaDashboard(App):
                 wt = self._worktrees[index]
                 if wt.issue_number:
                     import subprocess
+
                     subprocess.Popen(["gh", "issue", "view", str(wt.issue_number), "--web"])
                     self._set_status(f"Opening issue #{wt.issue_number} in browser...")
                 else:
@@ -1034,7 +1065,7 @@ class SynthiaDashboard(App):
         """Open terminal at worktree path."""
         if self.current_section != Section.WORKTREES:
             return
-        if not hasattr(self, '_worktrees') or not self._worktrees:
+        if not hasattr(self, "_worktrees") or not self._worktrees:
             return
         try:
             list_view = self.query_one("#content-list", ListView)
@@ -1050,7 +1081,7 @@ class SynthiaDashboard(App):
         """Resume Claude session in selected worktree."""
         if self.current_section != Section.WORKTREES:
             return
-        if not hasattr(self, '_worktrees') or not self._worktrees:
+        if not hasattr(self, "_worktrees") or not self._worktrees:
             return
         try:
             list_view = self.query_one("#content-list", ListView)
@@ -1058,19 +1089,31 @@ class SynthiaDashboard(App):
             if index is not None and 0 <= index < len(self._worktrees):
                 wt = self._worktrees[index]
                 import subprocess
+
                 # Open new pane below (synthia stays on top) and start claude session
-                subprocess.Popen([
-                    'flatpak', 'run', 'org.wezfurlong.wezterm', 'cli',
-                    'split-pane', '--bottom', '--percent', '50', '--',
-                    'bash', '-c', f'cd {wt.path} && claude --dangerously-skip-permissions'
-                ])
+                subprocess.Popen(
+                    [
+                        "flatpak",
+                        "run",
+                        "org.wezfurlong.wezterm",
+                        "cli",
+                        "split-pane",
+                        "--bottom",
+                        "--percent",
+                        "50",
+                        "--",
+                        "bash",
+                        "-c",
+                        f"cd {wt.path} && claude --dangerously-skip-permissions",
+                    ]
+                )
                 self._set_status(f"Opening Claude in {Path(wt.path).name}...")
         except Exception:
             pass
 
     def _delete_selected_worktree(self) -> None:
         """Delete selected worktree."""
-        if not hasattr(self, '_worktrees') or not self._worktrees:
+        if not hasattr(self, "_worktrees") or not self._worktrees:
             return
         try:
             list_view = self.query_one("#content-list", ListView)
@@ -1080,7 +1123,7 @@ class SynthiaDashboard(App):
                 short_name = Path(wt.path).name
                 self.push_screen(
                     ConfirmDeleteScreen(f"worktree '{short_name}'"),
-                    lambda confirmed: self._do_delete_worktree(wt.path) if confirmed else None
+                    lambda confirmed: self._do_delete_worktree(wt.path) if confirmed else None,
                 )
         except Exception:
             pass
@@ -1088,6 +1131,7 @@ class SynthiaDashboard(App):
     def _do_delete_worktree(self, path: str) -> None:
         """Actually delete the worktree."""
         import subprocess
+
         try:
             subprocess.run(["git", "worktree", "remove", path], check=True)
             self._set_status("Worktree deleted")

@@ -1,10 +1,11 @@
 """Tests for the MemorySystem class in src/synthia/memory.py."""
 
 import json
-import pytest
 from pathlib import Path
 
-from synthia.memory import MemorySystem, MemoryEntry, MEMORY_CATEGORIES
+import pytest
+
+from synthia.memory import MEMORY_CATEGORIES, MemoryEntry, MemorySystem
 
 
 class TestRemember:

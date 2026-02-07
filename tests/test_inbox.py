@@ -1,9 +1,10 @@
 """Tests for inbox.py functions."""
 
 import json
-import pytest
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from synthia.remote import inbox
 

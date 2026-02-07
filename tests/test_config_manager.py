@@ -29,7 +29,6 @@ from synthia.config_manager import (
     set_plugin_enabled,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -92,6 +91,7 @@ def _write_settings(settings_file: Path, data: dict) -> None:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def claude_dir(tmp_path, monkeypatch):
     """Set up a temporary .claude directory and redirect module-level paths."""
@@ -122,6 +122,7 @@ def claude_dir(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # parse_frontmatter
 # ---------------------------------------------------------------------------
+
 
 class TestParseFrontmatter:
     """Test YAML frontmatter parsing."""
@@ -167,6 +168,7 @@ class TestParseFrontmatter:
 # AgentConfig
 # ---------------------------------------------------------------------------
 
+
 class TestAgentConfig:
     """Test AgentConfig dataclass and methods."""
 
@@ -174,7 +176,8 @@ class TestAgentConfig:
         """AgentConfig.from_file parses a markdown agent file."""
         agents_dir = claude_dir / "agents"
         filepath = _write_agent(
-            agents_dir, "eva.md",
+            agents_dir,
+            "eva.md",
             name="Eva",
             description="Senior dev agent",
             model="opus",
@@ -243,6 +246,7 @@ class TestAgentConfig:
 # list_agents
 # ---------------------------------------------------------------------------
 
+
 class TestListAgents:
     """Test list_agents function."""
 
@@ -306,6 +310,7 @@ class TestListAgents:
 # load_agent / save_agent / delete_agent
 # ---------------------------------------------------------------------------
 
+
 class TestAgentCrud:
     """Test agent CRUD operations."""
 
@@ -352,6 +357,7 @@ class TestAgentCrud:
 # CommandConfig
 # ---------------------------------------------------------------------------
 
+
 class TestCommandConfig:
     """Test CommandConfig dataclass and methods."""
 
@@ -359,7 +365,8 @@ class TestCommandConfig:
         """CommandConfig.from_file parses a command markdown file."""
         commands_dir = claude_dir / "commands"
         filepath = _write_command(
-            commands_dir, "deploy.md",
+            commands_dir,
+            "deploy.md",
             description="Deploy to production",
             body="Run deployment script.",
         )
@@ -383,6 +390,7 @@ class TestCommandConfig:
 # ---------------------------------------------------------------------------
 # list_commands
 # ---------------------------------------------------------------------------
+
 
 class TestListCommands:
     """Test list_commands function."""
@@ -436,6 +444,7 @@ class TestListCommands:
 # load_command / save_command / delete_command
 # ---------------------------------------------------------------------------
 
+
 class TestCommandCrud:
     """Test command CRUD operations."""
 
@@ -481,6 +490,7 @@ class TestCommandCrud:
 # Settings (load / save)
 # ---------------------------------------------------------------------------
 
+
 class TestSettings:
     """Test load_settings and save_settings."""
 
@@ -519,38 +529,42 @@ class TestSettings:
 # list_hooks
 # ---------------------------------------------------------------------------
 
+
 class TestListHooks:
     """Test list_hooks function."""
 
     def test_list_hooks_with_hooks(self, claude_dir):
         """Returns HookConfig objects from settings.json hooks section."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "hooks": {
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": "echo 'prompt submitted'",
-                                "timeout": 10,
-                            }
-                        ]
-                    }
-                ],
-                "Stop": [
-                    {
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": "echo 'stopped'",
-                                "timeout": 5,
-                            }
-                        ]
-                    }
-                ],
-            }
-        })
+        _write_settings(
+            settings_file,
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "echo 'prompt submitted'",
+                                    "timeout": 10,
+                                }
+                            ]
+                        }
+                    ],
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "echo 'stopped'",
+                                    "timeout": 5,
+                                }
+                            ]
+                        }
+                    ],
+                }
+            },
+        )
         hooks = list_hooks()
         assert len(hooks) == 2
         events = [h.event for h in hooks]
@@ -560,18 +574,21 @@ class TestListHooks:
     def test_list_hooks_multiple_in_same_event(self, claude_dir):
         """Multiple hooks under the same event are all returned."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "hooks": {
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [
-                            {"type": "command", "command": "lint", "timeout": 10},
-                            {"type": "command", "command": "typecheck", "timeout": 20},
-                        ]
-                    }
-                ]
-            }
-        })
+        _write_settings(
+            settings_file,
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": "lint", "timeout": 10},
+                                {"type": "command", "command": "typecheck", "timeout": 20},
+                            ]
+                        }
+                    ]
+                }
+            },
+        )
         hooks = list_hooks()
         assert len(hooks) == 2
         commands = [h.command for h in hooks]
@@ -593,17 +610,7 @@ class TestListHooks:
     def test_list_hooks_defaults(self, claude_dir):
         """Hook with missing timeout and type gets defaults."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "hooks": {
-                "Stop": [
-                    {
-                        "hooks": [
-                            {"command": "cleanup"}
-                        ]
-                    }
-                ]
-            }
-        })
+        _write_settings(settings_file, {"hooks": {"Stop": [{"hooks": [{"command": "cleanup"}]}]}})
         hooks = list_hooks()
         assert len(hooks) == 1
         assert hooks[0].timeout == 30  # default
@@ -615,6 +622,7 @@ class TestListHooks:
 # ---------------------------------------------------------------------------
 # save_hook / delete_hook
 # ---------------------------------------------------------------------------
+
 
 class TestHookCrud:
     """Test hook save and delete operations."""
@@ -637,17 +645,14 @@ class TestHookCrud:
     def test_save_hook_update_existing(self, claude_dir):
         """Saving a hook with same command updates the existing one."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "hooks": {
-                "Stop": [
-                    {
-                        "hooks": [
-                            {"type": "command", "command": "cleanup", "timeout": 10}
-                        ]
-                    }
-                ]
-            }
-        })
+        _write_settings(
+            settings_file,
+            {
+                "hooks": {
+                    "Stop": [{"hooks": [{"type": "command", "command": "cleanup", "timeout": 10}]}]
+                }
+            },
+        )
 
         hook = HookConfig(event="Stop", command="cleanup", timeout=60)
         save_hook(hook)
@@ -660,17 +665,14 @@ class TestHookCrud:
     def test_delete_hook_exists(self, claude_dir):
         """Deleting an existing hook returns True."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "hooks": {
-                "Stop": [
-                    {
-                        "hooks": [
-                            {"type": "command", "command": "cleanup", "timeout": 10}
-                        ]
-                    }
-                ]
-            }
-        })
+        _write_settings(
+            settings_file,
+            {
+                "hooks": {
+                    "Stop": [{"hooks": [{"type": "command", "command": "cleanup", "timeout": 10}]}]
+                }
+            },
+        )
         assert delete_hook("Stop", "cleanup") is True
         # Verify the hook is removed from settings
         settings = load_settings()
@@ -686,23 +688,21 @@ class TestHookCrud:
     def test_delete_hook_wrong_command(self, claude_dir):
         """Deleting a hook with non-matching command returns False."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "hooks": {
-                "Stop": [
-                    {
-                        "hooks": [
-                            {"type": "command", "command": "cleanup", "timeout": 10}
-                        ]
-                    }
-                ]
-            }
-        })
+        _write_settings(
+            settings_file,
+            {
+                "hooks": {
+                    "Stop": [{"hooks": [{"type": "command", "command": "cleanup", "timeout": 10}]}]
+                }
+            },
+        )
         assert delete_hook("Stop", "nonexistent") is False
 
 
 # ---------------------------------------------------------------------------
 # PluginInfo
 # ---------------------------------------------------------------------------
+
 
 class TestPluginInfo:
     """Test PluginInfo dataclass."""
@@ -722,25 +722,33 @@ class TestPluginInfo:
 # list_plugins / set_plugin_enabled
 # ---------------------------------------------------------------------------
 
+
 class TestPlugins:
     """Test plugin listing and management."""
 
     def test_list_plugins_from_installed_file(self, claude_dir):
         """Plugins are loaded from installed_plugins.json with enabled state from settings."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "enabledPlugins": {
-                "tool@vendor": True,
-                "other@vendor": False,
-            }
-        })
+        _write_settings(
+            settings_file,
+            {
+                "enabledPlugins": {
+                    "tool@vendor": True,
+                    "other@vendor": False,
+                }
+            },
+        )
         plugins_file = claude_dir / "plugins" / "installed_plugins.json"
-        plugins_file.write_text(json.dumps({
-            "plugins": {
-                "tool@vendor": [{"version": "2.0", "installedAt": "2025-01-01"}],
-                "other@vendor": [{"version": "1.0", "installedAt": "2025-01-02"}],
-            }
-        }))
+        plugins_file.write_text(
+            json.dumps(
+                {
+                    "plugins": {
+                        "tool@vendor": [{"version": "2.0", "installedAt": "2025-01-01"}],
+                        "other@vendor": [{"version": "1.0", "installedAt": "2025-01-02"}],
+                    }
+                }
+            )
+        )
 
         plugins = list_plugins()
         assert len(plugins) == 2
@@ -752,11 +760,14 @@ class TestPlugins:
     def test_list_plugins_fallback_settings_only(self, claude_dir):
         """When installed_plugins.json doesn't exist, fall back to settings."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "enabledPlugins": {
-                "fallback@vendor": True,
-            }
-        })
+        _write_settings(
+            settings_file,
+            {
+                "enabledPlugins": {
+                    "fallback@vendor": True,
+                }
+            },
+        )
         # No installed_plugins.json file
 
         plugins = list_plugins()
@@ -782,9 +793,7 @@ class TestPlugins:
     def test_set_plugin_disabled(self, claude_dir):
         """set_plugin_enabled can disable a plugin."""
         settings_file = claude_dir / "settings.json"
-        _write_settings(settings_file, {
-            "enabledPlugins": {"my-plugin@vendor": True}
-        })
+        _write_settings(settings_file, {"enabledPlugins": {"my-plugin@vendor": True}})
 
         set_plugin_enabled("my-plugin@vendor", False)
         settings = load_settings()

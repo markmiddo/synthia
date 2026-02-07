@@ -28,8 +28,8 @@ class AudioRecorder:
         self.channels = channels
         self.device = device
         self.recording = False
-        self.audio_queue = queue.Queue()
-        self.stream = None
+        self.audio_queue: queue.Queue[np.ndarray] = queue.Queue()
+        self.stream: Optional[sd.InputStream] = None
 
         # Find USB microphone if no device specified
         if self.device is None:
@@ -75,9 +75,11 @@ class AudioRecorder:
         # Calculate the number of samples in the resampled audio
         num_samples = int(len(audio_data) * target_rate / orig_rate)
         resampled = signal.resample(audio_data, num_samples)
-        return resampled.astype(np.int16)
+        return np.asarray(resampled).astype(np.int16)
 
-    def _audio_callback(self, indata: np.ndarray, frames: int, time: object, status: sd.CallbackFlags) -> None:
+    def _audio_callback(
+        self, indata: np.ndarray, frames: int, time: object, status: sd.CallbackFlags
+    ) -> None:
         """Callback for audio stream - adds audio chunks to queue."""
         if status:
             logger.debug("Audio status: %s", status)
@@ -101,7 +103,8 @@ class AudioRecorder:
             dtype=np.int16,
             callback=self._audio_callback,
         )
-        self.stream.start()
+        if self.stream is not None:
+            self.stream.start()
         logger.info("Recording...")
 
     def stop_recording(self) -> bytes:
@@ -140,7 +143,9 @@ class AudioRecorder:
 
         # Resample to target rate for Google STT
         if self.device_sample_rate != self.target_sample_rate:
-            logger.debug("Resampling %sHz -> %sHz", self.device_sample_rate, self.target_sample_rate)
+            logger.debug(
+                "Resampling %sHz -> %sHz", self.device_sample_rate, self.target_sample_rate
+            )
             audio_data = self._resample(
                 audio_data, self.device_sample_rate, self.target_sample_rate
             )

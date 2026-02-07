@@ -10,7 +10,9 @@ DEFAULT_TIMEOUT = 3000
 ERROR_TIMEOUT = 5000
 
 
-def notify(title: str, message: str, icon: str = "audio-input-microphone", timeout: int = DEFAULT_TIMEOUT):
+def notify(
+    title: str, message: str, icon: str = "audio-input-microphone", timeout: int = DEFAULT_TIMEOUT
+):
     """Show a desktop notification.
 
     Args:

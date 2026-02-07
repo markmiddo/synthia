@@ -178,6 +178,7 @@ class Assistant:
         system_prompt = SYSTEM_PROMPT.format(date=current_datetime)
 
         # Call Claude API
+        assert self.client is not None
         response = self.client.messages.create(
             model=self.model,
             max_tokens=1500,

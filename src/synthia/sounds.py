@@ -14,9 +14,9 @@ BEEP_VOLUME = 0.3
 MAX_TEMP_FILES = 10
 
 # Beep frequencies (Hz)
-FREQ_HIGH = 880    # Recording start
-FREQ_LOW = 440     # Recording stop
-FREQ_ERROR = 220   # Error notification
+FREQ_HIGH = 880  # Recording start
+FREQ_LOW = 440  # Recording stop
+FREQ_ERROR = 220  # Error notification
 
 # Beep durations (ms)
 DURATION_SHORT = 100
@@ -68,7 +68,7 @@ class SoundEffects:
 
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
-        self._temp_files = []
+        self._temp_files: list[str] = []
         atexit.register(self.cleanup)
 
         # Pre-generate sounds

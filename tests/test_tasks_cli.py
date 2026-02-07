@@ -1,21 +1,22 @@
 """Tests for the task functions in src/synthia/tasks_cli.py."""
 
 import json
-import pytest
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 import synthia.tasks_cli as tasks_cli
 from synthia.tasks_cli import (
-    load_tasks,
-    save_tasks,
-    find_task,
     add_task,
     complete_task,
-    move_task,
     delete_task,
+    find_task,
     list_tasks,
+    load_tasks,
+    move_task,
+    save_tasks,
 )
 
 
@@ -93,7 +94,9 @@ class TestSaveTasks:
 class TestAddTask:
     """Tests for the add_task function."""
 
-    def test_add_task_creates_task_with_uuid_and_timestamps(self, tmp_tasks_file: Path, monkeypatch):
+    def test_add_task_creates_task_with_uuid_and_timestamps(
+        self, tmp_tasks_file: Path, monkeypatch
+    ):
         """Add task creates task with UUID and created_at timestamp."""
         monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
 
@@ -110,7 +113,9 @@ class TestAddTask:
         assert task["status"] == "todo"
         assert task["completed_at"] is None
 
-    def test_add_task_with_tags_parses_comma_separated_string(self, tmp_tasks_file: Path, monkeypatch):
+    def test_add_task_with_tags_parses_comma_separated_string(
+        self, tmp_tasks_file: Path, monkeypatch
+    ):
         """Add task parses comma-separated tags string into list."""
         monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
 

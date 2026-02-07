@@ -1,4 +1,5 @@
 """Tests for synthia.llm_polish module."""
+
 from __future__ import annotations
 
 import pytest
@@ -152,9 +153,7 @@ class TestPolishRequestPayload:
         mock_response = mocker.Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"response": "corrected text"}
-        mock_post = mocker.patch(
-            "synthia.llm_polish.requests.post", return_value=mock_response
-        )
+        mock_post = mocker.patch("synthia.llm_polish.requests.post", return_value=mock_response)
 
         polisher = TranscriptionPolisher(
             ollama_url="http://localhost:11434",

@@ -9,14 +9,14 @@ Features:
 - Push notifications
 """
 
-import os
-import sys
 import asyncio
+import logging
+import os
+import re
 import subprocess
+import sys
 import tempfile
 import time
-import logging
-import re
 from datetime import datetime
 from pathlib import Path
 
@@ -27,11 +27,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # Security: Input sanitization for text sent to terminal
 MAX_MESSAGE_LENGTH = 2000  # Limit message length
 DANGEROUS_SEQUENCES = [
-    '\x1b',  # Escape sequences
-    '\x00',  # Null bytes
-    '\x07',  # Bell
-    '\x08',  # Backspace
-    '\x7f',  # Delete
+    "\x1b",  # Escape sequences
+    "\x00",  # Null bytes
+    "\x07",  # Bell
+    "\x08",  # Backspace
+    "\x7f",  # Delete
 ]
 
 
@@ -49,30 +49,33 @@ def sanitize_terminal_input(text: str) -> str:
 
     # Remove dangerous control characters
     for seq in DANGEROUS_SEQUENCES:
-        text = text.replace(seq, '')
+        text = text.replace(seq, "")
 
     # Remove ANSI escape sequences
-    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+    text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
 
     # Remove other control characters (except newline, tab)
-    text = ''.join(char for char in text if char == '\n' or char == '\t' or ord(char) >= 32)
+    text = "".join(char for char in text if char == "\n" or char == "\t" or ord(char) >= 32)
 
     return text.strip()
+
 
 try:
     from telegram import Update
     from telegram.ext import (
         Application,
         CommandHandler,
+        ContextTypes,
         MessageHandler,
         filters,
-        ContextTypes,
     )
-except ImportError:
-    Update = None
 
-from synthia.config import load_config
+    HAS_TELEGRAM = True
+except ImportError:
+    HAS_TELEGRAM = False
+
 from synthia.assistant import Assistant
+from synthia.config import load_config
 from synthia.transcribe import Transcriber
 
 # Use XDG_RUNTIME_DIR for secure temp files (user-only access, not world-readable /tmp)
@@ -83,8 +86,7 @@ PLAN_APPROVED_FILE = os.path.join(_RUNTIME_DIR, "synthia-plan-approved")
 
 # Set up logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -102,15 +104,14 @@ class SynthiaBot:
 
         # Initialize transcriber (Whisper)
         self.transcriber = Transcriber(
-            use_local=True,
-            local_model=self.config.get('local_stt_model', 'tiny')
+            use_local=True, local_model=self.config.get("local_stt_model", "tiny")
         )
 
         # Initialize assistant (Qwen via Ollama)
         self.assistant = Assistant(
             use_local=True,
-            local_model=self.config.get('local_llm_model', 'qwen2.5:1.5b-instruct-q4_0'),
-            ollama_url=self.config.get('ollama_url', 'http://localhost:11434')
+            local_model=self.config.get("local_llm_model", "qwen2.5:1.5b-instruct-q4_0"),
+            ollama_url=self.config.get("ollama_url", "http://localhost:11434"),
         )
 
         logger.info("Synthia Bot initialized")
@@ -121,6 +122,9 @@ class SynthiaBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             await update.message.reply_text("Unauthorized.")
             return
@@ -139,31 +143,34 @@ class SynthiaBot:
             "/gpu - GPU usage\n"
             "/screenshot - Take screenshot\n\n"
             "Or just send me a message or voice note!",
-            parse_mode='Markdown'
+            parse_mode="Markdown",
         )
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command - show system status."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
         try:
             # Get uptime
-            uptime = subprocess.check_output(['uptime', '-p'], text=True).strip()
+            uptime = subprocess.check_output(["uptime", "-p"], text=True).strip()
 
             # Get load average
-            load = subprocess.check_output(['cat', '/proc/loadavg'], text=True).split()[:3]
-            load_str = ', '.join(load)
+            load = subprocess.check_output(["cat", "/proc/loadavg"], text=True).split()[:3]
+            load_str = ", ".join(load)
 
             # Get memory
-            mem = subprocess.check_output(['free', '-h'], text=True).split('\n')[1].split()
+            mem = subprocess.check_output(["free", "-h"], text=True).split("\n")[1].split()
             mem_used, mem_total = mem[2], mem[1]
 
             # Check if Ollama is running
-            ollama_status = "Running" if self._is_process_running('ollama') else "Stopped"
+            ollama_status = "Running" if self._is_process_running("ollama") else "Stopped"
 
             # Check if Synthia main is running
-            synthia_status = "Running" if self._is_process_running('synthia') else "Stopped"
+            synthia_status = "Running" if self._is_process_running("synthia") else "Stopped"
 
             status_msg = (
                 f"*System Status*\n\n"
@@ -175,41 +182,48 @@ class SynthiaBot:
                 f"Ollama: {ollama_status}"
             )
 
-            await update.message.reply_text(status_msg, parse_mode='Markdown')
+            await update.message.reply_text(status_msg, parse_mode="Markdown")
 
         except Exception as e:
             await update.message.reply_text(f"Error getting status: {e}")
 
     async def disk(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /disk command - show disk usage."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
         try:
-            df = subprocess.check_output(['df', '-h', '/'], text=True).split('\n')[1].split()
+            df = subprocess.check_output(["df", "-h", "/"], text=True).split("\n")[1].split()
             used, total, percent = df[2], df[1], df[4]
 
             await update.message.reply_text(
-                f"*Disk Usage*\n\n"
-                f"Used: {used} / {total} ({percent})",
-                parse_mode='Markdown'
+                f"*Disk Usage*\n\n" f"Used: {used} / {total} ({percent})", parse_mode="Markdown"
             )
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
 
     async def gpu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /gpu command - show GPU usage."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
         try:
             gpu_info = subprocess.check_output(
-                ['nvidia-smi', '--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu',
-                 '--format=csv,noheader,nounits'],
-                text=True
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu",
+                    "--format=csv,noheader,nounits",
+                ],
+                text=True,
             ).strip()
 
-            name, mem_used, mem_total, util, temp = gpu_info.split(', ')
+            name, mem_used, mem_total, util, temp = gpu_info.split(", ")
 
             await update.message.reply_text(
                 f"*GPU Status*\n\n"
@@ -217,13 +231,16 @@ class SynthiaBot:
                 f"Memory: {mem_used}MB / {mem_total}MB\n"
                 f"Utilization: {util}%\n"
                 f"Temperature: {temp}C",
-                parse_mode='Markdown'
+                parse_mode="Markdown",
             )
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
 
     async def screenshot(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /screenshot command - take and send screenshot."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
@@ -231,24 +248,22 @@ class SynthiaBot:
             await update.message.reply_text("Taking screenshot...")
 
             # Take screenshot using gnome-screenshot or scrot
-            screenshot_path = os.path.join(_RUNTIME_DIR, 'synthia_screenshot.png')
+            screenshot_path = os.path.join(_RUNTIME_DIR, "synthia_screenshot.png")
 
             # Try gnome-screenshot first, fall back to scrot
             try:
                 subprocess.run(
-                    ['gnome-screenshot', '-f', screenshot_path],
+                    ["gnome-screenshot", "-f", screenshot_path],
                     check=True,
-                    env={**os.environ, 'DISPLAY': ':0'}
+                    env={**os.environ, "DISPLAY": ":0"},
                 )
             except FileNotFoundError:
                 subprocess.run(
-                    ['scrot', screenshot_path],
-                    check=True,
-                    env={**os.environ, 'DISPLAY': ':0'}
+                    ["scrot", screenshot_path], check=True, env={**os.environ, "DISPLAY": ":0"}
                 )
 
             # Send the screenshot
-            with open(screenshot_path, 'rb') as photo:
+            with open(screenshot_path, "rb") as photo:
                 await update.message.reply_photo(photo)
 
             # Clean up
@@ -259,21 +274,27 @@ class SynthiaBot:
 
     async def clip_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /clip command - copy text to PC clipboard."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
-        text = ' '.join(context.args) if context.args else ''
+        text = " ".join(context.args) if context.args else ""
         if not text:
             await update.message.reply_text("Usage: /clip <text to copy>")
             return
 
         try:
             from synthia.commands import copy_to_clipboard
+
             success = copy_to_clipboard(text)
 
             if success:
                 preview = text[:50] + "..." if len(text) > 50 else text
-                await update.message.reply_text(f"Copied to PC clipboard:\n`{preview}`", parse_mode='Markdown')
+                await update.message.reply_text(
+                    f"Copied to PC clipboard:\n`{preview}`", parse_mode="Markdown"
+                )
             else:
                 await update.message.reply_text("Failed to copy to clipboard")
         except Exception as e:
@@ -281,18 +302,24 @@ class SynthiaBot:
 
     async def getclip_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /getclip command - get PC clipboard content."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
         try:
             from synthia.commands import get_clipboard
+
             content = get_clipboard()
 
             if content:
                 # Truncate if too long for Telegram
                 if len(content) > 4000:
                     content = content[:4000] + "\n\n... (truncated)"
-                await update.message.reply_text(f"*PC Clipboard:*\n```\n{content}\n```", parse_mode='Markdown')
+                await update.message.reply_text(
+                    f"*PC Clipboard:*\n```\n{content}\n```", parse_mode="Markdown"
+                )
             else:
                 await update.message.reply_text("Clipboard is empty")
         except Exception as e:
@@ -300,6 +327,9 @@ class SynthiaBot:
 
     async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle document uploads - save to inbox."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
@@ -307,13 +337,15 @@ class SynthiaBot:
             from synthia.remote.inbox import add_inbox_item, get_files_dir
 
             doc = update.message.document
+            assert doc is not None
             file = await doc.get_file()
 
             # Download file
             files_dir = get_files_dir()
             # SECURITY: Sanitize filename to prevent path traversal (e.g., "../../.bashrc")
-            safe_name = Path(doc.file_name).name  # Strips directory components
-            if not safe_name or safe_name.startswith('.'):
+            file_name = doc.file_name or f"upload_{int(time.time())}"
+            safe_name = Path(file_name).name  # Strips directory components
+            if not safe_name or safe_name.startswith("."):
                 safe_name = f"upload_{int(time.time())}"
             file_path = files_dir / safe_name
             await file.download_to_drive(str(file_path))
@@ -333,12 +365,16 @@ class SynthiaBot:
 
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle photo uploads - save largest resolution to inbox."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
         try:
-            from synthia.remote.inbox import add_inbox_item, get_files_dir
             from datetime import datetime
+
+            from synthia.remote.inbox import add_inbox_item, get_files_dir
 
             # Get largest photo
             photo = update.message.photo[-1]
@@ -366,18 +402,24 @@ class SynthiaBot:
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages - route to Claude Code if in remote mode, else local LLM."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
         text = update.message.text
+        if text is None:
+            return
         logger.info(f"Received text: {text}")
 
         # Check for URLs and save to inbox (only if not in remote mode)
         if not self._is_remote_mode():
-            url_pattern = r'https?://[^\s]+'
+            url_pattern = r"https?://[^\s]+"
             urls = re.findall(url_pattern, text)
             if urls:
                 from synthia.remote.inbox import add_inbox_item
+
                 for url in urls:
                     add_inbox_item(
                         item_type="url",
@@ -387,7 +429,7 @@ class SynthiaBot:
                     )
                 await update.message.reply_text(f"Saved {len(urls)} URL(s) to inbox")
                 # If the message is just URL(s), don't process further
-                text_without_urls = re.sub(url_pattern, '', text).strip()
+                text_without_urls = re.sub(url_pattern, "", text).strip()
                 if not text_without_urls:
                     return
 
@@ -400,12 +442,30 @@ class SynthiaBot:
 
             if waiting_for_approval:
                 # Check if this is an approval message
-                approval_words = ['yes', 'go', 'approved', 'proceed', 'do it', 'ok', 'okay', 'yep', 'yeah', 'sure', 'continue', 'execute', 'run it', 'go ahead']
-                if text.lower().strip() in approval_words or text.lower().strip().rstrip('!.') in approval_words:
+                approval_words = [
+                    "yes",
+                    "go",
+                    "approved",
+                    "proceed",
+                    "do it",
+                    "ok",
+                    "okay",
+                    "yep",
+                    "yeah",
+                    "sure",
+                    "continue",
+                    "execute",
+                    "run it",
+                    "go ahead",
+                ]
+                if (
+                    text.lower().strip() in approval_words
+                    or text.lower().strip().rstrip("!.") in approval_words
+                ):
                     # Send approval signal
                     os.remove(WAITING_APPROVAL_FILE)
-                    with open(PLAN_APPROVED_FILE, 'w') as f:
-                        f.write('approved')
+                    with open(PLAN_APPROVED_FILE, "w") as f:
+                        f.write("approved")
                     await update.message.reply_text("✅ Approved! Executing plan...")
                     # Send "proceed" to Claude Code
                     self._send_to_claude_code("proceed with the plan")
@@ -413,7 +473,9 @@ class SynthiaBot:
                 else:
                     # New request while waiting - cancel old plan
                     os.remove(WAITING_APPROVAL_FILE)
-                    await update.message.reply_text("📝 New request received, cancelling previous plan...")
+                    await update.message.reply_text(
+                        "📝 New request received, cancelling previous plan..."
+                    )
 
             # Varied processing messages
             processing_msgs = [
@@ -434,7 +496,7 @@ class SynthiaBot:
             response = self.assistant.process(text)
 
             # Extract the spoken response (key is 'speech' not 'response')
-            reply = response.get('speech', 'Sorry, I could not process that.')
+            reply = response.get("speech", "Sorry, I could not process that.")
 
             await update.message.reply_text(reply)
 
@@ -448,19 +510,20 @@ class SynthiaBot:
 
     def _get_display(self) -> str:
         """Get the active X display, trying common options."""
-        for display in [':1', ':0']:
+        for display in [":1", ":0"]:
             try:
                 result = subprocess.run(
-                    ['wmctrl', '-l'],
-                    capture_output=True, text=True,
-                    env={**os.environ, 'DISPLAY': display},
-                    timeout=2
+                    ["wmctrl", "-l"],
+                    capture_output=True,
+                    text=True,
+                    env={**os.environ, "DISPLAY": display},
+                    timeout=2,
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return display
             except Exception:
                 pass
-        return os.environ.get('DISPLAY', ':0')
+        return os.environ.get("DISPLAY", ":0")
 
     def _send_to_claude_code(self, message: str) -> bool:
         """Send a message to the Claude Code terminal.
@@ -492,11 +555,11 @@ class SynthiaBot:
         # Try ydotool first (works even without focus on the window)
         try:
             # Check if ydotoold is running
-            result = subprocess.run(['pgrep', '-x', 'ydotoold'], capture_output=True)
+            result = subprocess.run(["pgrep", "-x", "ydotoold"], capture_output=True)
             if result.returncode == 0:
                 # ydotool is available and daemon is running
-                subprocess.run(['ydotool', 'type', '--', message], check=True)
-                subprocess.run(['ydotool', 'key', 'enter'], check=True)
+                subprocess.run(["ydotool", "type", "--", message], check=True)
+                subprocess.run(["ydotool", "key", "enter"], check=True)
                 logger.info(f"Sent via ydotool: {message}")
                 return True
         except FileNotFoundError:
@@ -505,8 +568,8 @@ class SynthiaBot:
         # Fallback to wtype (requires the terminal to be focused)
         try:
             # wtype types to the currently focused window
-            subprocess.run(['wtype', message], check=True)
-            subprocess.run(['wtype', '-k', 'Return'], check=True)
+            subprocess.run(["wtype", message], check=True)
+            subprocess.run(["wtype", "-k", "Return"], check=True)
             logger.info(f"Sent via wtype: {message}")
             return True
         except FileNotFoundError:
@@ -522,9 +585,7 @@ class SynthiaBot:
 
         # Find terminal window - look for "Remote" tab in WezTerm
         result = subprocess.run(
-            ['wmctrl', '-l'],
-            capture_output=True, text=True,
-            env={**os.environ, 'DISPLAY': display}
+            ["wmctrl", "-l"], capture_output=True, text=True, env={**os.environ, "DISPLAY": display}
         )
 
         # Priority order for window matching:
@@ -532,26 +593,28 @@ class SynthiaBot:
         # 2. Window with Claude Code indicator (✳ or Claude)
         # 3. WezTerm windows (contain tab info like [1/4])
         window_id = None
-        candidates = []
-        for line in result.stdout.strip().split('\n'):
+        candidates: list[tuple[str, str]] = []
+        for line in result.stdout.strip().split("\n"):
             parts = line.split(None, 4)
             if len(parts) >= 4:
                 wid = parts[0]
-                title = parts[-1] if len(parts) > 4 else ''
+                title = parts[-1] if len(parts) > 4 else ""
                 # Skip empty titles and desktop/panel windows
-                if not title or title.startswith('@!') or title.startswith('N/A'):
+                if not title or title.startswith("@!") or title.startswith("N/A"):
                     continue
                 # Skip browser windows (Chrome, Firefox, etc)
-                if any(x in title for x in ['Chrome', 'Firefox', 'Zen', 'Brave']):
+                if any(x in title for x in ["Chrome", "Firefox", "Zen", "Brave"]):
                     continue
                 # Highest priority - "Remote" tab
-                if title == 'Remote':
+                if title == "Remote":
                     candidates.insert(0, (wid, title))
                 # High priority - Claude Code window (has ✳ indicator)
-                elif '✳' in title:
-                    candidates.insert(1 if candidates and candidates[0][1] == 'Remote' else 0, (wid, title))
+                elif "✳" in title:
+                    candidates.insert(
+                        1 if candidates and candidates[0][1] == "Remote" else 0, (wid, title)
+                    )
                 # Medium priority - WezTerm with tab indicator [X/Y]
-                elif title.startswith('[') and '/' in title[:6]:
+                elif title.startswith("[") and "/" in title[:6]:
                     candidates.append((wid, title))
 
         if candidates:
@@ -565,16 +628,16 @@ class SynthiaBot:
 
         # Type the message into the terminal
         subprocess.run(
-            ['xdotool', 'type', '--window', window_id, '--clearmodifiers', message],
+            ["xdotool", "type", "--window", window_id, "--clearmodifiers", message],
             check=True,
-            env={**os.environ, 'DISPLAY': display}
+            env={**os.environ, "DISPLAY": display},
         )
 
         # Press Enter
         subprocess.run(
-            ['xdotool', 'key', '--window', window_id, 'Return'],
+            ["xdotool", "key", "--window", window_id, "Return"],
             check=True,
-            env={**os.environ, 'DISPLAY': display}
+            env={**os.environ, "DISPLAY": display},
         )
 
         logger.info(f"Sent via xdotool: {message}")
@@ -582,6 +645,10 @@ class SynthiaBot:
 
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle voice notes - transcribe and process."""
+        assert update.effective_user is not None
+        assert update.message is not None
+        assert update.message.voice is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
@@ -592,19 +659,21 @@ class SynthiaBot:
             voice = await update.message.voice.get_file()
 
             # Create temp file for the voice note
-            with tempfile.NamedTemporaryFile(suffix='.ogg', delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
                 ogg_path = f.name
 
             await voice.download_to_drive(ogg_path)
 
             # Convert to WAV for Whisper
-            wav_path = ogg_path.replace('.ogg', '.wav')
-            subprocess.run([
-                'ffmpeg', '-i', ogg_path, '-ar', '16000', '-ac', '1', wav_path, '-y'
-            ], check=True, capture_output=True)
+            wav_path = ogg_path.replace(".ogg", ".wav")
+            subprocess.run(
+                ["ffmpeg", "-i", ogg_path, "-ar", "16000", "-ac", "1", wav_path, "-y"],
+                check=True,
+                capture_output=True,
+            )
 
             # Read WAV and transcribe
-            with open(wav_path, 'rb') as f:
+            with open(wav_path, "rb") as f:
                 # Skip WAV header (44 bytes) and read PCM data
                 f.seek(44)
                 audio_data = f.read()
@@ -623,6 +692,7 @@ class SynthiaBot:
             if self._is_remote_mode():
                 # Varied sending messages
                 import random
+
                 sending_msgs = [
                     "📤 Sending to Claude Code...",
                     "🚀 Forwarding to Claude...",
@@ -637,11 +707,11 @@ class SynthiaBot:
                 return
 
             # Show what was heard (only in local mode)
-            await update.message.reply_text(f"Heard: _{transcript}_", parse_mode='Markdown')
+            await update.message.reply_text(f"Heard: _{transcript}_", parse_mode="Markdown")
 
             # Process with assistant
             response = self.assistant.process(transcript)
-            reply = response.get('speech', 'Sorry, I could not process that.')
+            reply = response.get("speech", "Sorry, I could not process that.")
 
             await update.message.reply_text(reply)
 
@@ -652,7 +722,7 @@ class SynthiaBot:
     def _is_process_running(self, name: str) -> bool:
         """Check if a process is running."""
         try:
-            subprocess.check_output(['pgrep', '-f', name])
+            subprocess.check_output(["pgrep", "-f", name])
             return True
         except subprocess.CalledProcessError:
             return False
@@ -661,23 +731,27 @@ class SynthiaBot:
         """Check if remote mode is enabled."""
         return os.path.exists(REMOTE_MODE_FILE)
 
-    def _get_remote_chat_id(self) -> int:
+    def _get_remote_chat_id(self) -> int | None:
         """Get the chat ID for remote notifications."""
         try:
-            with open(REMOTE_MODE_FILE, 'r') as f:
+            with open(REMOTE_MODE_FILE, "r") as f:
                 return int(f.read().strip())
         except Exception:
             return None
 
     async def enable_dev_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Enable Dev Mode - control Claude Code remotely."""
+        assert update.effective_user is not None
+        assert update.message is not None
+        assert update.effective_chat is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
         chat_id = update.effective_chat.id
 
         # Save mode state with chat_id (restrictive permissions)
-        with open(REMOTE_MODE_FILE, 'w') as f:
+        with open(REMOTE_MODE_FILE, "w") as f:
             f.write(str(chat_id))
         os.chmod(REMOTE_MODE_FILE, 0o600)
 
@@ -685,12 +759,15 @@ class SynthiaBot:
             "🟢 *Dev Mode ENABLED*\n\n"
             "You can now control Claude Code remotely.\n"
             "Use /quick when you're back at your PC.",
-            parse_mode='Markdown'
+            parse_mode="Markdown",
         )
         logger.info(f"Dev Mode enabled for chat {chat_id}")
 
     async def enable_quick_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Enable Quick Mode - local assistant."""
+        assert update.effective_user is not None
+        assert update.message is not None
+
         if not self.is_authorized(update.effective_user.id):
             return
 
@@ -701,9 +778,8 @@ class SynthiaBot:
             pass
 
         await update.message.reply_text(
-            "🟡 *Quick Mode ENABLED*\n\n"
-            "Back to local assistant. Claude will speak responses.",
-            parse_mode='Markdown'
+            "🟡 *Quick Mode ENABLED*\n\n" "Back to local assistant. Claude will speak responses.",
+            parse_mode="Markdown",
         )
         logger.info("Quick Mode enabled")
 
@@ -749,8 +825,8 @@ def send_telegram_notification(message: str):
     import requests
 
     config = load_config()
-    bot_token = config.get('telegram_bot_token')
-    allowed_users = config.get('telegram_allowed_users', [])
+    bot_token = config.get("telegram_bot_token")
+    allowed_users = config.get("telegram_allowed_users", [])
 
     if not bot_token or not allowed_users:
         return False
@@ -758,11 +834,9 @@ def send_telegram_notification(message: str):
     for user_id in allowed_users:
         try:
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            requests.post(url, json={
-                "chat_id": user_id,
-                "text": message,
-                "parse_mode": "Markdown"
-            }, timeout=5)
+            requests.post(
+                url, json={"chat_id": user_id, "text": message, "parse_mode": "Markdown"}, timeout=5
+            )
         except Exception as e:
             logger.error(f"Failed to send notification: {e}")
 
@@ -779,8 +853,8 @@ def main():
 
     config = load_config()
 
-    bot_token = config.get('telegram_bot_token')
-    allowed_users = config.get('telegram_allowed_users', [])
+    bot_token = config.get("telegram_bot_token")
+    allowed_users = config.get("telegram_allowed_users", [])
 
     if not bot_token:
         print("Error: telegram_bot_token not set in config")

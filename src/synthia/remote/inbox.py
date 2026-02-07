@@ -8,7 +8,7 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +32,21 @@ def get_inbox_file() -> Path:
     return get_inbox_dir() / "inbox.json"
 
 
-def load_inbox() -> list[dict]:
+def load_inbox() -> list[dict[str, Any]]:
     """Load inbox items from JSON file."""
     inbox_file = get_inbox_file()
     try:
         if inbox_file.exists():
             with open(inbox_file) as f:
                 data = json.load(f)
-                return data.get("items", [])
+                items: list[dict[str, Any]] = data.get("items", [])
+                return items
     except Exception as e:
         logger.warning("Failed to load inbox: %s", e)
     return []
 
 
-def save_inbox(items: list[dict]):
+def save_inbox(items: list[dict[str, Any]]) -> None:
     """Save inbox items to JSON file."""
     inbox_file = get_inbox_file()
     try:
@@ -62,7 +63,7 @@ def add_inbox_item(
     url: Optional[str] = None,
     size_bytes: Optional[int] = None,
     from_user: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Add a new item to the inbox."""
     items = load_inbox()
 
@@ -87,7 +88,7 @@ def add_inbox_item(
     return item
 
 
-def mark_item_opened(item_id: str):
+def mark_item_opened(item_id: str) -> None:
     """Mark an inbox item as opened."""
     items = load_inbox()
     for item in items:
@@ -106,11 +107,12 @@ def delete_inbox_item(item_id: str) -> bool:
     for item in items:
         if item.get("id") == item_id:
             # Delete associated file if it exists
-            if item.get("path") and os.path.exists(item["path"]):
+            item_path = item.get("path")
+            if item_path and isinstance(item_path, str) and os.path.exists(item_path):
                 try:
-                    os.remove(item["path"])
+                    os.remove(item_path)
                 except OSError as e:
-                    logger.debug("Failed to delete inbox file %s: %s", item["path"], e)
+                    logger.debug("Failed to delete inbox file %s: %s", item_path, e)
             deleted = True
         else:
             new_items.append(item)
@@ -119,21 +121,22 @@ def delete_inbox_item(item_id: str) -> bool:
     return deleted
 
 
-def clear_inbox():
+def clear_inbox() -> None:
     """Clear all inbox items and their files."""
     items = load_inbox()
 
     # Delete all files
     for item in items:
-        if item.get("path") and os.path.exists(item["path"]):
+        item_path = item.get("path")
+        if item_path and isinstance(item_path, str) and os.path.exists(item_path):
             try:
-                os.remove(item["path"])
+                os.remove(item_path)
             except OSError as e:
-                logger.debug("Failed to delete inbox file %s: %s", item["path"], e)
+                logger.debug("Failed to delete inbox file %s: %s", item_path, e)
 
     save_inbox([])
 
 
-def get_inbox_items() -> list[dict]:
+def get_inbox_items() -> list[dict[str, Any]]:
     """Get all inbox items."""
     return load_inbox()

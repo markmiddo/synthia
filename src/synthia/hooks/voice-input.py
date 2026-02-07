@@ -9,9 +9,10 @@ Usage:
     python voice-input.py --push-to-talk # Hold Enter to record
 """
 
-import sys
-import os
 import argparse
+import os
+import sys
+from typing import Optional
 
 # Add synthia src to path dynamically (no hardcoded paths)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,11 +20,11 @@ SYNTHIA_SRC = os.path.dirname(SCRIPT_DIR)  # Go up from hooks/ to synthia/
 sys.path.insert(0, SYNTHIA_SRC)
 
 from audio import AudioRecorder
+from config import get_google_credentials_path, load_config
 from transcribe import Transcriber
-from config import load_config, get_google_credentials_path
 
 
-def record_and_transcribe(duration: float = None, push_to_talk: bool = False) -> str:
+def record_and_transcribe(duration: Optional[float] = None, push_to_talk: bool = False) -> str:
     """Record audio and return transcribed text."""
     config = load_config()
     credentials_path = get_google_credentials_path(config)
@@ -43,6 +44,7 @@ def record_and_transcribe(duration: float = None, push_to_talk: bool = False) ->
         audio_data = recorder.stop_recording()
     elif duration:
         import time
+
         import numpy as np
         import sounddevice as sd
 
@@ -55,13 +57,15 @@ def record_and_transcribe(duration: float = None, push_to_talk: bool = False) ->
             samplerate=recorder.device_sample_rate,
             channels=1,
             dtype=np.int16,
-            device=recorder.device
+            device=recorder.device,
         )
         sd.wait()
 
         # Resample if needed
         if recorder.device_sample_rate != config["sample_rate"]:
-            audio = recorder._resample(audio.flatten(), recorder.device_sample_rate, config["sample_rate"])
+            audio = recorder._resample(
+                audio.flatten(), recorder.device_sample_rate, config["sample_rate"]
+            )
             audio_data = audio.tobytes()
         else:
             audio_data = audio.tobytes()
@@ -73,7 +77,7 @@ def record_and_transcribe(duration: float = None, push_to_talk: bool = False) ->
 
     if audio_data:
         text = transcriber.transcribe(audio_data)
-        return text
+        return str(text) if text else ""
 
     return ""
 

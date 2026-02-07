@@ -33,8 +33,10 @@ try:
         Static,
         TextArea,
     )
-except ImportError:
-    App = None
+except ImportError as _textual_err:
+    raise ImportError(
+        "textual is required for the memory TUI. Install with: pip install synthia[tui]"
+    ) from _textual_err
 
 from synthia.memory import (
     MEMORY_CATEGORIES,
@@ -180,12 +182,14 @@ class EditScreen(ModalScreen[Optional[dict]]):
         except Exception:
             tags = self.entry.tags
 
-        self.dismiss({
-            "category": self.entry.category,
-            "data": data,
-            "tags": tags,
-            "line_number": self.line_number,
-        })
+        self.dismiss(
+            {
+                "category": self.entry.category,
+                "data": data,
+                "tags": tags,
+                "line_number": self.line_number,
+            }
+        )
 
 
 class ConfirmDeleteScreen(ModalScreen[bool]):
@@ -427,7 +431,8 @@ class MemoryDashboard(App):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
-        self._set_active_button(button_id)
+        if button_id is not None:
+            self._set_active_button(button_id)
 
         if button_id == "btn-search":
             query = self.query_one("#search-input", Input).value
@@ -610,11 +615,11 @@ class MemoryDashboard(App):
         entry, line_num = self.current_entries[self.selected_index]
         # Store for callback
         self._pending_delete = (entry.category, line_num)
-        self.push_screen(ConfirmDeleteScreen(entry), self._on_delete_confirm)
+        self.push_screen(ConfirmDeleteScreen(entry), self._on_delete_confirm)  # type: ignore[arg-type]
 
     def _on_delete_confirm(self, confirmed: bool) -> None:
         """Callback when delete confirmation is dismissed."""
-        if confirmed and hasattr(self, '_pending_delete'):
+        if confirmed and self._pending_delete is not None:
             category, line_num = self._pending_delete
             self._do_delete(category, line_num)
         self._pending_delete = None
