@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # Type alias for config dictionary
 ConfigDict = dict[str, Any]
@@ -64,15 +67,107 @@ DEFAULT_CONFIG: ConfigDict = {
 
 CONFIG_PATH = Path.home() / ".config" / "synthia" / "config.yaml"
 
+# Valid values for constrained config keys
+VALID_HOTKEYS = {
+    "Key.ctrl_r", "Key.ctrl_l", "Key.alt_r", "Key.alt_l",
+    "Key.shift_r", "Key.shift_l",
+}
+VALID_SAMPLE_RATES = {8000, 16000, 22050, 44100, 48000}
+VALID_STT_MODELS = {"tiny", "base", "small", "medium", "large"}
+
+# Keys that must be boolean
+_BOOLEAN_KEYS = {
+    "show_notifications", "play_sound_on_record",
+    "use_local_stt", "use_local_llm", "use_local_tts",
+    "use_llm_polish", "clipboard_history_enabled",
+    "memory_enabled", "memory_auto_retrieve",
+}
+
+
+def validate_config(config: ConfigDict) -> list[str]:
+    """Validate configuration values and return a list of warnings.
+
+    Checks types, ranges, and known values. Never crashes on bad config —
+    returns warnings so the caller can log them and continue.
+    """
+    warnings: list[str] = []
+
+    # Hotkeys
+    for key in ("dictation_key", "assistant_key"):
+        val = config.get(key)
+        if val is not None and val not in VALID_HOTKEYS:
+            warnings.append(
+                f"{key}={val!r} is not a known hotkey. "
+                f"Valid: {', '.join(sorted(VALID_HOTKEYS))}"
+            )
+
+    # Sample rate
+    sr = config.get("sample_rate")
+    if sr is not None and sr not in VALID_SAMPLE_RATES:
+        warnings.append(
+            f"sample_rate={sr} is not a standard rate. "
+            f"Valid: {sorted(VALID_SAMPLE_RATES)}"
+        )
+
+    # TTS speed
+    speed = config.get("tts_speed")
+    if speed is not None and not (0.25 <= speed <= 4.0):
+        warnings.append(f"tts_speed={speed} is out of range (0.25–4.0)")
+
+    # Positive integers
+    for key in ("conversation_memory", "clipboard_history_max_items"):
+        val = config.get(key)
+        if val is not None and (not isinstance(val, int) or val <= 0):
+            warnings.append(f"{key}={val!r} must be a positive integer")
+
+    # LLM polish timeout
+    timeout = config.get("llm_polish_timeout")
+    if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
+        warnings.append(f"llm_polish_timeout={timeout!r} must be a positive number")
+
+    # Boolean flags
+    for key in _BOOLEAN_KEYS:
+        val = config.get(key)
+        if val is not None and not isinstance(val, bool):
+            warnings.append(f"{key}={val!r} must be true or false")
+
+    # Local STT model
+    model = config.get("local_stt_model")
+    if model is not None and model not in VALID_STT_MODELS:
+        warnings.append(
+            f"local_stt_model={model!r} is not valid. "
+            f"Valid: {', '.join(sorted(VALID_STT_MODELS))}"
+        )
+
+    # Ollama URL
+    url = config.get("ollama_url")
+    if url and not (url.startswith("http://") or url.startswith("https://")):
+        warnings.append(f"ollama_url={url!r} must start with http:// or https://")
+
+    # Unknown keys
+    unknown = set(config.keys()) - set(DEFAULT_CONFIG.keys())
+    if unknown:
+        warnings.append(
+            f"Unknown config keys (possible typos): {', '.join(sorted(unknown))}"
+        )
+
+    return warnings
+
 
 def load_config() -> ConfigDict:
-    """Load configuration from YAML file, falling back to defaults."""
+    """Load configuration from YAML file, falling back to defaults.
+
+    Validates the merged config and logs warnings for any issues found.
+    """
     config = DEFAULT_CONFIG.copy()
 
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
             user_config = yaml.safe_load(f) or {}
             config.update(user_config)
+
+    for warning in validate_config(config):
+        logger.warning("Config: %s", warning)
 
     return config
 

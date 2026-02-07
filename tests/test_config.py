@@ -9,10 +9,14 @@ import yaml
 from synthia import config
 from synthia.config import (
     DEFAULT_CONFIG,
+    VALID_HOTKEYS,
+    VALID_SAMPLE_RATES,
+    VALID_STT_MODELS,
     apply_word_replacements,
     get_anthropic_api_key,
     get_google_credentials_path,
     load_config,
+    validate_config,
 )
 
 
@@ -157,3 +161,138 @@ class TestDefaultConfig:
         }
 
         assert set(DEFAULT_CONFIG.keys()) == expected_keys
+
+
+class TestValidateConfig:
+    """Tests for validate_config function."""
+
+    def test_default_config_passes_validation(self):
+        """DEFAULT_CONFIG produces zero warnings."""
+        warnings = validate_config(DEFAULT_CONFIG)
+        assert warnings == []
+
+    def test_warns_on_invalid_hotkey(self):
+        """Invalid hotkey value produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "dictation_key": "Key.f12"}
+        warnings = validate_config(cfg)
+        assert any("dictation_key" in w for w in warnings)
+
+    def test_accepts_valid_hotkeys(self):
+        """All VALID_HOTKEYS are accepted without warnings."""
+        for key in VALID_HOTKEYS:
+            cfg = {**DEFAULT_CONFIG, "dictation_key": key}
+            warnings = validate_config(cfg)
+            assert not any("dictation_key" in w for w in warnings)
+
+    def test_warns_on_invalid_sample_rate(self):
+        """Non-standard sample rate produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "sample_rate": 9999}
+        warnings = validate_config(cfg)
+        assert any("sample_rate" in w for w in warnings)
+
+    def test_accepts_valid_sample_rates(self):
+        """All VALID_SAMPLE_RATES pass without warnings."""
+        for rate in VALID_SAMPLE_RATES:
+            cfg = {**DEFAULT_CONFIG, "sample_rate": rate}
+            warnings = validate_config(cfg)
+            assert not any("sample_rate" in w for w in warnings)
+
+    def test_warns_on_tts_speed_too_low(self):
+        """TTS speed below 0.25 produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "tts_speed": 0.1}
+        warnings = validate_config(cfg)
+        assert any("tts_speed" in w for w in warnings)
+
+    def test_warns_on_tts_speed_too_high(self):
+        """TTS speed above 4.0 produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "tts_speed": 5.0}
+        warnings = validate_config(cfg)
+        assert any("tts_speed" in w for w in warnings)
+
+    def test_accepts_tts_speed_boundaries(self):
+        """TTS speed at boundaries (0.25 and 4.0) is valid."""
+        for speed in (0.25, 4.0):
+            cfg = {**DEFAULT_CONFIG, "tts_speed": speed}
+            warnings = validate_config(cfg)
+            assert not any("tts_speed" in w for w in warnings)
+
+    def test_warns_on_zero_conversation_memory(self):
+        """Zero conversation_memory produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "conversation_memory": 0}
+        warnings = validate_config(cfg)
+        assert any("conversation_memory" in w for w in warnings)
+
+    def test_warns_on_negative_clipboard_max(self):
+        """Negative clipboard_history_max_items produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "clipboard_history_max_items": -1}
+        warnings = validate_config(cfg)
+        assert any("clipboard_history_max_items" in w for w in warnings)
+
+    def test_warns_on_non_positive_llm_timeout(self):
+        """Zero or negative llm_polish_timeout produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "llm_polish_timeout": 0}
+        warnings = validate_config(cfg)
+        assert any("llm_polish_timeout" in w for w in warnings)
+
+    def test_warns_on_non_bool_flag(self):
+        """Non-boolean value for a boolean flag produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "use_local_stt": "yes"}
+        warnings = validate_config(cfg)
+        assert any("use_local_stt" in w for w in warnings)
+
+    def test_warns_on_invalid_stt_model(self):
+        """Invalid STT model name produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "local_stt_model": "huge"}
+        warnings = validate_config(cfg)
+        assert any("local_stt_model" in w for w in warnings)
+
+    def test_accepts_valid_stt_models(self):
+        """All VALID_STT_MODELS pass without warnings."""
+        for model in VALID_STT_MODELS:
+            cfg = {**DEFAULT_CONFIG, "local_stt_model": model}
+            warnings = validate_config(cfg)
+            assert not any("local_stt_model" in w for w in warnings)
+
+    def test_warns_on_invalid_ollama_url(self):
+        """Ollama URL without http/https produces a warning."""
+        cfg = {**DEFAULT_CONFIG, "ollama_url": "ftp://localhost:11434"}
+        warnings = validate_config(cfg)
+        assert any("ollama_url" in w for w in warnings)
+
+    def test_accepts_https_ollama_url(self):
+        """HTTPS Ollama URL is valid."""
+        cfg = {**DEFAULT_CONFIG, "ollama_url": "https://ollama.example.com"}
+        warnings = validate_config(cfg)
+        assert not any("ollama_url" in w for w in warnings)
+
+    def test_warns_on_unknown_keys(self):
+        """Unknown config keys produce a warning about possible typos."""
+        cfg = {**DEFAULT_CONFIG, "use_locl_stt": True, "sampl_rate": 16000}
+        warnings = validate_config(cfg)
+        assert any("Unknown config keys" in w for w in warnings)
+        assert any("sampl_rate" in w for w in warnings)
+        assert any("use_locl_stt" in w for w in warnings)
+
+    def test_multiple_issues_produce_multiple_warnings(self):
+        """Config with multiple issues returns multiple warnings."""
+        cfg = {
+            **DEFAULT_CONFIG,
+            "tts_speed": 10.0,
+            "sample_rate": 1,
+            "use_local_stt": "yes",
+            "local_stt_model": "huge",
+        }
+        warnings = validate_config(cfg)
+        assert len(warnings) >= 4
+
+    def test_load_config_logs_warnings(self, monkeypatch, tmp_path, caplog):
+        """load_config logs validation warnings for bad user config."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump({"tts_speed": 999.0}))
+        monkeypatch.setattr(config, "CONFIG_PATH", config_file)
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="synthia.config"):
+            load_config()
+
+        assert any("tts_speed" in record.message for record in caplog.records)
