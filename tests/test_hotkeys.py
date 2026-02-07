@@ -311,6 +311,15 @@ class TestPynputHotkeyListener:
 # -- create_hotkey_listener factory ------------------------------------------
 
 
+try:
+    from pynput.keyboard import Key as _Key
+
+    _has_pynput_display = True
+except (ImportError, Exception):
+    _has_pynput_display = False
+
+
+@pytest.mark.skipif(not _has_pynput_display, reason="pynput requires a display server")
 class TestPynputHotkeyListenerUpdateKeys:
     """Tests for PynputHotkeyListener.update_keys method."""
 
