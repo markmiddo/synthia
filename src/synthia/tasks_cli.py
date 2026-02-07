@@ -10,30 +10,33 @@ Usage:
     python tasks_cli.py delete TASK_ID_OR_TITLE
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 TASKS_FILE = Path.home() / ".config" / "synthia" / "tasks.json"
 
 
-def load_tasks():
+def load_tasks() -> dict:
     if not TASKS_FILE.exists():
         return {"tasks": []}
     with open(TASKS_FILE) as f:
         return json.load(f)
 
 
-def save_tasks(data):
+def save_tasks(data: dict) -> None:
     TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(TASKS_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
 
-def find_task(data, identifier):
+def find_task(data: dict, identifier: str) -> Optional[dict]:
     """Find task by ID or title (partial match)."""
     # Try exact ID match first
     for task in data["tasks"]:
@@ -47,7 +50,7 @@ def find_task(data, identifier):
     return None
 
 
-def list_tasks(status=None):
+def list_tasks(status: Optional[str] = None) -> None:
     data = load_tasks()
     tasks = data["tasks"]
 
@@ -74,7 +77,7 @@ def list_tasks(status=None):
                 print(f"  - {t['title']}{due}{tags}")
 
 
-def add_task(title, description=None, tags=None, due_date=None):
+def add_task(title: str, description: Optional[str] = None, tags: Optional[str] = None, due_date: Optional[str] = None) -> None:
     data = load_tasks()
 
     task = {
@@ -93,7 +96,7 @@ def add_task(title, description=None, tags=None, due_date=None):
     print(f"Added task: {title}")
 
 
-def complete_task(identifier):
+def complete_task(identifier: str) -> bool:
     data = load_tasks()
     task = find_task(data, identifier)
 
@@ -108,7 +111,7 @@ def complete_task(identifier):
     return True
 
 
-def move_task(identifier, status):
+def move_task(identifier: str, status: str) -> bool:
     if status not in ["todo", "in_progress", "done"]:
         print(f"Invalid status: {status}. Use: todo, in_progress, done")
         return False
@@ -131,7 +134,7 @@ def move_task(identifier, status):
     return True
 
 
-def delete_task(identifier):
+def delete_task(identifier: str) -> bool:
     data = load_tasks()
     task = find_task(data, identifier)
 
@@ -145,7 +148,7 @@ def delete_task(identifier):
     return True
 
 
-def main():
+def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
         return

@@ -1,5 +1,7 @@
 """Text-to-Speech integration with Google Cloud and local Piper options."""
 
+from __future__ import annotations
+
 import logging
 import os
 import subprocess
@@ -18,12 +20,12 @@ class TextToSpeech:
 
     def __init__(
         self,
-        credentials_path: str = None,
+        credentials_path: str | None = None,
         voice_name: str = "en-US-Neural2-J",
         speed: float = 1.0,
         use_local: bool = False,
         local_voice: str = "~/.local/share/piper-voices/en_US-amy-medium.onnx",
-    ):
+    ) -> None:
         self.use_local = use_local
         self.speed = speed
         self.voice_name = voice_name
@@ -35,7 +37,7 @@ class TextToSpeech:
         else:
             self._init_google(credentials_path, voice_name)
 
-    def _init_google(self, credentials_path: str, voice_name: str):
+    def _init_google(self, credentials_path: str | None, voice_name: str) -> None:
         """Initialize Google Cloud TTS."""
         from google.cloud import texttospeech
 
@@ -45,7 +47,7 @@ class TextToSpeech:
         self.language_code = "-".join(voice_name.split("-")[:2])
         logger.info("Google TTS initialized with voice: %s", voice_name)
 
-    def _split_into_chunks(self, text: str, max_chars: int = MAX_CHUNK_CHARS) -> list:
+    def _split_into_chunks(self, text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
         """Split text into smaller chunks for streaming effect."""
         sentences = []
         current = ""
@@ -193,7 +195,7 @@ class TextToSpeech:
             logger.error("Google TTS error: %s", e)
             return False
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop any currently playing audio."""
         subprocess.run(["pkill", "-f", "mpv"], check=False)
         subprocess.run(["pkill", "-f", "aplay"], check=False)

@@ -25,7 +25,7 @@ class ClipboardMonitor:
         self,
         max_items: int = 5,
         history_file: Optional[str] = None,
-    ):
+    ) -> None:
         self.max_items = max_items
         self.history_file = history_file or os.path.join(
             os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
@@ -38,7 +38,7 @@ class ClipboardMonitor:
         self._last_hash: Optional[str] = None
         self._load_history()
 
-    def _load_history(self):
+    def _load_history(self) -> None:
         """Load existing history from file."""
         try:
             if os.path.exists(self.history_file):
@@ -48,7 +48,7 @@ class ClipboardMonitor:
             logger.debug("Could not load clipboard history: %s", e)
             self.history = []
 
-    def _save_history(self):
+    def _save_history(self) -> None:
         """Save history to file with restrictive permissions."""
         try:
             with open(self.history_file, "w") as f:
@@ -62,7 +62,7 @@ class ClipboardMonitor:
         """Generate hash of content for deduplication."""
         return hashlib.sha256(content.encode()).hexdigest()
 
-    def _add_item(self, content: str):
+    def _add_item(self, content: str) -> None:
         """Add item to history (deduplicated)."""
         if not content or not content.strip():
             return
@@ -117,7 +117,7 @@ class ClipboardMonitor:
             logger.debug("Clipboard read failed: %s", e)
         return None
 
-    def _run_wayland_monitor(self):
+    def _run_wayland_monitor(self) -> None:
         """Run wl-paste --watch for efficient Wayland monitoring."""
         while self.running:
             try:
@@ -141,7 +141,7 @@ class ClipboardMonitor:
                 logger.warning("Wayland clipboard monitor error: %s", e)
                 time.sleep(1)
 
-    def _run_x11_monitor(self):
+    def _run_x11_monitor(self) -> None:
         """Run polling-based monitor for X11."""
         while self.running:
             try:
@@ -153,7 +153,7 @@ class ClipboardMonitor:
                 logger.warning("X11 clipboard monitor error: %s", e)
                 time.sleep(1)
 
-    def start(self):
+    def start(self) -> None:
         """Start the clipboard monitor."""
         if self.running:
             return
@@ -169,7 +169,7 @@ class ClipboardMonitor:
 
         self._thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the clipboard monitor."""
         self.running = False
 

@@ -6,7 +6,7 @@ import logging
 import os
 import shlex
 import subprocess
-from typing import Any
+from typing import Any, Callable
 
 from synthia.display import is_wayland
 
@@ -676,7 +676,7 @@ def memory_search(query: str) -> str:
     return "\n".join(lines)
 
 
-def memory_add(category: str, tags: list[str], **data) -> bool:
+def memory_add(category: str, tags: list[str], **data: Any) -> bool:
     """Add a new memory entry."""
     from synthia.memory import remember
 
@@ -722,7 +722,7 @@ def suspend_system() -> bool:
 # ============== ACTION EXECUTOR ==============
 
 # Action dispatch table - maps action types to handler functions
-_ACTION_HANDLERS: dict[str, callable] = {
+_ACTION_HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     # App control
     "open_app": lambda a: open_app(a.get("app", "")),
     "open_url": lambda a: open_url(a.get("url", ""), a.get("browser", "firefox")),

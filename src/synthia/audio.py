@@ -1,5 +1,7 @@
 """Audio capture for Synthia."""
 
+from __future__ import annotations
+
 import logging
 import queue
 from typing import Optional, Tuple
@@ -21,7 +23,7 @@ class AudioRecorder:
 
     def __init__(
         self, target_sample_rate: int = 16000, channels: int = 1, device: Optional[int] = None
-    ):
+    ) -> None:
         self.target_sample_rate = target_sample_rate  # What Google expects
         self.channels = channels
         self.device = device
@@ -75,14 +77,14 @@ class AudioRecorder:
         resampled = signal.resample(audio_data, num_samples)
         return resampled.astype(np.int16)
 
-    def _audio_callback(self, indata, frames, time, status):
+    def _audio_callback(self, indata: np.ndarray, frames: int, time: object, status: sd.CallbackFlags) -> None:
         """Callback for audio stream - adds audio chunks to queue."""
         if status:
             logger.debug("Audio status: %s", status)
         if self.recording:
             self.audio_queue.put(indata.copy())
 
-    def start_recording(self):
+    def start_recording(self) -> None:
         """Start recording audio."""
         self.recording = True
         # Clear any old audio from queue
@@ -146,7 +148,7 @@ class AudioRecorder:
         return audio_data.tobytes()
 
 
-def list_audio_devices():
+def list_audio_devices() -> None:
     """List available audio input devices."""
     print("\nAvailable audio input devices:")
     print("-" * 40)

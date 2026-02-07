@@ -4,11 +4,13 @@ On Wayland: Uses evdev to read directly from input devices.
 On X11: Uses pynput for global keyboard hooks.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import threading
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .display import is_wayland
 
@@ -19,22 +21,22 @@ class HotkeyListener(ABC):
     """Abstract base class for hotkey listeners."""
 
     @abstractmethod
-    def start(self):
+    def start(self) -> None:
         """Start listening for hotkeys."""
         pass
 
     @abstractmethod
-    def stop(self):
+    def stop(self) -> None:
         """Stop listening for hotkeys."""
         pass
 
     @abstractmethod
-    def join(self):
+    def join(self) -> None:
         """Wait for listener to finish."""
         pass
 
     @abstractmethod
-    def update_keys(self, dictation_key_string: str, assistant_key_string: str):
+    def update_keys(self, dictation_key_string: str, assistant_key_string: str) -> None:
         """Update hotkeys without restarting the listener."""
         pass
 
@@ -59,13 +61,13 @@ class EvdevHotkeyListener(HotkeyListener):
 
     def __init__(
         self,
-        on_dictation_press: Callable,
-        on_dictation_release: Callable,
-        on_assistant_press: Callable,
-        on_assistant_release: Callable,
+        on_dictation_press: Callable[[], None],
+        on_dictation_release: Callable[[], None],
+        on_assistant_press: Callable[[], None],
+        on_assistant_release: Callable[[], None],
         dictation_key_code: int = 97,  # Default: Right Ctrl
         assistant_key_code: int = 100,  # Default: Right Alt
-    ):
+    ) -> None:
         self.on_dictation_press = on_dictation_press
         self.on_dictation_release = on_dictation_release
         self.on_assistant_press = on_assistant_press
@@ -75,7 +77,7 @@ class EvdevHotkeyListener(HotkeyListener):
 
         self.running = False
         self.thread: Optional[threading.Thread] = None
-        self.devices = []
+        self.devices: list = []
 
     @classmethod
     def get_key_code(cls, key_string: str) -> int:
@@ -107,7 +109,7 @@ class EvdevHotkeyListener(HotkeyListener):
             logger.error("evdev not installed. Install with: pip install evdev")
             return []
 
-    def _listen(self):
+    def _listen(self) -> None:
         """Main listening loop for evdev."""
         try:
             from selectors import EVENT_READ, DefaultSelector
@@ -142,7 +144,7 @@ class EvdevHotkeyListener(HotkeyListener):
         except Exception as e:
             logger.error("evdev listener error: %s", e)
 
-    def start(self):
+    def start(self) -> None:
         """Start the evdev listener in a background thread."""
         self.devices = self._find_keyboard_devices()
         if not self.devices:
@@ -156,7 +158,7 @@ class EvdevHotkeyListener(HotkeyListener):
         self.thread = threading.Thread(target=self._listen, daemon=True)
         self.thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the listener."""
         self.running = False
         for device in self.devices:
@@ -165,12 +167,12 @@ class EvdevHotkeyListener(HotkeyListener):
             except Exception as e:
                 logger.debug("Failed to close device: %s", e)
 
-    def join(self):
+    def join(self) -> None:
         """Wait for the listener thread to finish."""
         if self.thread:
             self.thread.join()
 
-    def update_keys(self, dictation_key_string: str, assistant_key_string: str):
+    def update_keys(self, dictation_key_string: str, assistant_key_string: str) -> None:
         """Update hotkeys without restarting the listener."""
         self.dictation_key_code = self.get_key_code(dictation_key_string)
         self.assistant_key_code = self.get_key_code(assistant_key_string)
@@ -188,13 +190,13 @@ class PynputHotkeyListener(HotkeyListener):
 
     def __init__(
         self,
-        on_dictation_press: Callable,
-        on_dictation_release: Callable,
-        on_assistant_press: Callable,
-        on_assistant_release: Callable,
-        dictation_key,
-        assistant_key,
-    ):
+        on_dictation_press: Callable[[], None],
+        on_dictation_release: Callable[[], None],
+        on_assistant_press: Callable[[], None],
+        on_assistant_release: Callable[[], None],
+        dictation_key: Any,
+        assistant_key: Any,
+    ) -> None:
         self.on_dictation_press = on_dictation_press
         self.on_dictation_release = on_dictation_release
         self.on_assistant_press = on_assistant_press
@@ -202,11 +204,11 @@ class PynputHotkeyListener(HotkeyListener):
         self.dictation_key = dictation_key
         self.assistant_key = assistant_key
 
-        self.listener = None
-        self.dictation_active = False
-        self.assistant_active = False
+        self.listener: Any = None
+        self.dictation_active: bool = False
+        self.assistant_active: bool = False
 
-    def _on_press(self, key):
+    def _on_press(self, key: Any) -> None:
         """Handle key press."""
         try:
             if (
@@ -226,7 +228,7 @@ class PynputHotkeyListener(HotkeyListener):
         except AttributeError:
             pass
 
-    def _on_release(self, key):
+    def _on_release(self, key: Any) -> None:
         """Handle key release."""
         try:
             if key == self.dictation_key and self.dictation_active:
@@ -238,29 +240,29 @@ class PynputHotkeyListener(HotkeyListener):
         except AttributeError:
             pass
 
-    def start(self):
+    def start(self) -> None:
         """Start the pynput listener."""
         from pynput import keyboard
 
         self.listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self.listener.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the listener."""
         if self.listener:
             self.listener.stop()
 
-    def join(self):
+    def join(self) -> None:
         """Wait for the listener to finish."""
         if self.listener:
             self.listener.join()
 
-    def update_keys(self, dictation_key_string: str, assistant_key_string: str):
+    def update_keys(self, dictation_key_string: str, assistant_key_string: str) -> None:
         """Update hotkeys without restarting the listener."""
         from pynput.keyboard import Key
 
         # Parse key strings to pynput Key objects
-        def parse_key(key_string: str):
+        def parse_key(key_string: str) -> Any:
             if key_string.startswith("Key."):
                 key_name = key_string[4:]
                 return getattr(Key, key_name)
@@ -272,12 +274,12 @@ class PynputHotkeyListener(HotkeyListener):
 
 
 def create_hotkey_listener(
-    on_dictation_press: Callable,
-    on_dictation_release: Callable,
-    on_assistant_press: Callable,
-    on_assistant_release: Callable,
-    dictation_key=None,
-    assistant_key=None,
+    on_dictation_press: Callable[[], None],
+    on_dictation_release: Callable[[], None],
+    on_assistant_press: Callable[[], None],
+    on_assistant_release: Callable[[], None],
+    dictation_key: Any = None,
+    assistant_key: Any = None,
     dictation_key_string: str = "Key.ctrl_r",
     assistant_key_string: str = "Key.alt_r",
 ) -> HotkeyListener:

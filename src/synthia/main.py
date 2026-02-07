@@ -7,6 +7,8 @@ Usage:
     Say "Hey Linux" - Wake word (when enabled)
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -14,6 +16,7 @@ import signal
 import sys
 import threading
 import time
+from typing import Any, Optional
 
 from synthia.assistant import Assistant
 from synthia.audio import AudioRecorder, list_audio_devices
@@ -36,7 +39,7 @@ logger = logging.getLogger(__name__)
 class Synthia:
     """Main Synthia application."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         logger.info("Starting Synthia...")
 
         # Load configuration
@@ -172,7 +175,7 @@ class Synthia:
         if self.config.get("show_notifications", True):
             notify_ready()
 
-    def _parse_key(self, key_string: str):
+    def _parse_key(self, key_string: str) -> Any:
         """Parse a key string like 'Key.ctrl_r' to a pynput Key."""
         from pynput.keyboard import Key
 
@@ -181,7 +184,7 @@ class Synthia:
             return getattr(Key, key_name)
         return key_string
 
-    def _update_state(self, status: str):
+    def _update_state(self, status: str) -> None:
         """Update state file for GUI overlay communication."""
         try:
             state = {"status": status, "recording": status == "recording"}
@@ -190,7 +193,7 @@ class Synthia:
         except Exception as e:
             logger.debug("Could not update state file: %s", e)
 
-    def _save_to_history(self, text: str, mode: str, response: str = None):
+    def _save_to_history(self, text: str, mode: str, response: Optional[str] = None) -> None:
         """Save transcription to history file for GUI display."""
         try:
             from datetime import datetime
@@ -223,11 +226,11 @@ class Synthia:
         except Exception as e:
             logger.debug("Could not save history: %s", e)
 
-    def _on_quit(self):
+    def _on_quit(self) -> None:
         """Handle quit from tray icon."""
         self.running = False
 
-    def _watch_config_reload(self):
+    def _watch_config_reload(self) -> None:
         """Watch for config reload signal file and update hotkeys dynamically."""
         while self.running:
             try:
@@ -252,7 +255,7 @@ class Synthia:
 
             time.sleep(0.5)  # Check twice per second
 
-    def _on_dictation_press(self):
+    def _on_dictation_press(self) -> None:
         """Handle dictation key press (Right Ctrl)."""
         if not self.running or self.dictation_active or self.assistant_active:
             return
@@ -268,7 +271,7 @@ class Synthia:
             logger.error("Could not start recording: %s", e)
             self.sounds.play_error()
 
-    def _on_dictation_release(self):
+    def _on_dictation_release(self) -> None:
         """Handle dictation key release (Right Ctrl)."""
         if not self.running or not self.dictation_active:
             return
@@ -307,7 +310,7 @@ class Synthia:
             if self.tray:
                 self.tray.set_status(Status.READY)
 
-    def _on_assistant_press(self):
+    def _on_assistant_press(self) -> None:
         """Handle assistant key press (Right Alt)."""
         if not self.running or self.assistant_active or self.dictation_active:
             return
@@ -323,7 +326,7 @@ class Synthia:
             logger.error("Could not start recording: %s", e)
             self.sounds.play_error()
 
-    def _on_assistant_release(self):
+    def _on_assistant_release(self) -> None:
         """Handle assistant key release (Right Alt)."""
         if not self.running or not self.assistant_active:
             return
@@ -376,7 +379,7 @@ class Synthia:
             if self.tray:
                 self.tray.set_status(Status.READY)
 
-    def run(self):
+    def run(self) -> None:
         """Run the main keyboard listener loop."""
         logger.info("Use Ctrl+C to exit")
 
@@ -409,7 +412,7 @@ class Synthia:
         self.sounds.cleanup()
 
 
-def handle_memory_command(args: list[str]):
+def handle_memory_command(args: list[str]) -> None:
     """Handle memory subcommand.
 
     Usage:
@@ -498,7 +501,7 @@ def handle_memory_command(args: list[str]):
         print("  synthia memory tags      - List all tags")
 
 
-def main():
+def main() -> None:
     """Entry point."""
     logging.basicConfig(
         level=logging.INFO,

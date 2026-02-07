@@ -1,9 +1,11 @@
 """AI Assistant integration for Synthia - supports Claude API and local Ollama."""
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -93,14 +95,14 @@ class Assistant:
 
     def __init__(
         self,
-        api_key: str = None,
+        api_key: Optional[str] = None,
         model: str = "claude-haiku-4-20250514",
         memory_size: int = 10,
         use_local: bool = False,
         local_model: str = "qwen2.5:7b-instruct-q4_0",
         ollama_url: str = "http://localhost:11434",
         dev_mode: bool = False,
-    ):
+    ) -> None:
         self.use_local = use_local
         self.model = model if not use_local else local_model
         self.memory_size = memory_size
@@ -117,7 +119,7 @@ class Assistant:
             self.client = anthropic.Anthropic(api_key=api_key)
             logger.info("Assistant initialized with Claude: %s", model)
 
-    def _add_to_history(self, role: str, content: str):
+    def _add_to_history(self, role: str, content: str) -> None:
         """Add a message to conversation history, maintaining memory limit."""
         self.conversation_history.append({"role": role, "content": content})
 
@@ -289,7 +291,7 @@ class Assistant:
 
         return result
 
-    def clear_history(self):
+    def clear_history(self) -> None:
         """Clear conversation history."""
         self.conversation_history = []
         logger.debug("Conversation history cleared")

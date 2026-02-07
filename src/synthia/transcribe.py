@@ -1,5 +1,7 @@
 """Speech-to-Text integration with Google Cloud and local Whisper options."""
 
+from __future__ import annotations
+
 import logging
 import os
 import sys
@@ -24,12 +26,12 @@ class Transcriber:
 
     def __init__(
         self,
-        credentials_path: str = None,
+        credentials_path: str | None = None,
         language: str = "en-US",
         sample_rate: int = 16000,
         use_local: bool = False,
         local_model: str = "small",
-    ):
+    ) -> None:
         self.language = language
         self.sample_rate = sample_rate
         self.use_local = use_local
@@ -45,7 +47,7 @@ class Transcriber:
         else:
             self._init_google(credentials_path)
 
-    def _init_google(self, credentials_path: str):
+    def _init_google(self, credentials_path: str | None) -> None:
         """Initialize Google Cloud Speech-to-Text."""
         from google.cloud import speech
 
@@ -64,7 +66,7 @@ class Transcriber:
         )
         logger.info("Google STT initialized")
 
-    def _init_whisper(self):
+    def _init_whisper(self) -> None:
         """Initialize local Whisper model using faster-whisper."""
         # Force CPU mode to avoid CUDA library issues
         import os

@@ -73,7 +73,7 @@ class Section(Enum):
 class SidebarItem(ListItem):
     """Sidebar navigation item."""
 
-    def __init__(self, section: Section, index: int):
+    def __init__(self, section: Section, index: int) -> None:
         super().__init__()
         self.section = section
         self.index = index
@@ -86,7 +86,7 @@ class SidebarItem(ListItem):
 class MemoryListItem(ListItem):
     """List item for memory entries."""
 
-    def __init__(self, entry: MemoryEntry, line_number: int):
+    def __init__(self, entry: MemoryEntry, line_number: int) -> None:
         super().__init__()
         self.entry = entry
         self.line_number = line_number
@@ -112,7 +112,7 @@ class MemoryListItem(ListItem):
 class MemorySectionContent(Vertical):
     """Content widget for Memory section."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.current_entries: list[tuple[MemoryEntry, int]] = []
         self.selected_index: int = -1
@@ -134,7 +134,7 @@ class MemorySectionContent(Vertical):
 class AgentListItem(ListItem):
     """List item for agent entries."""
 
-    def __init__(self, agent: AgentConfig):
+    def __init__(self, agent: AgentConfig) -> None:
         super().__init__()
         self.agent = agent
 
@@ -146,7 +146,7 @@ class AgentListItem(ListItem):
 class PluginListItem(ListItem):
     """List item for plugin entries."""
 
-    def __init__(self, plugin: PluginInfo):
+    def __init__(self, plugin: PluginInfo) -> None:
         super().__init__()
         self.plugin = plugin
 
@@ -159,7 +159,7 @@ class PluginListItem(ListItem):
 class HookListItem(ListItem):
     """List item for hook entries."""
 
-    def __init__(self, hook: HookConfig):
+    def __init__(self, hook: HookConfig) -> None:
         super().__init__()
         self.hook = hook
 
@@ -173,7 +173,7 @@ class HookListItem(ListItem):
 class CommandListItem(ListItem):
     """List item for command entries."""
 
-    def __init__(self, command: CommandConfig):
+    def __init__(self, command: CommandConfig) -> None:
         super().__init__()
         self.command = command
 
@@ -188,7 +188,7 @@ class CommandListItem(ListItem):
 class SettingListItem(ListItem):
     """List item for settings entries."""
 
-    def __init__(self, key: str, value: Any):
+    def __init__(self, key: str, value: Any) -> None:
         super().__init__()
         self.key = key
         self.value = value
@@ -210,7 +210,7 @@ class SettingListItem(ListItem):
 class WorktreeListItem(ListItem):
     """List item for worktree entries."""
 
-    def __init__(self, worktree: WorktreeInfo, expanded: bool = False):
+    def __init__(self, worktree: WorktreeInfo, expanded: bool = False) -> None:
         super().__init__()
         self.worktree = worktree
         self.expanded = expanded
@@ -414,7 +414,7 @@ class SynthiaDashboard(App):
 
     TITLE = "Synthia Dashboard"
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.current_section: Section = Section.WORKTREES
 
@@ -1093,7 +1093,7 @@ class SynthiaDashboard(App):
             self._set_status("Error: Could not delete worktree")
 
 
-def main():
+def main() -> None:
     """Run the Synthia Dashboard."""
     app = SynthiaDashboard()
     app.run()
