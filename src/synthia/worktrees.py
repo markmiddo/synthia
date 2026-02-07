@@ -11,7 +11,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -165,7 +165,7 @@ def _find_session_for_path(project_path: str) -> Optional[dict]:
                     entry_path = entry.get("projectPath", "")
                     # Normalize for comparison
                     if str(Path(entry_path).resolve()) == normalized_path:
-                        return entry
+                        return dict(entry)
             except (json.JSONDecodeError, IOError):
                 continue
 
@@ -211,9 +211,11 @@ def _load_tasks_for_session(session_id: str) -> list[WorktreeTask]:
                 for task_data in task_list:
                     if isinstance(task_data, dict):
                         task = WorktreeTask(
-                            content=task_data.get("content", task_data.get("subject", "")),
-                            status=task_data.get("status", "pending"),
-                            active_form=task_data.get("activeForm", task_data.get("active_form", "")),
+                            content=str(task_data.get("content", task_data.get("subject", ""))),
+                            status=str(task_data.get("status", "pending")),
+                            active_form=str(
+                                task_data.get("activeForm", task_data.get("active_form", ""))
+                            ),
                         )
                         tasks.append(task)
 
@@ -226,7 +228,7 @@ def _load_tasks_for_session(session_id: str) -> list[WorktreeTask]:
     return tasks
 
 
-def load_config() -> dict:
+def load_config() -> dict[str, Any]:
     """Load worktree scanner configuration.
 
     Config file: ~/.config/synthia/worktrees.yaml
@@ -244,7 +246,8 @@ def load_config() -> dict:
 
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+            result = yaml.safe_load(f)
+            return dict(result) if result else {}
     except (yaml.YAMLError, IOError):
         return {}
 

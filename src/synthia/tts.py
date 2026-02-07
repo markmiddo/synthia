@@ -41,7 +41,8 @@ class TextToSpeech:
         """Initialize Google Cloud TTS."""
         from google.cloud import texttospeech
 
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        if credentials_path:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
         self.client = texttospeech.TextToSpeechClient()
         self.voice_name = voice_name
         self.language_code = "-".join(voice_name.split("-")[:2])
@@ -138,11 +139,13 @@ class TextToSpeech:
             )
 
             # Send text directly to piper's stdin (no shell escaping needed)
-            piper_proc.stdin.write(text.encode("utf-8"))
-            piper_proc.stdin.close()
+            if piper_proc.stdin is not None:
+                piper_proc.stdin.write(text.encode("utf-8"))
+                piper_proc.stdin.close()
 
             # Wait for both processes to complete
-            piper_proc.stdout.close()
+            if piper_proc.stdout is not None:
+                piper_proc.stdout.close()
             aplay_proc.wait()
             piper_proc.wait()
 
@@ -172,6 +175,7 @@ class TextToSpeech:
 
             synthesis_input = texttospeech.SynthesisInput(text=text)
 
+            assert self.client is not None
             response = self.client.synthesize_speech(
                 input=synthesis_input,
                 voice=voice,

@@ -69,18 +69,27 @@ CONFIG_PATH = Path.home() / ".config" / "synthia" / "config.yaml"
 
 # Valid values for constrained config keys
 VALID_HOTKEYS = {
-    "Key.ctrl_r", "Key.ctrl_l", "Key.alt_r", "Key.alt_l",
-    "Key.shift_r", "Key.shift_l",
+    "Key.ctrl_r",
+    "Key.ctrl_l",
+    "Key.alt_r",
+    "Key.alt_l",
+    "Key.shift_r",
+    "Key.shift_l",
 }
 VALID_SAMPLE_RATES = {8000, 16000, 22050, 44100, 48000}
 VALID_STT_MODELS = {"tiny", "base", "small", "medium", "large"}
 
 # Keys that must be boolean
 _BOOLEAN_KEYS = {
-    "show_notifications", "play_sound_on_record",
-    "use_local_stt", "use_local_llm", "use_local_tts",
-    "use_llm_polish", "clipboard_history_enabled",
-    "memory_enabled", "memory_auto_retrieve",
+    "show_notifications",
+    "play_sound_on_record",
+    "use_local_stt",
+    "use_local_llm",
+    "use_local_tts",
+    "use_llm_polish",
+    "clipboard_history_enabled",
+    "memory_enabled",
+    "memory_auto_retrieve",
 }
 
 
@@ -105,8 +114,7 @@ def validate_config(config: ConfigDict) -> list[str]:
     sr = config.get("sample_rate")
     if sr is not None and sr not in VALID_SAMPLE_RATES:
         warnings.append(
-            f"sample_rate={sr} is not a standard rate. "
-            f"Valid: {sorted(VALID_SAMPLE_RATES)}"
+            f"sample_rate={sr} is not a standard rate. " f"Valid: {sorted(VALID_SAMPLE_RATES)}"
         )
 
     # TTS speed
@@ -147,9 +155,7 @@ def validate_config(config: ConfigDict) -> list[str]:
     # Unknown keys
     unknown = set(config.keys()) - set(DEFAULT_CONFIG.keys())
     if unknown:
-        warnings.append(
-            f"Unknown config keys (possible typos): {', '.join(sorted(unknown))}"
-        )
+        warnings.append(f"Unknown config keys (possible typos): {', '.join(sorted(unknown))}")
 
     return warnings
 
@@ -174,14 +180,14 @@ def load_config() -> ConfigDict:
 
 def get_google_credentials_path(config: ConfigDict) -> str:
     """Get the expanded path to Google credentials."""
-    return os.path.expanduser(config["google_credentials"])
+    return os.path.expanduser(str(config["google_credentials"]))
 
 
 def get_anthropic_api_key(config: ConfigDict) -> str:
     """Load the Anthropic API key from file."""
     key_path = os.path.expanduser(config["anthropic_api_key"])
     with open(key_path) as f:
-        return f.read().strip()
+        return str(f.read().strip())
 
 
 def apply_word_replacements(text: str, config: ConfigDict) -> str:

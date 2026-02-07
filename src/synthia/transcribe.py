@@ -51,7 +51,8 @@ class Transcriber:
         """Initialize Google Cloud Speech-to-Text."""
         from google.cloud import speech
 
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        if credentials_path:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
         self.client = speech.SpeechClient()
 
         self.config = speech.RecognitionConfig(
@@ -106,6 +107,7 @@ class Transcriber:
 
         audio = speech.RecognitionAudio(content=audio_data)
 
+        assert self.client is not None
         response = self.client.recognize(config=self.config, audio=audio)
 
         if not response.results:
@@ -128,6 +130,7 @@ class Transcriber:
         audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
 
         # faster-whisper returns segments generator
+        assert self.whisper_model is not None
         segments, info = self.whisper_model.transcribe(
             audio_np,
             language="en",

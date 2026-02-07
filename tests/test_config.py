@@ -1,4 +1,5 @@
 """Tests for synthia.config module."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -292,6 +293,7 @@ class TestValidateConfig:
         monkeypatch.setattr(config, "CONFIG_PATH", config_file)
 
         import logging
+
         with caplog.at_level(logging.WARNING, logger="synthia.config"):
             load_config()
 

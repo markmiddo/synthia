@@ -87,4 +87,4 @@ class TranscriptionPolisher:
         if not polished or len(polished) > len(transcription) * 2:
             return transcription
 
-        return polished
+        return str(polished)

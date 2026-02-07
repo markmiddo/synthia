@@ -9,17 +9,17 @@ Usage:
     python tts.py --file response.txt
 """
 
-import sys
-import os
 import argparse
+import os
+import sys
 
 # Add synthia src to path dynamically (no hardcoded paths)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SYNTHIA_SRC = os.path.dirname(SCRIPT_DIR)  # Go up from hooks/ to synthia/
 sys.path.insert(0, SYNTHIA_SRC)
 
+from config import get_google_credentials_path, load_config
 from tts import TextToSpeech
-from config import load_config, get_google_credentials_path
 
 
 def speak(text: str):
@@ -29,9 +29,7 @@ def speak(text: str):
 
     config = load_config()
     tts = TextToSpeech(
-        get_google_credentials_path(config),
-        config['tts_voice'],
-        config['tts_speed']
+        get_google_credentials_path(config), config["tts_voice"], config["tts_speed"]
     )
 
     # Clean up text for speech
@@ -51,7 +49,7 @@ def main():
     args = parser.parse_args()
 
     if args.file:
-        with open(args.file, 'r') as f:
+        with open(args.file, "r") as f:
             text = f.read()
     elif args.text:
         text = args.text

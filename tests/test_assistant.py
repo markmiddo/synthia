@@ -112,10 +112,12 @@ class TestParseResponse:
 
     def test_parse_json_with_actions(self):
         """JSON with actions is parsed correctly."""
-        response = json.dumps({
-            "speech": "Turning up the volume.",
-            "actions": [{"type": "change_volume", "delta": 10}],
-        })
+        response = json.dumps(
+            {
+                "speech": "Turning up the volume.",
+                "actions": [{"type": "change_volume", "delta": 10}],
+            }
+        )
         result = self.assistant._parse_response(response)
         assert result["speech"] == "Turning up the volume."
         assert len(result["actions"]) == 1
@@ -179,13 +181,15 @@ class TestParseResponse:
 
     def test_parse_complex_actions(self):
         """Multiple actions are parsed correctly."""
-        response = json.dumps({
-            "speech": "Opening Firefox and maximizing.",
-            "actions": [
-                {"type": "open_app", "app": "firefox"},
-                {"type": "maximize_window"},
-            ],
-        })
+        response = json.dumps(
+            {
+                "speech": "Opening Firefox and maximizing.",
+                "actions": [
+                    {"type": "open_app", "app": "firefox"},
+                    {"type": "maximize_window"},
+                ],
+            }
+        )
         result = self.assistant._parse_response(response)
         assert len(result["actions"]) == 2
         assert result["actions"][0]["type"] == "open_app"
@@ -213,7 +217,8 @@ class TestProcess:
         """Process with use_local=True calls _process_ollama."""
         assistant = Assistant(use_local=True)
         mock_ollama = mocker.patch.object(
-            assistant, "_process_ollama",
+            assistant,
+            "_process_ollama",
             return_value={"speech": "Hi!", "actions": []},
         )
         result = assistant.process("Hello")
@@ -225,7 +230,8 @@ class TestProcess:
         assistant = Assistant(use_local=True)
         assistant.use_local = False  # Override to avoid needing Anthropic import
         mock_claude = mocker.patch.object(
-            assistant, "_process_claude",
+            assistant,
+            "_process_claude",
             return_value={"speech": "Hi from Claude!", "actions": []},
         )
         result = assistant.process("Hello")
@@ -236,7 +242,8 @@ class TestProcess:
         """Exceptions during processing return an error message."""
         assistant = Assistant(use_local=True)
         mocker.patch.object(
-            assistant, "_process_ollama",
+            assistant,
+            "_process_ollama",
             side_effect=Exception("Connection refused"),
         )
         result = assistant.process("Hello")
@@ -248,7 +255,8 @@ class TestProcess:
         """User input is added to history before processing."""
         assistant = Assistant(use_local=True)
         mocker.patch.object(
-            assistant, "_process_ollama",
+            assistant,
+            "_process_ollama",
             return_value={"speech": "Hi!", "actions": []},
         )
         assistant.process("Hello there")
@@ -263,11 +271,13 @@ class TestProcess:
         """In dev mode, memory context is prepended to user input."""
         assistant = Assistant(use_local=True, dev_mode=True)
         mocker.patch.object(
-            assistant, "_get_memory_context",
+            assistant,
+            "_get_memory_context",
             return_value="[Memory: React patterns]",
         )
         mock_ollama = mocker.patch.object(
-            assistant, "_process_ollama",
+            assistant,
+            "_process_ollama",
             return_value={"speech": "Done.", "actions": []},
         )
         assistant.process("Tell me about React")
@@ -280,11 +290,13 @@ class TestProcess:
         """In dev mode with empty memory context, input is not enriched."""
         assistant = Assistant(use_local=True, dev_mode=True)
         mocker.patch.object(
-            assistant, "_get_memory_context",
+            assistant,
+            "_get_memory_context",
             return_value="",
         )
         mock_ollama = mocker.patch.object(
-            assistant, "_process_ollama",
+            assistant,
+            "_process_ollama",
             return_value={"speech": "Done.", "actions": []},
         )
         assistant.process("Hello")
@@ -314,9 +326,7 @@ class TestProcessOllama:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "message": {
-                "content": '{"speech": "Hello!", "actions": []}'
-            }
+            "message": {"content": '{"speech": "Hello!", "actions": []}'}
         }
         mocker.patch("synthia.assistant.requests.post", return_value=mock_response)
 

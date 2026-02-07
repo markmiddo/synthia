@@ -28,7 +28,7 @@ def load_settings() -> Dict[str, Any]:
     if not SETTINGS_FILE.exists():
         return {}
     with open(SETTINGS_FILE, "r") as f:
-        return json.load(f)
+        return dict(json.load(f))
 
 
 def save_settings(settings: Dict[str, Any]) -> None:
@@ -245,12 +245,14 @@ def list_plugins() -> List[PluginInfo]:
     for name, versions in installed.get("plugins", {}).items():
         if versions:
             latest = versions[0]
-            plugins.append(PluginInfo(
-                name=name,
-                version=latest.get("version", ""),
-                enabled=enabled_plugins.get(name, False),
-                installed_at=latest.get("installedAt", ""),
-            ))
+            plugins.append(
+                PluginInfo(
+                    name=name,
+                    version=latest.get("version", ""),
+                    enabled=enabled_plugins.get(name, False),
+                    installed_at=latest.get("installedAt", ""),
+                )
+            )
 
     return plugins
 
@@ -283,12 +285,14 @@ def list_hooks() -> List[HookConfig]:
     for event, event_hooks in hooks_config.items():
         for hook_group in event_hooks:
             for hook in hook_group.get("hooks", []):
-                hooks.append(HookConfig(
-                    event=event,
-                    command=hook.get("command", ""),
-                    timeout=hook.get("timeout", 30),
-                    hook_type=hook.get("type", "command"),
-                ))
+                hooks.append(
+                    HookConfig(
+                        event=event,
+                        command=hook.get("command", ""),
+                        timeout=hook.get("timeout", 30),
+                        hook_type=hook.get("type", "command"),
+                    )
+                )
 
     return hooks
 
@@ -316,11 +320,13 @@ def save_hook(hook: HookConfig) -> None:
     if not found:
         if not event_hooks:
             event_hooks.append({"hooks": []})
-        event_hooks[0]["hooks"].append({
-            "type": hook.hook_type,
-            "command": hook.command,
-            "timeout": hook.timeout,
-        })
+        event_hooks[0]["hooks"].append(
+            {
+                "type": hook.hook_type,
+                "command": hook.command,
+                "timeout": hook.timeout,
+            }
+        )
 
     save_settings(settings)
 

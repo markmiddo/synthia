@@ -28,8 +28,7 @@ class ClipboardMonitor:
     ) -> None:
         self.max_items = max_items
         self.history_file = history_file or os.path.join(
-            os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
-            "synthia-clipboard.json"
+            os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "synthia-clipboard.json"
         )
         self.history: list[dict] = []
         self.running = False
@@ -89,7 +88,7 @@ class ClipboardMonitor:
         self.history.insert(0, item)
 
         # Trim to max items
-        self.history = self.history[:self.max_items]
+        self.history = self.history[: self.max_items]
 
         self._save_history()
         logger.debug("Clipboard captured: %s...", content[:50])
@@ -131,10 +130,12 @@ class ClipboardMonitor:
                 )
 
                 while self.running and self._process.poll() is None:
+                    if self._process.stdout is None:
+                        break
                     line = self._process.stdout.readline()
                     if line:
                         # Accumulate content until we get empty line
-                        content = line.rstrip('\n')
+                        content = line.rstrip("\n")
                         self._add_item(content)
 
             except Exception as e:

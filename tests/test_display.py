@@ -1,4 +1,5 @@
 """Tests for synthia.display module."""
+
 import pytest
 
 from synthia.display import get_display_server, is_wayland, is_x11

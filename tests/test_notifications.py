@@ -1,18 +1,18 @@
 """Tests for synthia.notifications module."""
 
 import subprocess
-from unittest.mock import patch, call
+from unittest.mock import call, patch
 
 import pytest
 
 from synthia.notifications import (
-    notify,
-    notify_ready,
-    notify_dictation,
-    notify_assistant,
-    notify_error,
     DEFAULT_TIMEOUT,
     ERROR_TIMEOUT,
+    notify,
+    notify_assistant,
+    notify_dictation,
+    notify_error,
+    notify_ready,
 )
 
 

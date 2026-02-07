@@ -11,7 +11,6 @@ from synthia.hotkeys import (
     create_hotkey_listener,
 )
 
-
 # -- Helpers ------------------------------------------------------------------
 
 
@@ -144,8 +143,8 @@ class TestEvdevHotkeyListener:
 
         listener.update_keys("Key.shift_l", "Key.alt_l")
 
-        assert listener.dictation_key_code == 42   # KEY_LEFTSHIFT
-        assert listener.assistant_key_code == 56    # KEY_LEFTALT
+        assert listener.dictation_key_code == 42  # KEY_LEFTSHIFT
+        assert listener.assistant_key_code == 56  # KEY_LEFTALT
 
     def test_update_keys_unknown_string_defaults(self):
         """update_keys falls back to 97 for unrecognised key strings."""
@@ -231,9 +230,7 @@ class TestPynputHotkeyListener:
         """_on_press triggers dictation callback when dictation key is pressed."""
         cbs = _make_callbacks()
         sentinel_key = object()
-        listener = PynputHotkeyListener(
-            **cbs, dictation_key=sentinel_key, assistant_key=object()
-        )
+        listener = PynputHotkeyListener(**cbs, dictation_key=sentinel_key, assistant_key=object())
 
         listener._on_press(sentinel_key)
 
@@ -244,9 +241,7 @@ class TestPynputHotkeyListener:
         """_on_press triggers assistant callback when assistant key is pressed."""
         cbs = _make_callbacks()
         sentinel_key = object()
-        listener = PynputHotkeyListener(
-            **cbs, dictation_key=object(), assistant_key=sentinel_key
-        )
+        listener = PynputHotkeyListener(**cbs, dictation_key=object(), assistant_key=sentinel_key)
 
         listener._on_press(sentinel_key)
 
@@ -256,9 +251,7 @@ class TestPynputHotkeyListener:
     def test_on_press_ignores_unknown_key(self):
         """_on_press does nothing for an unrecognised key."""
         cbs = _make_callbacks()
-        listener = PynputHotkeyListener(
-            **cbs, dictation_key=object(), assistant_key=object()
-        )
+        listener = PynputHotkeyListener(**cbs, dictation_key=object(), assistant_key=object())
 
         listener._on_press(object())
 
@@ -284,9 +277,7 @@ class TestPynputHotkeyListener:
         """_on_release triggers dictation release callback after press."""
         cbs = _make_callbacks()
         sentinel_key = object()
-        listener = PynputHotkeyListener(
-            **cbs, dictation_key=sentinel_key, assistant_key=object()
-        )
+        listener = PynputHotkeyListener(**cbs, dictation_key=sentinel_key, assistant_key=object())
 
         listener._on_press(sentinel_key)
         listener._on_release(sentinel_key)
@@ -298,9 +289,7 @@ class TestPynputHotkeyListener:
         """_on_release triggers assistant release callback after press."""
         cbs = _make_callbacks()
         sentinel_key = object()
-        listener = PynputHotkeyListener(
-            **cbs, dictation_key=object(), assistant_key=sentinel_key
-        )
+        listener = PynputHotkeyListener(**cbs, dictation_key=object(), assistant_key=sentinel_key)
 
         listener._on_press(sentinel_key)
         listener._on_release(sentinel_key)
@@ -312,9 +301,7 @@ class TestPynputHotkeyListener:
         """_on_release is a no-op when the key was never pressed."""
         cbs = _make_callbacks()
         sentinel_key = object()
-        listener = PynputHotkeyListener(
-            **cbs, dictation_key=sentinel_key, assistant_key=object()
-        )
+        listener = PynputHotkeyListener(**cbs, dictation_key=sentinel_key, assistant_key=object())
 
         listener._on_release(sentinel_key)
 
@@ -341,9 +328,7 @@ class TestCreateHotkeyListener:
         monkeypatch.setenv("DISPLAY", ":0")
         cbs = _make_callbacks()
 
-        listener = create_hotkey_listener(
-            **cbs, dictation_key="mock_key", assistant_key="mock_key"
-        )
+        listener = create_hotkey_listener(**cbs, dictation_key="mock_key", assistant_key="mock_key")
 
         assert isinstance(listener, PynputHotkeyListener)
 
@@ -351,9 +336,7 @@ class TestCreateHotkeyListener:
         """Factory falls back to PynputHotkeyListener when no display is set."""
         cbs = _make_callbacks()
 
-        listener = create_hotkey_listener(
-            **cbs, dictation_key=None, assistant_key=None
-        )
+        listener = create_hotkey_listener(**cbs, dictation_key=None, assistant_key=None)
 
         assert isinstance(listener, PynputHotkeyListener)
 
@@ -369,8 +352,8 @@ class TestCreateHotkeyListener:
         )
 
         assert isinstance(listener, EvdevHotkeyListener)
-        assert listener.dictation_key_code == 42   # KEY_LEFTSHIFT
-        assert listener.assistant_key_code == 56    # KEY_LEFTALT
+        assert listener.dictation_key_code == 42  # KEY_LEFTSHIFT
+        assert listener.assistant_key_code == 56  # KEY_LEFTALT
 
     def test_evdev_listener_uses_default_key_strings(self, clean_env, monkeypatch):
         """Factory defaults to Key.ctrl_r / Key.alt_r when no strings given."""
@@ -380,8 +363,8 @@ class TestCreateHotkeyListener:
         listener = create_hotkey_listener(**cbs)
 
         assert isinstance(listener, EvdevHotkeyListener)
-        assert listener.dictation_key_code == 97   # KEY_RIGHTCTRL
-        assert listener.assistant_key_code == 100   # KEY_RIGHTALT
+        assert listener.dictation_key_code == 97  # KEY_RIGHTCTRL
+        assert listener.assistant_key_code == 100  # KEY_RIGHTALT
 
     def test_pynput_listener_receives_key_objects(self, clean_env, monkeypatch):
         """Factory passes key objects through to PynputHotkeyListener."""
@@ -412,7 +395,5 @@ class TestCreateHotkeyListener:
         # X11 path
         monkeypatch.delenv("WAYLAND_DISPLAY")
         monkeypatch.setenv("DISPLAY", ":0")
-        x11_listener = create_hotkey_listener(
-            **cbs, dictation_key=None, assistant_key=None
-        )
+        x11_listener = create_hotkey_listener(**cbs, dictation_key=None, assistant_key=None)
         assert isinstance(x11_listener, HotkeyListener)

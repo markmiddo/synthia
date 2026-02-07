@@ -51,10 +51,10 @@ class EvdevHotkeyListener(HotkeyListener):
 
     # Key code mappings from pynput format to evdev codes
     KEY_CODE_MAP = {
-        "Key.ctrl_r": 97,   # KEY_RIGHTCTRL
-        "Key.ctrl_l": 29,   # KEY_LEFTCTRL
-        "Key.alt_r": 100,   # KEY_RIGHTALT
-        "Key.alt_l": 56,    # KEY_LEFTALT
+        "Key.ctrl_r": 97,  # KEY_RIGHTCTRL
+        "Key.ctrl_l": 29,  # KEY_LEFTCTRL
+        "Key.alt_r": 100,  # KEY_RIGHTALT
+        "Key.alt_l": 56,  # KEY_LEFTALT
         "Key.shift_r": 54,  # KEY_RIGHTSHIFT
         "Key.shift_l": 42,  # KEY_LEFTSHIFT
     }
@@ -122,9 +122,9 @@ class EvdevHotkeyListener(HotkeyListener):
 
             while self.running:
                 for key, mask in selector.select(timeout=0.1):
-                    device = key.fileobj
+                    dev: Any = key.fileobj
                     try:
-                        for event in device.read():
+                        for event in dev.read():
                             if event.type == ecodes.EV_KEY:
                                 # Key press (1) or release (0)
                                 if event.code == self.dictation_key_code:
@@ -270,7 +270,11 @@ class PynputHotkeyListener(HotkeyListener):
 
         self.dictation_key = parse_key(dictation_key_string)
         self.assistant_key = parse_key(assistant_key_string)
-        logger.info("Hotkeys updated: dictation=%s, assistant=%s", dictation_key_string, assistant_key_string)
+        logger.info(
+            "Hotkeys updated: dictation=%s, assistant=%s",
+            dictation_key_string,
+            assistant_key_string,
+        )
 
 
 def create_hotkey_listener(

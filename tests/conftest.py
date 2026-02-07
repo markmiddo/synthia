@@ -29,7 +29,13 @@ def tmp_memory_dir(tmp_path):
     """Create a temporary memory directory with empty JSONL files."""
     memory_dir = tmp_path / "memory"
     memory_dir.mkdir(parents=True)
-    for name in ["bugs.jsonl", "patterns.jsonl", "architecture.jsonl", "gotchas.jsonl", "stack.jsonl"]:
+    for name in [
+        "bugs.jsonl",
+        "patterns.jsonl",
+        "architecture.jsonl",
+        "gotchas.jsonl",
+        "stack.jsonl",
+    ]:
         (memory_dir / name).touch()
     return memory_dir
 

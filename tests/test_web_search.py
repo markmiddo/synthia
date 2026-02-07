@@ -1,4 +1,5 @@
 """Tests for synthia.web_search module."""
+
 from __future__ import annotations
 
 import pytest

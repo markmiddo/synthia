@@ -54,11 +54,13 @@ class WebSearch:
             sources = []
 
             for result in response.get("results", []):
-                sources.append({
-                    "title": result.get("title", ""),
-                    "url": result.get("url", ""),
-                    "snippet": result.get("content", "")[:200],
-                })
+                sources.append(
+                    {
+                        "title": result.get("title", ""),
+                        "url": result.get("url", ""),
+                        "snippet": result.get("content", "")[:200],
+                    }
+                )
 
             return {
                 "answer": answer,
@@ -86,10 +88,10 @@ class WebSearch:
         result = self.search(query, max_results=3)
 
         if result["success"] and result["answer"]:
-            return result["answer"]
+            return str(result["answer"])
         elif result["sources"]:
             # Fallback to first snippet if no answer
-            return result["sources"][0]["snippet"]
+            return str(result["sources"][0]["snippet"])
         else:
             return "I couldn't find an answer to that."
 

@@ -1,21 +1,21 @@
 """Tests for synthia.sounds module."""
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from synthia.sounds import (
-    _generate_beep,
-    SoundEffects,
     BEEP_SAMPLE_RATE,
     BEEP_VOLUME,
+    DURATION_LONG,
+    DURATION_SHORT,
+    FREQ_ERROR,
     FREQ_HIGH,
     FREQ_LOW,
-    FREQ_ERROR,
-    DURATION_SHORT,
-    DURATION_LONG,
     MAX_TEMP_FILES,
+    SoundEffects,
+    _generate_beep,
 )
 
 

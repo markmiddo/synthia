@@ -18,16 +18,16 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 TASKS_FILE = Path.home() / ".config" / "synthia" / "tasks.json"
 
 
-def load_tasks() -> dict:
+def load_tasks() -> dict[str, Any]:
     if not TASKS_FILE.exists():
         return {"tasks": []}
     with open(TASKS_FILE) as f:
-        return json.load(f)
+        return dict(json.load(f))
 
 
 def save_tasks(data: dict) -> None:
@@ -36,17 +36,17 @@ def save_tasks(data: dict) -> None:
         json.dump(data, f, indent=2)
 
 
-def find_task(data: dict, identifier: str) -> Optional[dict]:
+def find_task(data: dict[str, Any], identifier: str) -> Optional[dict[str, Any]]:
     """Find task by ID or title (partial match)."""
     # Try exact ID match first
     for task in data["tasks"]:
         if task["id"] == identifier:
-            return task
+            return task  # type: ignore[no-any-return]
     # Try title match (case-insensitive, partial)
     identifier_lower = identifier.lower()
     for task in data["tasks"]:
         if identifier_lower in task["title"].lower():
-            return task
+            return task  # type: ignore[no-any-return]
     return None
 
 
@@ -62,13 +62,15 @@ def list_tasks(status: Optional[str] = None) -> None:
         return
 
     # Group by status
-    by_status = {"todo": [], "in_progress": [], "done": []}
+    by_status: dict[str, list[dict[str, Any]]] = {"todo": [], "in_progress": [], "done": []}
     for t in tasks:
         by_status.get(t["status"], []).append(t)
 
-    for status_name, status_tasks in [("To Do", by_status["todo"]),
-                                        ("In Progress", by_status["in_progress"]),
-                                        ("Done", by_status["done"])]:
+    for status_name, status_tasks in [
+        ("To Do", by_status["todo"]),
+        ("In Progress", by_status["in_progress"]),
+        ("Done", by_status["done"]),
+    ]:
         if status_tasks:
             print(f"\n{status_name}:")
             for t in status_tasks:
@@ -77,7 +79,12 @@ def list_tasks(status: Optional[str] = None) -> None:
                 print(f"  - {t['title']}{due}{tags}")
 
 
-def add_task(title: str, description: Optional[str] = None, tags: Optional[str] = None, due_date: Optional[str] = None) -> None:
+def add_task(
+    title: str,
+    description: Optional[str] = None,
+    tags: Optional[str] = None,
+    due_date: Optional[str] = None,
+) -> None:
     data = load_tasks()
 
     task = {
@@ -88,7 +95,7 @@ def add_task(title: str, description: Optional[str] = None, tags: Optional[str] 
         "tags": tags.split(",") if tags else [],
         "due_date": due_date,
         "created_at": datetime.now().astimezone().isoformat(),
-        "completed_at": None
+        "completed_at": None,
     }
 
     data["tasks"].append(task)
@@ -165,7 +172,9 @@ def main() -> None:
 
     elif command == "add":
         if len(sys.argv) < 3:
-            print("Usage: tasks_cli.py add \"Task title\" [--desc \"...\"] [--tags \"...\"] [--due \"...\"]")
+            print(
+                'Usage: tasks_cli.py add "Task title" [--desc "..."] [--tags "..."] [--due "..."]'
+            )
             return
 
         title = sys.argv[2]

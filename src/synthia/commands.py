@@ -451,7 +451,22 @@ def move_to_workspace(number: int) -> bool:
     if is_wayland():
         # On Cosmic/Wayland, use Super+Shift+number
         try:
-            subprocess.run(["wtype", "-M", "logo", "-M", "shift", "-k", str(number), "-m", "shift", "-m", "logo"], check=True)
+            subprocess.run(
+                [
+                    "wtype",
+                    "-M",
+                    "logo",
+                    "-M",
+                    "shift",
+                    "-k",
+                    str(number),
+                    "-m",
+                    "shift",
+                    "-m",
+                    "logo",
+                ],
+                check=True,
+            )
             logger.info("Moved window to workspace %d (Wayland)", number)
             return True
         except FileNotFoundError:
@@ -601,7 +616,7 @@ def _get_telegram_chat_id() -> int:
     config = load_config()
     allowed_users = config.get("telegram_allowed_users", [])
     if allowed_users:
-        return allowed_users[0]  # Use first allowed user as default
+        return int(allowed_users[0])  # Use first allowed user as default
     return 0
 
 
@@ -646,9 +661,9 @@ def is_remote_mode() -> bool:
 
 def memory_recall(tags: list[str]) -> str:
     """Recall memories by tags and return formatted output."""
-    from synthia.memory import recall
+    from synthia.memory import get_memory_system
 
-    entries = recall(tags, limit=5)
+    entries = get_memory_system().recall(tags, limit=5)
 
     if not entries:
         return f"No memories found for tags: {', '.join(tags)}"
@@ -662,9 +677,9 @@ def memory_recall(tags: list[str]) -> str:
 
 def memory_search(query: str) -> str:
     """Search memories by text and return formatted output."""
-    from synthia.memory import search
+    from synthia.memory import get_memory_system
 
-    entries = search(query, limit=5)
+    entries = get_memory_system().search_text(query, limit=5)
 
     if not entries:
         return f"No memories found matching: {query}"

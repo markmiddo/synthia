@@ -20,18 +20,23 @@ from typing import Any, Optional
 
 from synthia.assistant import Assistant
 from synthia.audio import AudioRecorder, list_audio_devices
+from synthia.clipboard_monitor import ClipboardMonitor
 from synthia.commands import execute_actions
-from synthia.config import apply_word_replacements, get_anthropic_api_key, get_google_credentials_path, load_config
+from synthia.config import (
+    apply_word_replacements,
+    get_anthropic_api_key,
+    get_google_credentials_path,
+    load_config,
+)
 from synthia.display import get_display_server, is_wayland
 from synthia.hotkeys import create_hotkey_listener
 from synthia.indicator import Status, TrayIndicator
+from synthia.llm_polish import TranscriptionPolisher
 from synthia.notifications import notify_assistant, notify_dictation, notify_error, notify_ready
 from synthia.output import type_text
 from synthia.sounds import SoundEffects
 from synthia.transcribe import Transcriber
 from synthia.tts import TextToSpeech
-from synthia.llm_polish import TranscriptionPolisher
-from synthia.clipboard_monitor import ClipboardMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +112,7 @@ class Synthia:
 
         # Initialize LLM polisher for dictation accuracy (if enabled)
         use_llm_polish = self.config.get("use_llm_polish", True)
+        self.polisher: Optional[TranscriptionPolisher] = None
         if use_llm_polish:
             self.polisher = TranscriptionPolisher(
                 ollama_url=self.config.get("ollama_url", "http://localhost:11434"),
@@ -115,17 +121,14 @@ class Synthia:
                 enabled=True,
             )
             logger.info("LLM polish for dictation: enabled")
-        else:
-            self.polisher = None
 
         # Initialize clipboard monitor (if enabled)
         clipboard_enabled = self.config.get("clipboard_history_enabled", True)
+        self.clipboard_monitor: Optional[ClipboardMonitor] = None
         if clipboard_enabled:
             self.clipboard_monitor = ClipboardMonitor(
                 max_items=self.config.get("clipboard_history_max_items", 5),
             )
-        else:
-            self.clipboard_monitor = None
 
         # State tracking
         self.dictation_active = False
@@ -163,8 +166,12 @@ class Synthia:
         )
 
         # Display friendly key names
-        dictation_display = self.config["dictation_key"].replace("Key.", "").replace("_", " ").title()
-        assistant_display = self.config["assistant_key"].replace("Key.", "").replace("_", " ").title()
+        dictation_display = (
+            self.config["dictation_key"].replace("Key.", "").replace("_", " ").title()
+        )
+        assistant_display = (
+            self.config["assistant_key"].replace("Key.", "").replace("_", " ").title()
+        )
 
         logger.info("Display server: %s", get_display_server())
         logger.info("Dictation key: %s (hold to dictate)", dictation_display)
@@ -428,6 +435,7 @@ def handle_memory_command(args: list[str]) -> None:
         # Launch TUI dashboard
         try:
             from synthia.memory_tui import main as run_tui
+
             run_tui()
         except ImportError:
             print("TUI requires textual. Install with: pip install textual")
@@ -485,10 +493,10 @@ def handle_memory_command(args: list[str]) -> None:
 
     elif subcmd == "tags":
         mem = get_memory_system()
-        tags = mem.list_all_tags()
+        all_tags = mem.list_all_tags()
 
         print("\n=== All Tags (by usage) ===\n")
-        for tag, count in tags.items():
+        for tag, count in all_tags.items():
             print(f"  {tag}: {count}")
 
     else:
