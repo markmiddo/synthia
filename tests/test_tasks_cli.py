@@ -413,3 +413,359 @@ class TestDeleteTask:
         result = delete_task("nonexistent-id")
 
         assert result is False
+
+
+class TestListTasksOutput:
+    """Tests for list_tasks output formatting."""
+
+    def test_list_tasks_prints_all_tasks_when_no_filter(
+        self, tmp_tasks_file: Path, monkeypatch, capsys
+    ):
+        """List tasks prints all tasks organized by status."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        data = {
+            "tasks": [
+                {
+                    "id": "1",
+                    "title": "Todo task",
+                    "description": None,
+                    "status": "todo",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                },
+                {
+                    "id": "2",
+                    "title": "In progress task",
+                    "description": None,
+                    "status": "in_progress",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                },
+            ]
+        }
+        save_tasks(data)
+
+        list_tasks()
+
+        captured = capsys.readouterr()
+        assert "To Do:" in captured.out
+        assert "In Progress:" in captured.out
+        assert "Todo task" in captured.out
+        assert "In progress task" in captured.out
+
+    def test_list_tasks_filters_by_status(self, tmp_tasks_file: Path, monkeypatch, capsys):
+        """List tasks with status filter only shows tasks with that status."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        data = {
+            "tasks": [
+                {
+                    "id": "1",
+                    "title": "In progress 1",
+                    "description": None,
+                    "status": "in_progress",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                },
+                {
+                    "id": "2",
+                    "title": "In progress 2",
+                    "description": None,
+                    "status": "in_progress",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                },
+                {
+                    "id": "3",
+                    "title": "Todo task",
+                    "description": None,
+                    "status": "todo",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                },
+            ]
+        }
+        save_tasks(data)
+
+        list_tasks(status="in_progress")
+
+        captured = capsys.readouterr()
+        assert "In progress 1" in captured.out
+        assert "In progress 2" in captured.out
+        assert "Todo task" not in captured.out
+
+    def test_list_tasks_shows_message_when_empty(self, tmp_tasks_file: Path, monkeypatch, capsys):
+        """List tasks shows 'No tasks found' when no tasks exist."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        save_tasks({"tasks": []})
+
+        list_tasks()
+
+        captured = capsys.readouterr()
+        assert "No tasks found" in captured.out
+
+    def test_list_tasks_includes_due_dates_in_output(
+        self, tmp_tasks_file: Path, monkeypatch, capsys
+    ):
+        """List tasks shows due dates when present."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        data = {
+            "tasks": [
+                {
+                    "id": "1",
+                    "title": "Due soon",
+                    "description": None,
+                    "status": "todo",
+                    "tags": [],
+                    "due_date": "2024-02-20",
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                }
+            ]
+        }
+        save_tasks(data)
+
+        list_tasks()
+
+        captured = capsys.readouterr()
+        assert "2024-02-20" in captured.out
+
+    def test_list_tasks_includes_tags_in_output(self, tmp_tasks_file: Path, monkeypatch, capsys):
+        """List tasks shows tags when present."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        data = {
+            "tasks": [
+                {
+                    "id": "1",
+                    "title": "Tagged task",
+                    "description": None,
+                    "status": "todo",
+                    "tags": ["urgent", "backend"],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                }
+            ]
+        }
+        save_tasks(data)
+
+        list_tasks()
+
+        captured = capsys.readouterr()
+        assert "urgent" in captured.out
+        assert "backend" in captured.out
+
+
+class TestAddTaskWithDescription:
+    """Tests for add_task with description parameter."""
+
+    def test_add_task_with_description_stores_it(self, tmp_tasks_file: Path, monkeypatch):
+        """Add task with description parameter stores the description."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        add_task(title="Task with desc", description="This is a detailed description")
+
+        data = load_tasks()
+        task = data["tasks"][0]
+
+        assert task["title"] == "Task with desc"
+        assert task["description"] == "This is a detailed description"
+
+    def test_add_task_description_defaults_to_none(self, tmp_tasks_file: Path, monkeypatch):
+        """Add task without description has None."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        add_task(title="No description")
+
+        data = load_tasks()
+        task = data["tasks"][0]
+
+        assert task["description"] is None
+
+
+class TestMainCliParsing:
+    """Tests for main() CLI argument parsing."""
+
+    def test_main_list_subcommand(self, tmp_tasks_file: Path, monkeypatch, capsys):
+        """main() with 'list' subcommand calls list_tasks."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+        monkeypatch.setattr("sys.argv", ["tasks_cli.py", "list"])
+
+        data = {
+            "tasks": [
+                {
+                    "id": "1",
+                    "title": "Test task",
+                    "description": None,
+                    "status": "todo",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                }
+            ]
+        }
+        save_tasks(data)
+
+        tasks_cli.main()
+
+        captured = capsys.readouterr()
+        assert "Test task" in captured.out
+
+    def test_main_add_subcommand_with_title(self, tmp_tasks_file: Path, monkeypatch, capsys):
+        """main() with 'add' subcommand adds a task."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+        monkeypatch.setattr("sys.argv", ["tasks_cli.py", "add", "New task"])
+
+        tasks_cli.main()
+
+        captured = capsys.readouterr()
+        assert "Added task: New task" in captured.out
+
+        data = load_tasks()
+        assert len(data["tasks"]) == 1
+        assert data["tasks"][0]["title"] == "New task"
+
+    def test_main_add_with_description_flag(self, tmp_tasks_file: Path, monkeypatch):
+        """main() parses --desc flag for add command."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["tasks_cli.py", "add", "Task", "--desc", "Task description"],
+        )
+
+        tasks_cli.main()
+
+        data = load_tasks()
+        assert data["tasks"][0]["description"] == "Task description"
+
+    def test_main_add_with_tags_flag(self, tmp_tasks_file: Path, monkeypatch):
+        """main() parses --tags flag for add command."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["tasks_cli.py", "add", "Task", "--tags", "urgent,backend"],
+        )
+
+        tasks_cli.main()
+
+        data = load_tasks()
+        assert "urgent" in data["tasks"][0]["tags"]
+        assert "backend" in data["tasks"][0]["tags"]
+
+    def test_main_add_with_due_flag(self, tmp_tasks_file: Path, monkeypatch):
+        """main() parses --due flag for add command."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["tasks_cli.py", "add", "Task", "--due", "2024-02-20"],
+        )
+
+        tasks_cli.main()
+
+        data = load_tasks()
+        assert data["tasks"][0]["due_date"] == "2024-02-20"
+
+    def test_main_done_subcommand(self, tmp_tasks_file: Path, monkeypatch, capsys):
+        """main() with 'done' subcommand completes a task."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        data = {
+            "tasks": [
+                {
+                    "id": "task-1",
+                    "title": "Complete me",
+                    "description": None,
+                    "status": "todo",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                }
+            ]
+        }
+        save_tasks(data)
+
+        monkeypatch.setattr("sys.argv", ["tasks_cli.py", "done", "task-1"])
+
+        tasks_cli.main()
+
+        captured = capsys.readouterr()
+        assert "Completed:" in captured.out
+
+    def test_main_move_subcommand(self, tmp_tasks_file: Path, monkeypatch, capsys):
+        """main() with 'move' subcommand changes task status."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        data = {
+            "tasks": [
+                {
+                    "id": "task-1",
+                    "title": "Move me",
+                    "description": None,
+                    "status": "todo",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                }
+            ]
+        }
+        save_tasks(data)
+
+        monkeypatch.setattr("sys.argv", ["tasks_cli.py", "move", "task-1", "in_progress"])
+
+        tasks_cli.main()
+
+        captured = capsys.readouterr()
+        assert "in_progress" in captured.out
+
+    def test_main_delete_subcommand(self, tmp_tasks_file: Path, monkeypatch, capsys):
+        """main() with 'delete' subcommand removes a task."""
+        monkeypatch.setattr("synthia.tasks_cli.TASKS_FILE", tmp_tasks_file)
+
+        data = {
+            "tasks": [
+                {
+                    "id": "task-1",
+                    "title": "Delete me",
+                    "description": None,
+                    "status": "todo",
+                    "tags": [],
+                    "due_date": None,
+                    "created_at": "2024-01-15T10:00:00",
+                    "completed_at": None,
+                }
+            ]
+        }
+        save_tasks(data)
+
+        monkeypatch.setattr("sys.argv", ["tasks_cli.py", "delete", "task-1"])
+
+        tasks_cli.main()
+
+        captured = capsys.readouterr()
+        assert "Deleted:" in captured.out
+
+    def test_main_unknown_command(self, monkeypatch, capsys):
+        """main() with unknown command shows error."""
+        monkeypatch.setattr("sys.argv", ["tasks_cli.py", "unknown"])
+
+        tasks_cli.main()
+
+        captured = capsys.readouterr()
+        assert "Unknown command" in captured.out

@@ -343,3 +343,260 @@ class TestEnsureMemoryDir:
         for category, filename in MEMORY_CATEGORIES.items():
             file_path = memory_dir / filename
             assert file_path.exists(), f"Expected {filename} to be created"
+
+
+class TestGetContextForTask:
+    """Tests for get_context_for_task method."""
+
+    def test_get_context_returns_matching_memories(self, tmp_memory_dir: Path):
+        """Get context for task returns memories with matching keywords."""
+        memory = MemorySystem(memory_dir=tmp_memory_dir)
+
+        # Add a memory with 'react' keyword
+        memory.remember(
+            category="pattern",
+            tags=["react", "hooks"],
+            topic="React hooks",
+            rule="Use hooks for state",
+            why="Better composability",
+        )
+
+        # Task description containing 'react' should find this
+        context = memory.get_context_for_task("I need to implement a React component")
+
+        assert context != ""
+        assert "React hooks" in context
+
+    def test_get_context_returns_empty_for_no_matches(self, tmp_memory_dir: Path):
+        """Get context returns empty string when no keywords match."""
+        memory = MemorySystem(memory_dir=tmp_memory_dir)
+
+        memory.remember(
+            category="bug",
+            tags=["python"],
+            error="Import error",
+            cause="Missing module",
+            fix="Install it",
+        )
+
+        # Task with no matching keywords
+        context = memory.get_context_for_task("Write documentation for the API")
+
+        assert context == ""
+
+    def test_get_context_finds_multiple_memories(self, tmp_memory_dir: Path):
+        """Get context can return multiple matching memories."""
+        memory = MemorySystem(memory_dir=tmp_memory_dir)
+
+        memory.remember(
+            category="gotcha",
+            tags=["typescript", "types"],
+            area="Type checking",
+            gotcha="String literals matter for types",
+        )
+
+        memory.remember(
+            category="stack",
+            tags=["typescript", "compiler"],
+            tool="TypeScript",
+            note="Enable strict mode in tsconfig",
+        )
+
+        context = memory.get_context_for_task("Fixing TypeScript type errors in the new module")
+
+        assert context != ""
+        assert "Type checking" in context or "TypeScript" in context
+
+
+class TestExtractKeywords:
+    """Tests for _extract_keywords method."""
+
+    def test_extract_keywords_finds_known_tags(self, tmp_memory_dir: Path):
+        """Extract keywords finds known tags in text."""
+        memory = MemorySystem(memory_dir=tmp_memory_dir)
+
+        keywords = memory._extract_keywords("Building a React app with TypeScript")
+
+        assert "react" in keywords
+        assert "typescript" in keywords
+
+    def test_extract_keywords_is_case_insensitive(self, tmp_memory_dir: Path):
+        """Extract keywords is case insensitive."""
+        memory = MemorySystem(memory_dir=tmp_memory_dir)
+
+        keywords = memory._extract_keywords("Using REACT and TypeScript")
+
+        assert "react" in keywords
+        assert "typescript" in keywords
+
+    def test_extract_keywords_returns_empty_for_unrelated_text(self, tmp_memory_dir: Path):
+        """Extract keywords returns empty for completely unrelated text."""
+        memory = MemorySystem(memory_dir=tmp_memory_dir)
+
+        keywords = memory._extract_keywords("The quick brown fox jumps")
+
+        assert keywords == []
+
+    def test_extract_keywords_finds_backend_keywords(self, tmp_memory_dir: Path):
+        """Extract keywords finds backend-related keywords."""
+        memory = MemorySystem(memory_dir=tmp_memory_dir)
+
+        keywords = memory._extract_keywords("Implementing Go API with MongoDB")
+
+        assert "go" in keywords
+        assert "mongodb" in keywords
+        assert "api" in keywords
+
+
+class TestMemoryEntryFormatDisplay:
+    """Tests for MemoryEntry.format_display for different categories."""
+
+    def test_format_display_for_pattern_category(self):
+        """Format display produces readable output for pattern category."""
+        entry = MemoryEntry(
+            category="pattern",
+            data={"topic": "Error handling", "rule": "Use try/catch blocks", "why": "Safety"},
+            tags=["javascript"],
+            date="2024-01-15",
+        )
+
+        display = entry.format_display()
+
+        assert "[PATTERN]" in display
+        assert "Error handling" in display
+        assert "Use try/catch blocks" in display
+        assert "Safety" in display
+
+    def test_format_display_for_arch_category(self):
+        """Format display produces readable output for arch category."""
+        entry = MemoryEntry(
+            category="arch",
+            data={"decision": "Monorepo structure", "why": "Easier sharing of code"},
+            tags=["architecture"],
+            date="2024-01-15",
+        )
+
+        display = entry.format_display()
+
+        assert "[ARCHITECTURE]" in display
+        assert "Monorepo structure" in display
+        assert "Easier sharing of code" in display
+
+    def test_format_display_for_gotcha_category(self):
+        """Format display produces readable output for gotcha category."""
+        entry = MemoryEntry(
+            category="gotcha",
+            data={"area": "Async operations", "gotcha": "Don't forget to await promises"},
+            tags=["javascript"],
+            date="2024-01-15",
+        )
+
+        display = entry.format_display()
+
+        assert "[GOTCHA]" in display
+        assert "Async operations" in display
+        assert "Don't forget to await promises" in display
+
+    def test_format_display_for_stack_category(self):
+        """Format display produces readable output for stack category."""
+        entry = MemoryEntry(
+            category="stack",
+            data={"tool": "Docker", "note": "Always use .dockerignore file"},
+            tags=["devops"],
+            date="2024-01-15",
+        )
+
+        display = entry.format_display()
+
+        assert "[STACK]" in display
+        assert "Docker" in display
+        assert "Always use .dockerignore file" in display
+
+    def test_format_display_includes_tags(self):
+        """Format display always includes tags."""
+        entry = MemoryEntry(
+            category="bug",
+            data={"error": "Error", "cause": "Cause", "fix": "Fix"},
+            tags=["tag1", "tag2", "tag3"],
+            date="2024-01-15",
+        )
+
+        display = entry.format_display()
+
+        assert "tag1" in display
+        assert "tag2" in display
+        assert "tag3" in display
+
+
+class TestConvenienceFunctions:
+    """Tests for convenience functions recall(), remember(), search()."""
+
+    def test_recall_convenience_function(self, tmp_memory_dir: Path, monkeypatch):
+        """recall() convenience function delegates to singleton."""
+        # Reset singleton
+        import synthia.memory
+        from synthia.memory import _memory_system, recall, remember
+
+        synthia.memory._memory_system = None
+
+        monkeypatch.setattr("synthia.memory.DEFAULT_MEMORY_DIR", tmp_memory_dir)
+
+        # Add a memory
+        remember(
+            category="bug",
+            tags=["python", "test"],
+            error="Error",
+            cause="Cause",
+            fix="Fix",
+        )
+
+        # Recall it
+        results = recall(tags=["python"])
+
+        assert len(results) == 1
+        assert results[0].data["error"] == "Error"
+
+    def test_remember_convenience_function(self, tmp_memory_dir: Path, monkeypatch):
+        """remember() convenience function delegates to singleton."""
+        # Reset singleton
+        import synthia.memory
+        from synthia.memory import _memory_system, remember
+
+        synthia.memory._memory_system = None
+
+        monkeypatch.setattr("synthia.memory.DEFAULT_MEMORY_DIR", tmp_memory_dir)
+
+        result = remember(
+            category="pattern",
+            tags=["testing"],
+            topic="Test fixtures",
+            rule="Use fixtures",
+            why="Cleaner",
+        )
+
+        assert result is True
+
+    def test_search_convenience_function(self, tmp_memory_dir: Path, monkeypatch):
+        """search() convenience function delegates to singleton."""
+        # Reset singleton
+        import synthia.memory
+        from synthia.memory import remember, search
+
+        synthia.memory._memory_system = None
+
+        monkeypatch.setattr("synthia.memory.DEFAULT_MEMORY_DIR", tmp_memory_dir)
+
+        # Add a memory
+        remember(
+            category="bug",
+            tags=["test"],
+            error="ModuleNotFoundError",
+            cause="Missing",
+            fix="Install",
+        )
+
+        # Search for it
+        results = search("ModuleNotFoundError")
+
+        assert len(results) == 1
+        assert results[0].data["error"] == "ModuleNotFoundError"

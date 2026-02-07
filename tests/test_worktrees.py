@@ -175,3 +175,257 @@ class TestWorktreeInfoProgress:
         completed, total = info.progress
         assert completed == 3
         assert total == 5
+
+
+class TestSaveAndLoadConfig:
+    """Tests for save_config and load_config roundtrip."""
+
+    def test_save_config_writes_valid_yaml(self, tmp_path, monkeypatch):
+        """Save config writes valid YAML that can be read back."""
+        fake_config_path = tmp_path / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        config = {
+            "repos": [
+                "/home/user/project1",
+                "/home/user/project2",
+            ]
+        }
+
+        result = patch("synthia.worktrees.CONFIG_PATH", fake_config_path)
+        with result:
+            from synthia.worktrees import save_config
+
+            saved = save_config(config)
+
+        assert saved is True
+        assert fake_config_path.exists()
+
+    def test_save_and_load_config_roundtrip(self, tmp_path, monkeypatch):
+        """Save and load config preserves data."""
+        from synthia.worktrees import load_config, save_config
+
+        fake_config_path = tmp_path / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        original_config = {
+            "repos": [
+                "/home/user/project1",
+                "/home/user/project2",
+            ]
+        }
+
+        save_config(original_config)
+        loaded_config = load_config()
+
+        assert loaded_config == original_config
+        assert loaded_config["repos"] == original_config["repos"]
+
+    def test_save_config_creates_parent_directories(self, tmp_path, monkeypatch):
+        """Save config creates parent directories if they don't exist."""
+        from synthia.worktrees import save_config
+
+        fake_config_path = tmp_path / "deep" / "nested" / "path" / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        result = save_config({"repos": []})
+
+        assert result is True
+        assert fake_config_path.parent.exists()
+
+
+class TestGetConfiguredRepos:
+    """Tests for get_configured_repos function."""
+
+    def test_get_configured_repos_returns_list(self, tmp_path, monkeypatch):
+        """Get configured repos returns a list of repo paths."""
+        from synthia.worktrees import get_configured_repos, save_config
+
+        fake_config_path = tmp_path / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        config = {
+            "repos": [
+                "/home/user/project1",
+                "/home/user/project2",
+            ]
+        }
+        save_config(config)
+
+        repos = get_configured_repos()
+
+        assert isinstance(repos, list)
+        assert len(repos) == 2
+        assert "/home/user/project1" in repos
+        assert "/home/user/project2" in repos
+
+    def test_get_configured_repos_returns_empty_when_no_config(self, tmp_path, monkeypatch):
+        """Get configured repos returns empty list when no config exists."""
+        from synthia.worktrees import get_configured_repos
+
+        fake_config_path = tmp_path / "nonexistent" / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        repos = get_configured_repos()
+
+        assert repos == []
+
+
+class TestAddRepo:
+    """Tests for add_repo function."""
+
+    def test_add_repo_adds_new_repository(self, tmp_path, monkeypatch):
+        """Add repo adds a new repository path to config."""
+        from synthia.worktrees import add_repo, get_configured_repos, save_config
+
+        fake_config_path = tmp_path / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        save_config({"repos": []})
+
+        result = add_repo("/home/user/newproject")
+
+        assert result is True
+        repos = get_configured_repos()
+        assert "/home/user/newproject" in [r for r in repos]
+
+    def test_add_repo_idempotent_does_not_duplicate(self, tmp_path, monkeypatch):
+        """Add repo does not create duplicate entries."""
+        from synthia.worktrees import add_repo, get_configured_repos, save_config
+
+        fake_config_path = tmp_path / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        repo_path = "/home/user/project1"
+        save_config({"repos": [repo_path]})
+
+        # Add the same repo again
+        result = add_repo(repo_path)
+
+        assert result is True
+        repos = get_configured_repos()
+        count = sum(1 for r in repos if r == repo_path)
+        assert count == 1
+
+    def test_add_repo_normalizes_paths(self, tmp_path, monkeypatch):
+        """Add repo normalizes paths for comparison."""
+        from synthia.worktrees import add_repo, get_configured_repos, save_config
+
+        fake_config_path = tmp_path / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        save_config({"repos": []})
+
+        # Add with relative-like path
+        add_repo("/home/user/project")
+
+        repos = get_configured_repos()
+        assert any("project" in r for r in repos)
+
+
+class TestRemoveRepo:
+    """Tests for remove_repo function."""
+
+    def test_remove_repo_removes_repository(self, tmp_path, monkeypatch):
+        """Remove repo removes a repository path from config."""
+        from synthia.worktrees import get_configured_repos, remove_repo, save_config
+
+        fake_config_path = tmp_path / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        repo_path = "/home/user/projecttoremove"
+        save_config({"repos": [repo_path, "/home/user/otherproject"]})
+
+        result = remove_repo(repo_path)
+
+        assert result is True
+        repos = get_configured_repos()
+        assert repo_path not in repos
+        assert "/home/user/otherproject" in repos
+
+    def test_remove_repo_handles_missing_gracefully(self, tmp_path, monkeypatch):
+        """Remove repo handles missing repo paths gracefully."""
+        from synthia.worktrees import remove_repo, save_config
+
+        fake_config_path = tmp_path / "worktrees.yaml"
+        monkeypatch.setattr("synthia.worktrees.CONFIG_PATH", fake_config_path)
+
+        save_config({"repos": ["/home/user/project1"]})
+
+        # Try to remove non-existent repo
+        result = remove_repo("/home/user/nonexistent")
+
+        assert result is True
+
+
+class TestWorktreeTaskDataclass:
+    """Tests for WorktreeTask dataclass."""
+
+    def test_worktree_task_has_required_fields(self):
+        """WorktreeTask has content, status, and active_form fields."""
+        task = WorktreeTask(
+            content="Do something",
+            status="in_progress",
+            active_form="Doing something",
+        )
+
+        assert task.content == "Do something"
+        assert task.status == "in_progress"
+        assert task.active_form == "Doing something"
+
+    def test_worktree_task_status_values(self):
+        """WorktreeTask can have pending, in_progress, or completed status."""
+        for status in ["pending", "in_progress", "completed"]:
+            task = WorktreeTask(
+                content="Task",
+                status=status,
+                active_form="Doing task",
+            )
+            assert task.status == status
+
+
+class TestWorktreeInfoDataclass:
+    """Tests for WorktreeInfo dataclass."""
+
+    def test_worktree_info_has_required_fields(self):
+        """WorktreeInfo has path, branch, and optional fields."""
+        info = WorktreeInfo(
+            path="/home/user/project",
+            branch="feature/123-test",
+        )
+
+        assert info.path == "/home/user/project"
+        assert info.branch == "feature/123-test"
+        assert info.session_id is None
+        assert info.session_summary is None
+
+    def test_worktree_info_with_session_fields(self):
+        """WorktreeInfo can store session_id and session_summary."""
+        info = WorktreeInfo(
+            path="/home/user/project",
+            branch="feature/123-test",
+            issue_number=123,
+            issue_title="Test feature",
+            session_id="session-123",
+            session_summary="Working on test feature",
+        )
+
+        assert info.session_id == "session-123"
+        assert info.session_summary == "Working on test feature"
+        assert info.issue_title == "Test feature"
+
+    def test_worktree_info_with_tasks(self):
+        """WorktreeInfo can store tasks list."""
+        tasks = [
+            WorktreeTask(content="Task 1", status="pending", active_form="Working on task 1"),
+            WorktreeTask(content="Task 2", status="completed", active_form="Completed task 2"),
+        ]
+        info = WorktreeInfo(
+            path="/home/user/project",
+            branch="feature/123-test",
+            tasks=tasks,
+        )
+
+        assert len(info.tasks) == 2
+        assert info.tasks[0].content == "Task 1"
+        assert info.tasks[1].status == "completed"
