@@ -46,4 +46,6 @@ config.yaml
 .pytest_cache/
 .coverage
 .mypy_cache/
+
+# Git worktrees
 .worktrees/
