@@ -15,23 +15,26 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from textual import work
-from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical, VerticalScroll
-from textual.message import Message
-from textual.screen import ModalScreen
-from textual.widgets import (
-    Button,
-    Footer,
-    Header,
-    Input,
-    Label,
-    ListItem,
-    ListView,
-    Static,
-    TextArea,
-)
+try:
+    from textual import work
+    from textual.app import App, ComposeResult
+    from textual.binding import Binding
+    from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+    from textual.message import Message
+    from textual.screen import ModalScreen
+    from textual.widgets import (
+        Button,
+        Footer,
+        Header,
+        Input,
+        Label,
+        ListItem,
+        ListView,
+        Static,
+        TextArea,
+    )
+except ImportError:
+    App = None
 
 from synthia.memory import (
     MEMORY_CATEGORIES,

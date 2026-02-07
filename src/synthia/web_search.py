@@ -3,7 +3,10 @@
 import logging
 from typing import Optional
 
-from tavily import TavilyClient
+try:
+    from tavily import TavilyClient
+except ImportError:
+    TavilyClient = None
 
 from synthia.config import load_config
 

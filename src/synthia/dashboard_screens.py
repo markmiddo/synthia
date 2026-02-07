@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Static, TextArea
+try:
+    from textual.app import ComposeResult
+    from textual.binding import Binding
+    from textual.containers import Horizontal, Vertical
+    from textual.screen import ModalScreen
+    from textual.widgets import Button, Input, Label, Select, Static, TextArea
+except ImportError:
+    ModalScreen = None
 
 from synthia.config_manager import AgentConfig, CommandConfig, HookConfig
 from synthia.memory import MemoryEntry

@@ -59,14 +59,17 @@ def sanitize_terminal_input(text: str) -> str:
 
     return text.strip()
 
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
+try:
+    from telegram import Update
+    from telegram.ext import (
+        Application,
+        CommandHandler,
+        MessageHandler,
+        filters,
+        ContextTypes,
+    )
+except ImportError:
+    Update = None
 
 from synthia.config import load_config
 from synthia.assistant import Assistant
