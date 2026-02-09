@@ -6,6 +6,7 @@ import "./App.css";
 function DatePicker({ value, onChange }: { value: string; onChange: (val: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLDivElement>(null);
   const today = new Date();
   const selected = value ? new Date(value + "T00:00:00") : null;
   const [viewYear, setViewYear] = useState(selected?.getFullYear() ?? today.getFullYear());
@@ -14,10 +15,21 @@ function DatePicker({ value, onChange }: { value: string; onChange: (val: string
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // Don't close if clicking the input itself or the dropdown
+      if (ref.current && !ref.current.contains(target) &&
+          inputRef.current && !inputRef.current.contains(target)) {
+        setOpen(false);
+      }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    // Use a small delay to avoid race conditions with the click that opened the dropdown
+    const timeoutId = setTimeout(() => {
+      document.addEventListener("mousedown", handler);
+    }, 10);
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener("mousedown", handler);
+    };
   }, [open]);
 
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
@@ -42,8 +54,8 @@ function DatePicker({ value, onChange }: { value: string; onChange: (val: string
     : "";
 
   return (
-    <div className="date-picker" ref={ref}>
-      <div className="date-picker-input" onClick={() => setOpen(!open)}>
+    <div className="date-picker">
+      <div className="date-picker-input" ref={inputRef} onClick={() => setOpen(!open)}>
         <span className={displayValue ? "date-picker-value" : "date-picker-placeholder"}>
           {displayValue || "Select date..."}
         </span>
@@ -52,7 +64,7 @@ function DatePicker({ value, onChange }: { value: string; onChange: (val: string
         )}
       </div>
       {open && (
-        <div className="date-picker-dropdown">
+        <div className="date-picker-dropdown" ref={ref}>
           <div className="date-picker-header">
             <button onClick={prevMonth}>&lsaquo;</button>
             <span>{monthNames[viewMonth]} {viewYear}</span>
