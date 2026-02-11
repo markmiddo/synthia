@@ -1057,19 +1057,51 @@
   letter-spacing: 0.5px;
 }
 
-.usage-row {
+.usage-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.usage-bar {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease, background 0.4s ease;
+  min-width: 2px;
+}
+
+.usage-pct {
+  font-size: 0.75rem;
+  color: #e2e8f0;
+  font-weight: 600;
+  min-width: 2.2rem;
+  text-align: right;
+}
+
+.usage-details {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.85rem;
-  color: #94a3b8;
-  padding: 0.35rem 0;
 }
 
-.usage-value {
-  color: #e2e8f0;
-  font-weight: 600;
-  font-size: 0.9rem;
+.usage-tokens {
+  font-size: 0.7rem;
+  color: #64748b;
+}
+
+.usage-reset {
+  font-size: 0.65rem;
+  color: #475569;
+  font-style: italic;
 }
 
 .main-content {
@@ -1707,6 +1739,22 @@
   color: #22c55e;
 }
 
+.notes-delete-btn {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  color: #ef4444;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.notes-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
 .notes-editor {
   flex: 1;
   width: 100%;
@@ -2029,11 +2077,66 @@
 .task-tag {
   font-size: 0.65rem;
   padding: 0.15rem 0.4rem;
-  background: rgba(6, 182, 212, 0.1);
   border-radius: 4px;
-  color: #06b6d4;
 }
 
+/* Tag Input */
+.tag-input-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+  background: rgba(6, 182, 212, 0.05);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  border-radius: 8px;
+  min-height: 38px;
+  align-items: center;
+  cursor: text;
+}
+
+.tag-input-container:focus-within {
+  border-color: rgba(6, 182, 212, 0.5);
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.tag-chip-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 1px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.tag-chip-remove:hover {
+  opacity: 1;
+}
+
+.tag-input-field {
+  flex: 1;
+  min-width: 60px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  padding: 2px 0;
+}
+
+.tag-input-field::placeholder {
+  color: #475569;
+}
 
 /* Task Modal */
 .task-modal {
@@ -2129,138 +2232,186 @@
   flex: 1;
 }
 
-/* Custom Date Picker */
-.date-picker {
+/* Date Picker */
+.datepicker-wrapper {
   position: relative;
+  width: 100%;
 }
 
-.date-picker-input {
+.datepicker-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   padding: 0.6rem 0.75rem;
   background: rgba(10, 11, 20, 0.8);
   border: 1px solid rgba(6, 182, 212, 0.2);
   border-radius: 6px;
-  cursor: pointer;
   font-size: 0.85rem;
+  color: #e2e8f0;
+  cursor: pointer;
   transition: border-color 0.15s ease;
+  text-align: left;
+  font-family: inherit;
 }
 
-.date-picker-input:hover {
+.datepicker-trigger:hover {
   border-color: rgba(6, 182, 212, 0.4);
 }
 
-.date-picker-value {
+.datepicker-placeholder {
+  color: rgba(148, 163, 184, 0.5);
+}
+
+.datepicker-value {
   color: #e2e8f0;
 }
 
-.date-picker-placeholder {
-  color: #64748b;
+.datepicker-icon {
+  font-size: 0.6rem;
+  color: rgba(6, 182, 212, 0.5);
+  margin-left: 0.5rem;
 }
 
-.date-picker-clear {
-  color: #64748b;
-  font-size: 1rem;
-  line-height: 1;
-  padding: 0 0.25rem;
+.datepicker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
 }
 
-.date-picker-clear:hover {
-  color: #ef4444;
-}
-
-.date-picker-dropdown {
+.datepicker-dropdown {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   z-index: 100;
-  background: rgba(15, 17, 27, 0.98);
+  background: rgba(10, 11, 20, 0.97);
   border: 1px solid rgba(6, 182, 212, 0.25);
   border-radius: 8px;
   padding: 0.75rem;
-  width: 240px;
+  min-width: 260px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-.date-picker-header {
+.datepicker-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 0.5rem;
 }
 
-.date-picker-header span {
-  font-size: 0.8rem;
+.datepicker-nav {
+  background: none;
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  border-radius: 4px;
+  color: rgba(6, 182, 212, 0.8);
+  font-size: 1.1rem;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  font-family: inherit;
+  padding: 0;
+  line-height: 1;
+}
+
+.datepicker-nav:hover {
+  background: rgba(6, 182, 212, 0.1);
+  border-color: rgba(6, 182, 212, 0.4);
+}
+
+.datepicker-month-label {
+  font-size: 0.85rem;
   font-weight: 600;
   color: #e2e8f0;
 }
 
-.date-picker-header button {
-  background: none;
-  border: none;
-  color: #06b6d4;
-  font-size: 1.1rem;
-  cursor: pointer;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  line-height: 1;
-}
-
-.date-picker-header button:hover {
-  background: rgba(6, 182, 212, 0.15);
-}
-
-.date-picker-weekdays {
+.datepicker-weekdays {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.datepicker-weekday {
   text-align: center;
-  margin-bottom: 0.25rem;
+  font-size: 0.7rem;
+  color: rgba(148, 163, 184, 0.5);
+  font-weight: 600;
+  padding: 2px 0;
+  text-transform: uppercase;
 }
 
-.date-picker-weekdays span {
-  font-size: 0.65rem;
-  color: #64748b;
-  padding: 0.2rem 0;
-}
-
-.date-picker-days {
+.datepicker-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
 }
 
-.date-picker-empty {
+.datepicker-empty {
   aspect-ratio: 1;
 }
 
-.date-picker-day {
+.datepicker-day {
   aspect-ratio: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
-  color: #94a3b8;
   background: none;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 4px;
+  color: #cbd5e1;
+  font-size: 0.8rem;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+  font-family: inherit;
+  padding: 0;
+  min-width: 32px;
+  min-height: 32px;
 }
 
-.date-picker-day:hover {
-  background: rgba(6, 182, 212, 0.15);
-  color: #e2e8f0;
+.datepicker-day:hover {
+  background: rgba(6, 182, 212, 0.12);
+  border-color: rgba(6, 182, 212, 0.3);
 }
 
-.date-picker-day.today {
+.datepicker-day.today {
+  border-color: rgba(6, 182, 212, 0.4);
+  color: rgba(6, 182, 212, 0.9);
+}
+
+.datepicker-day.selected {
+  background: rgba(6, 182, 212, 0.25);
+  border-color: rgba(6, 182, 212, 0.6);
   color: #06b6d4;
   font-weight: 600;
 }
 
-.date-picker-day.selected {
-  background: rgba(6, 182, 212, 0.3);
-  color: #06b6d4;
-  font-weight: 600;
+.datepicker-footer {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(6, 182, 212, 0.1);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.datepicker-clear {
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  color: rgba(239, 68, 68, 0.8);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  font-family: inherit;
+}
+
+.datepicker-clear:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.5);
 }
 
 .task-modal-footer {

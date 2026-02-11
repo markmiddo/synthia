@@ -1,98 +1,189 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Markdown from "react-markdown";
 import "./App.css";
 
 function DatePicker({ value, onChange }: { value: string; onChange: (val: string) => void }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLDivElement>(null);
+  const [viewDate, setViewDate] = useState(() => {
+    if (value) {
+      const [y, m] = value.split("-").map(Number);
+      return { year: y, month: m - 1 };
+    }
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+
   const today = new Date();
-  const selected = value ? new Date(value + "T00:00:00") : null;
-  const [viewYear, setViewYear] = useState(selected?.getFullYear() ?? today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(selected?.getMonth() ?? today.getMonth());
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      // Don't close if clicking the input itself or the dropdown
-      if (ref.current && !ref.current.contains(target) &&
-          inputRef.current && !inputRef.current.contains(target)) {
-        setOpen(false);
-      }
-    };
-    // Use a small delay to avoid race conditions with the click that opened the dropdown
-    const timeoutId = setTimeout(() => {
-      document.addEventListener("mousedown", handler);
-    }, 10);
-    return () => {
-      clearTimeout(timeoutId);
-      document.removeEventListener("mousedown", handler);
-    };
-  }, [open]);
+  const daysInMonth = new Date(viewDate.year, viewDate.month + 1, 0).getDate();
+  const firstDayOfWeek = new Date(viewDate.year, viewDate.month, 1).getDay();
 
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  const fmt = (y: number, m: number, d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
-  const todayStr = fmt(today.getFullYear(), today.getMonth(), today.getDate());
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
 
   const prevMonth = () => {
-    if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); }
-    else setViewMonth(viewMonth - 1);
-  };
-  const nextMonth = () => {
-    if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); }
-    else setViewMonth(viewMonth + 1);
+    setViewDate((v) => v.month === 0
+      ? { year: v.year - 1, month: 11 }
+      : { year: v.year, month: v.month - 1 });
   };
 
-  const displayValue = selected
-    ? `${selected.getDate()} ${monthNames[selected.getMonth()]} ${selected.getFullYear()}`
-    : "";
+  const nextMonth = () => {
+    setViewDate((v) => v.month === 11
+      ? { year: v.year + 1, month: 0 }
+      : { year: v.year, month: v.month + 1 });
+  };
+
+  const selectDay = (day: number) => {
+    const dateStr = `${viewDate.year}-${String(viewDate.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    onChange(dateStr);
+    setOpen(false);
+  };
+
+  const handleToggle = () => {
+    if (!open && value) {
+      const [y, m] = value.split("-").map(Number);
+      setViewDate({ year: y, month: m - 1 });
+    }
+    setOpen(!open);
+  };
+
+  const formatDisplay = (val: string) => {
+    if (!val) return "";
+    const [y, m, d] = val.split("-").map(Number);
+    return `${monthNames[m - 1]} ${d}, ${y}`;
+  };
+
+  const days: (number | null)[] = [];
+  for (let i = 0; i < firstDayOfWeek; i++) days.push(null);
+  for (let d = 1; d <= daysInMonth; d++) days.push(d);
 
   return (
-    <div className="date-picker">
-      <div className="date-picker-input" ref={inputRef} onClick={() => setOpen(!open)}>
-        <span className={displayValue ? "date-picker-value" : "date-picker-placeholder"}>
-          {displayValue || "Select date..."}
+    <div className="datepicker-wrapper">
+      <button type="button" className="datepicker-trigger" onClick={handleToggle}>
+        <span className={value ? "datepicker-value" : "datepicker-placeholder"}>
+          {value ? formatDisplay(value) : "Select date..."}
         </span>
-        {value && (
-          <span className="date-picker-clear" onClick={(e) => { e.stopPropagation(); onChange(""); }}>×</span>
-        )}
-      </div>
+        <span className="datepicker-icon">&#x25BC;</span>
+      </button>
       {open && (
-        <div className="date-picker-dropdown" ref={ref}>
-          <div className="date-picker-header">
-            <button onClick={prevMonth}>&lsaquo;</button>
-            <span>{monthNames[viewMonth]} {viewYear}</span>
-            <button onClick={nextMonth}>&rsaquo;</button>
-          </div>
-          <div className="date-picker-weekdays">
-            {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(d => <span key={d}>{d}</span>)}
-          </div>
-          <div className="date-picker-days">
-            {Array.from({ length: firstDay }, (_, i) => <span key={`e${i}`} className="date-picker-empty" />)}
-            {Array.from({ length: daysInMonth }, (_, i) => {
-              const day = i + 1;
-              const dateStr = fmt(viewYear, viewMonth, day);
-              const isSelected = dateStr === value;
-              const isToday = dateStr === todayStr;
-              return (
+        <>
+          <div className="datepicker-backdrop" onClick={() => setOpen(false)} />
+          <div className="datepicker-dropdown">
+            <div className="datepicker-header">
+              <button type="button" className="datepicker-nav" onClick={prevMonth}>&lsaquo;</button>
+              <span className="datepicker-month-label">
+                {monthNames[viewDate.month]} {viewDate.year}
+              </span>
+              <button type="button" className="datepicker-nav" onClick={nextMonth}>&rsaquo;</button>
+            </div>
+            <div className="datepicker-weekdays">
+              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                <span key={d} className="datepicker-weekday">{d}</span>
+              ))}
+            </div>
+            <div className="datepicker-grid">
+              {days.map((day, i) => {
+                if (day === null) return <span key={`empty-${i}`} className="datepicker-empty" />;
+                const dateStr = `${viewDate.year}-${String(viewDate.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                const isSelected = dateStr === value;
+                const isToday = dateStr === todayStr;
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    className={`datepicker-day${isSelected ? " selected" : ""}${isToday ? " today" : ""}`}
+                    onClick={() => selectDay(day)}
+                  >
+                    {day}
+                  </button>
+                );
+              })}
+            </div>
+            {value && (
+              <div className="datepicker-footer">
                 <button
-                  key={day}
-                  className={`date-picker-day${isSelected ? " selected" : ""}${isToday ? " today" : ""}`}
-                  onClick={() => { onChange(dateStr); setOpen(false); }}
+                  type="button"
+                  className="datepicker-clear"
+                  onClick={() => { onChange(""); setOpen(false); }}
                 >
-                  {day}
+                  Clear
                 </button>
-              );
-            })}
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
+    </div>
+  );
+}
+
+const TAG_COLORS = [
+  { bg: "rgba(6, 182, 212, 0.15)", text: "#06b6d4" },   // Cyan
+  { bg: "rgba(168, 85, 247, 0.15)", text: "#a855f7" },   // Purple
+  { bg: "rgba(34, 197, 94, 0.15)", text: "#22c55e" },    // Green
+  { bg: "rgba(249, 115, 22, 0.15)", text: "#f97316" },   // Orange
+  { bg: "rgba(236, 72, 153, 0.15)", text: "#ec4899" },   // Pink
+  { bg: "rgba(59, 130, 246, 0.15)", text: "#3b82f6" },   // Blue
+  { bg: "rgba(234, 179, 8, 0.15)", text: "#eab308" },    // Yellow
+  { bg: "rgba(239, 68, 68, 0.15)", text: "#ef4444" },    // Red
+];
+
+function getTagColor(tag: string) {
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = ((hash << 5) - hash + tag.charCodeAt(i)) | 0;
+  }
+  return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
+}
+
+function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+  const [input, setInput] = useState("");
+
+  const addTag = (val: string) => {
+    const trimmed = val.trim();
+    if (trimmed && !tags.includes(trimmed)) {
+      onChange([...tags, trimmed]);
+    }
+    setInput("");
+  };
+
+  const removeTag = (index: number) => {
+    onChange(tags.filter((_, i) => i !== index));
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addTag(input);
+    } else if (e.key === "Backspace" && !input && tags.length > 0) {
+      removeTag(tags.length - 1);
+    }
+  };
+
+  return (
+    <div className="tag-input-container">
+      {tags.map((tag, i) => {
+        const color = getTagColor(tag);
+        return (
+          <span key={tag} className="tag-chip" style={{ background: color.bg, color: color.text }}>
+            {tag}
+            <button type="button" className="tag-chip-remove" style={{ color: color.text }} onClick={() => removeTag(i)}>
+              &times;
+            </button>
+          </span>
+        );
+      })}
+      <input
+        type="text"
+        className="tag-input-field"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={() => { if (input.trim()) addTag(input); }}
+        placeholder={tags.length === 0 ? "Add tags..." : ""}
+      />
     </div>
   );
 }
@@ -280,19 +371,21 @@ function App() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDesc, setNewTaskDesc] = useState("");
-  const [newTaskTags, setNewTaskTags] = useState("");
+  const [newTaskTags, setNewTaskTags] = useState<string[]>([]);
   const [newTaskDue, setNewTaskDue] = useState("");
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
 
   // Usage stats state
   const [usageStats, setUsageStats] = useState<{
-    today_messages: number;
-    today_tokens: number;
-    today_sessions: number;
-    week_messages: number;
+    session_tokens: number;
+    session_pct: number;
+    session_resets_at: string;
     week_tokens: number;
-    week_sessions: number;
+    week_pct: number;
+    week_resets_at: string;
+    sonnet_week_tokens: number;
+    sonnet_week_pct: number;
     subscription_type: string;
   } | null>(null);
 
@@ -526,7 +619,7 @@ function App() {
       setSelectedNote(path);
       setNoteContent(content);
       setNoteEditing(true);
-      setNotePreview(true);
+      setNotePreview(false);
     } catch (e) {
       setError(String(e));
     }
@@ -554,6 +647,19 @@ function App() {
     setNotePreview(false);
     // Refresh the notes list to show any new or updated notes
     loadNotes(notesPath.join("/"));
+  }
+
+  async function handleDeleteNote(path: string) {
+    try {
+      await invoke("delete_note", { path });
+      if (selectedNote === path) {
+        handleCloseNote();
+      } else {
+        loadNotes(notesPath.join("/"));
+      }
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   async function handleRenameNote() {
@@ -653,12 +759,12 @@ function App() {
       await invoke("add_task", {
         title: newTaskTitle,
         description: newTaskDesc || null,
-        tags: newTaskTags.split(",").map(t => t.trim()).filter(Boolean),
+        tags: newTaskTags,
         dueDate: newTaskDue || null,
       });
       setNewTaskTitle("");
       setNewTaskDesc("");
-      setNewTaskTags("");
+      setNewTaskTags([]);
       setNewTaskDue("");
       setShowAddTask(false);
       loadTasks();
@@ -1004,6 +1110,12 @@ function App() {
     return n.toString();
   }
 
+  function usageBarColor(pct: number): string {
+    if (pct >= 80) return "#ef4444";
+    if (pct >= 50) return "#eab308";
+    return "#06b6d4";
+  }
+
   function renderSidebar() {
     return (
       <div className="sidebar">
@@ -1064,25 +1176,57 @@ function App() {
               )}
             </div>
             <div className="usage-section">
-              <div className="usage-label">Today</div>
-              <div className="usage-row">
-                <span>Messages</span>
-                <span className="usage-value">{usageStats.today_messages}</span>
+              <div className="usage-label">Current session</div>
+              <div className="usage-bar-row">
+                <div className="usage-bar">
+                  <div
+                    className="usage-bar-fill"
+                    style={{ width: `${usageStats.session_pct}%`, background: usageBarColor(usageStats.session_pct) }}
+                  />
+                </div>
+                <span className="usage-pct">{Math.round(usageStats.session_pct)}%</span>
               </div>
-              <div className="usage-row">
-                <span>Tokens</span>
-                <span className="usage-value">{formatTokens(usageStats.today_tokens)}</span>
+              <div className="usage-details">
+                <span className="usage-tokens">{formatTokens(usageStats.session_tokens)} tokens</span>
+                {usageStats.session_resets_at && (
+                  <span className="usage-reset">Resets {usageStats.session_resets_at}</span>
+                )}
               </div>
             </div>
             <div className="usage-section">
-              <div className="usage-label">This Week</div>
-              <div className="usage-row">
-                <span>Messages</span>
-                <span className="usage-value">{formatTokens(usageStats.week_messages)}</span>
+              <div className="usage-label">Current week</div>
+              <div className="usage-bar-row">
+                <div className="usage-bar">
+                  <div
+                    className="usage-bar-fill"
+                    style={{ width: `${usageStats.week_pct}%`, background: usageBarColor(usageStats.week_pct) }}
+                  />
+                </div>
+                <span className="usage-pct">{Math.round(usageStats.week_pct)}%</span>
               </div>
-              <div className="usage-row">
-                <span>Tokens</span>
-                <span className="usage-value">{formatTokens(usageStats.week_tokens)}</span>
+              <div className="usage-details">
+                <span className="usage-tokens">{formatTokens(usageStats.week_tokens)} tokens</span>
+                {usageStats.week_resets_at && (
+                  <span className="usage-reset">Resets {usageStats.week_resets_at}</span>
+                )}
+              </div>
+            </div>
+            <div className="usage-section">
+              <div className="usage-label">Sonnet (weekly)</div>
+              <div className="usage-bar-row">
+                <div className="usage-bar">
+                  <div
+                    className="usage-bar-fill"
+                    style={{ width: `${usageStats.sonnet_week_pct}%`, background: usageBarColor(usageStats.sonnet_week_pct) }}
+                  />
+                </div>
+                <span className="usage-pct">{Math.round(usageStats.sonnet_week_pct)}%</span>
+              </div>
+              <div className="usage-details">
+                <span className="usage-tokens">{formatTokens(usageStats.sonnet_week_tokens)} tokens</span>
+                {usageStats.week_resets_at && (
+                  <span className="usage-reset">Resets {usageStats.week_resets_at}</span>
+                )}
               </div>
             </div>
           </div>
@@ -2273,9 +2417,12 @@ function App() {
                 {formatDate(task.due_date)}
               </span>
             )}
-            {task.tags.map(tag => (
-              <span key={tag} className="task-tag">{tag}</span>
-            ))}
+            {task.tags.map(tag => {
+              const color = getTagColor(tag);
+              return (
+                <span key={tag} className="task-tag" style={{ background: color.bg, color: color.text }}>{tag}</span>
+              );
+            })}
           </div>
         </div>
       );
@@ -2286,7 +2433,7 @@ function App() {
       const isEditing = !!editingTask;
       const title = isEditing ? editingTask.title : newTaskTitle;
       const desc = isEditing ? (editingTask.description || "") : newTaskDesc;
-      const tags = isEditing ? editingTask.tags.join(", ") : newTaskTags;
+      const tags = isEditing ? editingTask.tags : newTaskTags;
       const due = isEditing ? (editingTask.due_date || "") : newTaskDue;
 
       return (
@@ -2325,12 +2472,10 @@ function App() {
                   />
                 </div>
                 <div className="task-field">
-                  <label>Tags (comma-separated)</label>
-                  <input
-                    type="text"
-                    value={tags}
-                    onChange={(e) => isEditing ? setEditingTask({ ...editingTask, tags: e.target.value.split(",").map(t => t.trim()).filter(Boolean) }) : setNewTaskTags(e.target.value)}
-                    placeholder="work, urgent"
+                  <label>Tags</label>
+                  <TagInput
+                    tags={tags}
+                    onChange={(t) => isEditing ? setEditingTask({ ...editingTask, tags: t }) : setNewTaskTags(t)}
                   />
                 </div>
               </div>
@@ -2487,6 +2632,12 @@ function App() {
                 disabled={noteSaving}
               >
                 {noteSaving ? "Saving..." : noteSaved ? "Saved!" : "Save"}
+              </button>
+              <button
+                className="notes-delete-btn"
+                onClick={() => { if (confirm("Delete this note?")) handleDeleteNote(selectedNote); }}
+              >
+                Delete
               </button>
             </div>
           </div>
