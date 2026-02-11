@@ -33,6 +33,13 @@ fn get_synthia_root() -> PathBuf {
     if let Ok(root) = std::env::var("SYNTHIA_ROOT") {
         return PathBuf::from(root);
     }
+    // Fallback: check the known development path
+    let dev_path = PathBuf::from(
+        std::env::var("HOME").unwrap_or_default()
+    ).join("dev/misc/synthia");
+    if dev_path.join("run.sh").exists() {
+        return dev_path;
+    }
     // Last resort: current directory
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
@@ -852,8 +859,15 @@ fn start_synthia() -> Result<String, String> {
     }
 
     let root = get_synthia_root();
+    let log_path = root.join("synthia.log");
+    let log_file = std::fs::File::create(&log_path)
+        .map_err(|e| format!("Failed to create log file: {}", e))?;
+    let stderr_file = log_file.try_clone()
+        .map_err(|e| format!("Failed to clone log file: {}", e))?;
     let child = Command::new(root.join("run.sh"))
         .current_dir(&root)
+        .stdout(std::process::Stdio::from(log_file))
+        .stderr(std::process::Stdio::from(stderr_file))
         .spawn()
         .map_err(|e| format!("Failed to start: {}", e))?;
 
@@ -2034,38 +2048,21 @@ fn move_task(id: String, status: String) -> Result<Task, String> {
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 struct UsageStats {
-    today_messages: u64,
-    today_tokens: u64,
-    today_sessions: u64,
-    week_messages: u64,
+    session_tokens: u64,
+    session_pct: f64,
+    session_resets_at: String,
     week_tokens: u64,
-    week_sessions: u64,
+    week_pct: f64,
+    week_resets_at: String,
+    sonnet_week_tokens: u64,
+    sonnet_week_pct: f64,
     subscription_type: String,
 }
 
-#[derive(Deserialize, Debug)]
-struct DailyActivity {
-    date: String,
-    #[serde(rename = "messageCount")]
-    message_count: u64,
-    #[serde(rename = "sessionCount")]
-    session_count: u64,
-}
-
-#[derive(Deserialize, Debug)]
-struct DailyModelTokens {
-    date: String,
-    #[serde(rename = "tokensByModel")]
-    tokens_by_model: std::collections::HashMap<String, u64>,
-}
-
-#[derive(Deserialize, Debug)]
-struct StatsCache {
-    #[serde(rename = "dailyActivity")]
-    daily_activity: Option<Vec<DailyActivity>>,
-    #[serde(rename = "dailyModelTokens")]
-    daily_model_tokens: Option<Vec<DailyModelTokens>>,
-}
+// Estimated limits for Claude Max subscription
+const SESSION_LIMIT: u64 = 800_000;    // ~800K output tokens per 5h session
+const WEEKLY_LIMIT: u64 = 4_000_000;   // ~4M output tokens per week
+const SONNET_WEEKLY_LIMIT: u64 = 8_000_000; // ~8M Sonnet tokens per week
 
 #[derive(Deserialize, Debug)]
 struct Credentials {
@@ -2082,20 +2079,12 @@ struct CredentialsOAuth {
 #[tauri::command]
 fn get_usage_stats() -> UsageStats {
     let claude_dir = get_claude_dir();
-    let stats_file = claude_dir.join("stats-cache.json");
     let creds_file = claude_dir.join(".credentials.json");
     let projects_dir = claude_dir.join("projects");
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let today_start = chrono::Local::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .unwrap();
-
-    // Calculate the date 7 days ago
-    let week_ago = (chrono::Local::now() - chrono::Duration::days(7))
-        .format("%Y-%m-%d")
-        .to_string();
+    let now = chrono::Local::now();
+    let session_cutoff = now - chrono::Duration::hours(5);
+    let week_cutoff = now - chrono::Duration::days(7);
 
     let mut stats = UsageStats::default();
 
@@ -2108,40 +2097,17 @@ fn get_usage_stats() -> UsageStats {
         }
     }
 
-    // Get cached stats for weekly totals
-    if let Ok(content) = fs::read_to_string(&stats_file) {
-        if let Ok(cache) = serde_json::from_str::<StatsCache>(&content) {
-            // Process daily activity for weekly totals
-            if let Some(activities) = cache.daily_activity {
-                for activity in &activities {
-                    if activity.date >= week_ago && activity.date != today {
-                        stats.week_messages += activity.message_count;
-                        stats.week_sessions += activity.session_count;
-                    }
-                }
-            }
+    // Track oldest message timestamp in the session window for reset calculation
+    let mut oldest_session_ts: Option<chrono::DateTime<chrono::Local>> = None;
 
-            // Process token usage for weekly totals
-            if let Some(tokens) = cache.daily_model_tokens {
-                for day in &tokens {
-                    let day_total: u64 = day.tokens_by_model.values().sum();
-                    if day.date >= week_ago && day.date != today {
-                        stats.week_tokens += day_total;
-                    }
-                }
-            }
-        }
-    }
-
-    // Calculate today's stats from actual session files
+    // Scan JSONL files for token usage
     if projects_dir.exists() {
-        let today_start_time = std::time::SystemTime::from(
+        let week_cutoff_systime = std::time::SystemTime::from(
             std::time::UNIX_EPOCH + std::time::Duration::from_secs(
-                today_start.and_utc().timestamp() as u64
+                week_cutoff.timestamp() as u64
             )
         );
 
-        // Walk through all project directories
         if let Ok(project_entries) = fs::read_dir(&projects_dir) {
             for project_entry in project_entries.flatten() {
                 let project_path = project_entry.path();
@@ -2149,35 +2115,82 @@ fn get_usage_stats() -> UsageStats {
                     continue;
                 }
 
-                // Session files are directly in project folder as UUID.jsonl
                 if let Ok(session_entries) = fs::read_dir(&project_path) {
                     for session_entry in session_entries.flatten() {
                         let session_path = session_entry.path();
 
-                        // Only process .jsonl files (not directories)
                         if session_path.is_file() {
                             if let Some(ext) = session_path.extension() {
                                 if ext == "jsonl" {
+                                    // Skip files not modified in the last 7 days
                                     if let Ok(metadata) = session_path.metadata() {
                                         if let Ok(modified) = metadata.modified() {
-                                            if modified >= today_start_time {
-                                                // Parse this file for today's usage
-                                                if let Ok(content) = fs::read_to_string(&session_path) {
-                                                    for line in content.lines() {
-                                                        if let Ok(data) = serde_json::from_str::<serde_json::Value>(line) {
-                                                            // Count assistant messages and extract usage
-                                                            if data.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-                                                                if let Some(msg) = data.get("message") {
-                                                                    stats.today_messages += 1;
-                                                                    if let Some(usage) = msg.get("usage") {
-                                                                        let output = usage.get("output_tokens")
-                                                                            .and_then(|v| v.as_u64())
-                                                                            .unwrap_or(0);
-                                                                        stats.today_tokens += output;
-                                                                    }
-                                                                }
-                                                            }
+                                            if modified < week_cutoff_systime {
+                                                continue;
+                                            }
+                                        }
+                                    }
+
+                                    if let Ok(content) = fs::read_to_string(&session_path) {
+                                        for line in content.lines() {
+                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(line) {
+                                                if data.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+                                                    continue;
+                                                }
+
+                                                // Parse timestamp
+                                                let ts_str = match data.get("timestamp").and_then(|t| t.as_str()) {
+                                                    Some(s) => s,
+                                                    None => continue,
+                                                };
+
+                                                let msg_time = match chrono::DateTime::parse_from_rfc3339(ts_str) {
+                                                    Ok(t) => t.with_timezone(&chrono::Local),
+                                                    Err(_) => continue,
+                                                };
+
+                                                // Skip messages older than 7 days
+                                                if msg_time < week_cutoff {
+                                                    continue;
+                                                }
+
+                                                // Extract output tokens
+                                                let output_tokens = data.get("message")
+                                                    .and_then(|m| m.get("usage"))
+                                                    .and_then(|u| u.get("output_tokens"))
+                                                    .and_then(|v| v.as_u64())
+                                                    .unwrap_or(0);
+
+                                                if output_tokens == 0 {
+                                                    continue;
+                                                }
+
+                                                // Check if Sonnet model
+                                                let model = data.get("message")
+                                                    .and_then(|m| m.get("model"))
+                                                    .and_then(|m| m.as_str())
+                                                    .unwrap_or("");
+                                                let is_sonnet = model.contains("sonnet");
+
+                                                // Weekly totals (all models)
+                                                stats.week_tokens += output_tokens;
+
+                                                // Sonnet weekly
+                                                if is_sonnet {
+                                                    stats.sonnet_week_tokens += output_tokens;
+                                                }
+
+                                                // Session window (last 5 hours)
+                                                if msg_time >= session_cutoff {
+                                                    stats.session_tokens += output_tokens;
+                                                    match oldest_session_ts {
+                                                        Some(existing) if msg_time < existing => {
+                                                            oldest_session_ts = Some(msg_time);
                                                         }
+                                                        None => {
+                                                            oldest_session_ts = Some(msg_time);
+                                                        }
+                                                        _ => {}
                                                     }
                                                 }
                                             }
@@ -2192,9 +2205,30 @@ fn get_usage_stats() -> UsageStats {
         }
     }
 
-    // Add today's stats to weekly totals
-    stats.week_messages += stats.today_messages;
-    stats.week_tokens += stats.today_tokens;
+    // Calculate percentages
+    stats.session_pct = ((stats.session_tokens as f64 / SESSION_LIMIT as f64) * 100.0).min(100.0);
+    stats.week_pct = ((stats.week_tokens as f64 / WEEKLY_LIMIT as f64) * 100.0).min(100.0);
+    stats.sonnet_week_pct = ((stats.sonnet_week_tokens as f64 / SONNET_WEEKLY_LIMIT as f64) * 100.0).min(100.0);
+
+    // Calculate reset times
+    // Session resets 5h from oldest message in the window (or "now" if no messages)
+    let session_reset = match oldest_session_ts {
+        Some(oldest) => oldest + chrono::Duration::hours(5),
+        None => now,
+    };
+    stats.session_resets_at = if stats.session_tokens == 0 {
+        String::new()
+    } else {
+        session_reset.format("%-I:%M %p").to_string()
+    };
+
+    // Weekly resets 7 days from now (rolling window)
+    let week_reset = now + chrono::Duration::days(1);
+    stats.week_resets_at = if stats.week_tokens == 0 {
+        String::new()
+    } else {
+        week_reset.format("%a, %-I:%M %p").to_string()
+    };
 
     stats
 }
@@ -2326,6 +2360,25 @@ fn rename_note(old_path: String, new_path: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to rename file: {}", e))?;
 
     Ok(new_path)
+}
+
+#[tauri::command]
+fn delete_note(path: String) -> Result<String, String> {
+    let base = get_notes_base_path();
+    let full_path = base.join(&path);
+
+    if !full_path.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+
+    if !full_path.exists() {
+        return Err("File not found".to_string());
+    }
+
+    fs::remove_file(&full_path)
+        .map_err(|e| format!("Failed to delete file: {}", e))?;
+
+    Ok("Note deleted".to_string())
 }
 
 #[tauri::command]
@@ -2542,6 +2595,7 @@ pub fn run() {
             read_note,
             save_note,
             rename_note,
+            delete_note,
             get_usage_stats,
             list_tasks,
             add_task,

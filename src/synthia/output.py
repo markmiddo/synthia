@@ -44,6 +44,69 @@ def _get_wezterm_cmd() -> list[str] | None:
     return _WEZTERM_CMD if _WEZTERM_CMD else None
 
 
+def _get_focused_window_class() -> str | None:
+    """Get the app_id/class of the currently focused window."""
+    if is_wayland():
+        try:
+            # swaymsg works on Sway; for GNOME/KDE try gdbus or similar
+            result = subprocess.run(
+                ["swaymsg", "-t", "get_tree"],
+                capture_output=True,
+                timeout=2,
+            )
+            if result.returncode == 0:
+                import json
+
+                tree = json.loads(result.stdout)
+                focused = _find_focused_node(tree)
+                if focused:
+                    app_id: str = focused.get("app_id") or focused.get("window_properties", {}).get(
+                        "class", ""
+                    )
+                    return app_id
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        # Fallback: use wlrctl or hyprctl if available
+        try:
+            hypr_result = subprocess.run(
+                ["hyprctl", "activewindow", "-j"],
+                capture_output=True,
+                timeout=2,
+            )
+            if hypr_result.returncode == 0:
+                import json
+
+                data = json.loads(hypr_result.stdout)
+                cls: str = data.get("class", "")
+                return cls
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    else:
+        try:
+            x11_result = subprocess.run(
+                ["xdotool", "getactivewindow", "getwindowclassname"],
+                capture_output=True,
+                timeout=2,
+                text=True,
+            )
+            if x11_result.returncode == 0:
+                return x11_result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    return None
+
+
+def _find_focused_node(node: dict) -> dict | None:
+    """Recursively find the focused node in a sway tree."""
+    if node.get("focused"):
+        return node
+    for child in node.get("nodes", []) + node.get("floating_nodes", []):
+        result = _find_focused_node(child)
+        if result:
+            return result
+    return None
+
+
 def type_text(text: str) -> bool:
     """Type text at the current cursor position.
 
@@ -86,13 +149,10 @@ def _type_with_wezterm_cli(text: str) -> bool:
         return False
 
     try:
-        # Get the focused pane - if this fails, Wezterm isn't active
-        result = subprocess.run(
-            [*cmd, "cli", "get-pane-direction", "Next"],
-            capture_output=True,
-            timeout=2,
-        )
-        # Even if get-pane-direction fails, send-text to the active pane works
+        # Only use wezterm CLI if we can confirm Wezterm is focused
+        focused = _get_focused_window_class()
+        if focused is None or "wezterm" not in focused.lower():
+            return False
 
         subprocess.run(
             [*cmd, "cli", "send-text", "--no-paste", text],

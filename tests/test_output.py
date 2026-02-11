@@ -194,14 +194,14 @@ class TestTypeWithWeztermCli:
     def test_calls_wezterm_send_text_with_text(self, monkeypatch):
         """Calls wezterm cli send-text with the provided text."""
         monkeypatch.setattr(output, "_get_wezterm_cmd", lambda: ["wezterm"])
+        monkeypatch.setattr(output, "_get_focused_window_class", lambda: "org.wezfurlong.wezterm")
         mock_run = Mock(return_value=Mock(returncode=0))
         monkeypatch.setattr("subprocess.run", mock_run)
 
         result = _type_with_wezterm_cli("hello world")
 
-        # Should call get-pane-direction and send-text
-        assert mock_run.call_count == 2
-        send_text_call = mock_run.call_args_list[1]
+        assert mock_run.call_count == 1
+        send_text_call = mock_run.call_args_list[0]
         assert "send-text" in send_text_call[0][0]
         assert "hello world" in send_text_call[0][0]
         assert result is True
@@ -211,6 +211,7 @@ class TestTypeWithWeztermCli:
         monkeypatch.setattr(
             output, "_get_wezterm_cmd", lambda: ["flatpak", "run", "org.wezfurlong.wezterm"]
         )
+        monkeypatch.setattr(output, "_get_focused_window_class", lambda: "org.wezfurlong.wezterm")
         mock_run = Mock(return_value=Mock(returncode=0))
         monkeypatch.setattr("subprocess.run", mock_run)
 
@@ -223,6 +224,7 @@ class TestTypeWithWeztermCli:
     def test_handles_timeout(self, monkeypatch):
         """Returns False on timeout."""
         monkeypatch.setattr(output, "_get_wezterm_cmd", lambda: ["wezterm"])
+        monkeypatch.setattr(output, "_get_focused_window_class", lambda: "org.wezfurlong.wezterm")
         mock_run = Mock(side_effect=subprocess.TimeoutExpired("cmd", 10))
         monkeypatch.setattr("subprocess.run", mock_run)
 
@@ -232,6 +234,7 @@ class TestTypeWithWeztermCli:
     def test_handles_called_process_error(self, monkeypatch):
         """Returns False when wezterm is not active."""
         monkeypatch.setattr(output, "_get_wezterm_cmd", lambda: ["wezterm"])
+        monkeypatch.setattr(output, "_get_focused_window_class", lambda: "org.wezfurlong.wezterm")
         mock_run = Mock(side_effect=subprocess.CalledProcessError(1, "cmd"))
         monkeypatch.setattr("subprocess.run", mock_run)
 
@@ -241,6 +244,7 @@ class TestTypeWithWeztermCli:
     def test_handles_file_not_found(self, monkeypatch):
         """Returns False when wezterm binary not found."""
         monkeypatch.setattr(output, "_get_wezterm_cmd", lambda: ["wezterm"])
+        monkeypatch.setattr(output, "_get_focused_window_class", lambda: "org.wezfurlong.wezterm")
         mock_run = Mock(side_effect=FileNotFoundError())
         monkeypatch.setattr("subprocess.run", mock_run)
 
@@ -250,13 +254,14 @@ class TestTypeWithWeztermCli:
     def test_send_text_timeout_parameter(self, monkeypatch):
         """send-text call has correct timeout."""
         monkeypatch.setattr(output, "_get_wezterm_cmd", lambda: ["wezterm"])
+        monkeypatch.setattr(output, "_get_focused_window_class", lambda: "org.wezfurlong.wezterm")
         mock_run = Mock(return_value=Mock(returncode=0))
         monkeypatch.setattr("subprocess.run", mock_run)
 
         _type_with_wezterm_cli("test")
 
         # Check send-text call timeout
-        send_text_call = mock_run.call_args_list[1]
+        send_text_call = mock_run.call_args_list[0]
         assert send_text_call[1]["timeout"] == output._TYPING_TIMEOUT
 
 

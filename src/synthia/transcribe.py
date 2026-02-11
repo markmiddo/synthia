@@ -69,17 +69,13 @@ class Transcriber:
 
     def _init_whisper(self) -> None:
         """Initialize local Whisper model using faster-whisper."""
-        # Force CPU mode to avoid CUDA library issues
-        import os
-
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
         from faster_whisper import WhisperModel
 
-        model_name = "tiny"
+        model_name = self.local_model
         logger.info("Loading faster-whisper model: %s...", model_name)
 
-        # Always use CPU - CUDA has library issues on this system
+        # Use CPU - GPU inference produces garbage with current cuDNN version
+        # TODO: Re-enable GPU after upgrading ctranslate2 + matching cuDNN
         self.whisper_model = WhisperModel(
             model_name, device="cpu", compute_type="int8", cpu_threads=4
         )
@@ -129,6 +125,18 @@ class Transcriber:
         # Convert bytes to numpy array (16-bit signed int)
         audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
 
+        # Skip very short audio (< 0.5 seconds) to avoid hallucinations
+        duration = len(audio_np) / self.sample_rate
+        if duration < 0.5:
+            logger.debug("Audio too short (%.2fs), skipping", duration)
+            return ""
+
+        # Check audio level - skip if too quiet (likely no speech)
+        rms = np.sqrt(np.mean(audio_np**2))
+        if rms < 0.005:
+            logger.debug("Audio too quiet (rms=%.4f), skipping", rms)
+            return ""
+
         # faster-whisper returns segments generator
         assert self.whisper_model is not None
         segments, info = self.whisper_model.transcribe(
@@ -136,10 +144,24 @@ class Transcriber:
             language="en",
             beam_size=1,  # Faster with beam_size=1
             vad_filter=True,  # Filter out silence
+            no_speech_threshold=0.6,  # Skip segments likely without speech
+            hallucination_silence_threshold=1.0,  # Skip hallucinated silence
+            condition_on_previous_text=False,  # Prevent hallucination loops
         )
 
-        # Collect all segments
-        transcript = " ".join(segment.text for segment in segments).strip()
+        # Collect segments with a max token limit to prevent runaway generation
+        parts = []
+        for segment in segments:
+            parts.append(segment.text)
+            if len(parts) > 50:  # Safety limit
+                logger.warning("Hit segment limit, stopping transcription")
+                break
+        transcript = " ".join(parts).strip()
+
+        # Reject hallucinated output (repetitive single characters)
+        if len(transcript) > 10 and len(set(transcript.replace(" ", ""))) <= 2:
+            logger.warning("Rejected hallucinated output: %s...", transcript[:30])
+            return ""
 
         # Remove filler words
         cleaned = self._clean_transcript(transcript)
