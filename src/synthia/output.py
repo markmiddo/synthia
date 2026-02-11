@@ -56,35 +56,41 @@ def _get_focused_window_class() -> str | None:
             )
             if result.returncode == 0:
                 import json
+
                 tree = json.loads(result.stdout)
                 focused = _find_focused_node(tree)
                 if focused:
-                    return focused.get("app_id") or focused.get("window_properties", {}).get("class", "")
+                    app_id: str = focused.get("app_id") or focused.get("window_properties", {}).get(
+                        "class", ""
+                    )
+                    return app_id
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
         # Fallback: use wlrctl or hyprctl if available
         try:
-            result = subprocess.run(
+            hypr_result = subprocess.run(
                 ["hyprctl", "activewindow", "-j"],
                 capture_output=True,
                 timeout=2,
             )
-            if result.returncode == 0:
+            if hypr_result.returncode == 0:
                 import json
-                data = json.loads(result.stdout)
-                return data.get("class", "")
+
+                data = json.loads(hypr_result.stdout)
+                cls: str = data.get("class", "")
+                return cls
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
     else:
         try:
-            result = subprocess.run(
+            x11_result = subprocess.run(
                 ["xdotool", "getactivewindow", "getwindowclassname"],
                 capture_output=True,
                 timeout=2,
                 text=True,
             )
-            if result.returncode == 0:
-                return result.stdout.strip()
+            if x11_result.returncode == 0:
+                return x11_result.stdout.strip()
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
     return None
