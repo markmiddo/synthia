@@ -351,7 +351,7 @@ function App() {
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [currentSection, setCurrentSection] = useState<Section>("tasks");
+  const [currentSection, setCurrentSection] = useState<Section>("worktrees");
   const [voiceView, setVoiceView] = useState<VoiceView>("main");
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
@@ -504,10 +504,18 @@ function App() {
       checkStatus();
       checkRemoteStatus();
       if (currentSection === "worktrees") loadWorktrees();
-      if (currentSection === "github") loadGithubIssues();
       if (currentSection === "voice" && voiceView === "history") loadHistory();
     }, 2000);
-    return () => clearInterval(interval);
+
+    // Separate longer interval for GitHub (every 60s, not 2s)
+    let githubInterval: ReturnType<typeof setInterval> | undefined;
+    if (currentSection === "github") {
+      githubInterval = setInterval(() => loadGithubIssues(), 60000);
+    }
+    return () => {
+      clearInterval(interval);
+      if (githubInterval) clearInterval(githubInterval);
+    };
   }, [currentSection, voiceView, memoryFilter]);
 
   async function loadWordReplacements() {
@@ -546,6 +554,13 @@ function App() {
       setGithubIssues(result.issues);
       setGithubFetchedAt(result.fetched_at);
       setGithubError(result.error);
+      // Refresh selectedIssue to avoid stale data in detail panel
+      setSelectedIssue(prev => {
+        if (!prev) return null;
+        return result.issues.find(
+          i => i.number === prev.number && i.repository === prev.repository
+        ) || null;
+      });
     } catch (e) {
       setGithubError(String(e));
     } finally {
@@ -1243,9 +1258,7 @@ function App() {
           >
             <span className="nav-item-icon">&#128025;</span>
             GitHub
-            {githubIssues.filter(i => i.state === "OPEN").length > 0 && (
-              <span className="nav-badge">{githubIssues.filter(i => i.state === "OPEN").length}</span>
-            )}
+            {(() => { const c = githubIssues.filter(i => i.state === "OPEN").length; return c > 0 ? <span className="nav-badge">{c}</span> : null; })()}
           </button>
           <button
             className={`nav-item ${currentSection === "voice" ? "active" : ""}`}
@@ -1518,6 +1531,15 @@ function App() {
       return date.toLocaleDateString();
     }
 
+    function addGithubRepo() {
+      const trimmed = newGithubRepo.trim();
+      if (trimmed.includes("/") && !githubConfig.repos.includes(trimmed)) {
+        const updated = [...githubConfig.repos, trimmed];
+        saveGithubConfig(updated, githubConfig.refresh_interval_seconds);
+        setNewGithubRepo("");
+      }
+    }
+
     function getRepoColorClass(repo: string): string {
       let hash = 0;
       for (let i = 0; i < repo.length; i++) {
@@ -1748,22 +1770,12 @@ function App() {
                   value={newGithubRepo}
                   onChange={(e) => setNewGithubRepo(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && newGithubRepo.includes("/")) {
-                      const updated = [...githubConfig.repos, newGithubRepo.trim()];
-                      saveGithubConfig(updated, githubConfig.refresh_interval_seconds);
-                      setNewGithubRepo("");
-                    }
+                    if (e.key === "Enter") addGithubRepo();
                   }}
                 />
                 <button
                   className="task-panel-btn primary"
-                  onClick={() => {
-                    if (newGithubRepo.includes("/")) {
-                      const updated = [...githubConfig.repos, newGithubRepo.trim()];
-                      saveGithubConfig(updated, githubConfig.refresh_interval_seconds);
-                      setNewGithubRepo("");
-                    }
-                  }}
+                  onClick={addGithubRepo}
                 >
                   Add
                 </button>
