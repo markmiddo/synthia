@@ -281,7 +281,46 @@ interface WorktreeInfo {
 
 const WORKTREE_STATUSES = ["in-progress", "reviewing", "merged", "ready-to-close"] as const;
 
-type Section = "worktrees" | "notes" | "tasks" | "voice" | "memory" | "config";
+interface GitHubLabel {
+  name: string;
+  color: string;
+}
+
+interface GitHubAssignee {
+  login: string;
+}
+
+interface GitHubMilestone {
+  title: string;
+}
+
+interface GitHubIssue {
+  number: number;
+  title: string;
+  state: string;
+  labels: GitHubLabel[];
+  assignees: GitHubAssignee[];
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+  body: string;
+  milestone: GitHubMilestone | null;
+  comments: unknown[];
+  repository: string | null;
+}
+
+interface GitHubConfig {
+  repos: string[];
+  refresh_interval_seconds: number;
+}
+
+interface GitHubIssuesResponse {
+  issues: GitHubIssue[];
+  fetched_at: string;
+  error: string | null;
+}
+
+type Section = "worktrees" | "notes" | "tasks" | "voice" | "memory" | "config" | "github";
 
 interface NoteEntry {
   name: string;
@@ -312,7 +351,7 @@ function App() {
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [currentSection, setCurrentSection] = useState<Section>("worktrees");
+  const [currentSection, setCurrentSection] = useState<Section>("tasks");
   const [voiceView, setVoiceView] = useState<VoiceView>("main");
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
@@ -364,6 +403,18 @@ function App() {
   const [editingNoteName, setEditingNoteName] = useState(false);
   const [noteNameInput, setNoteNameInput] = useState("");
   const [notePreview, setNotePreview] = useState(false);
+
+  // GitHub state
+  const [githubIssues, setGithubIssues] = useState<GitHubIssue[]>([]);
+  const [githubConfig, setGithubConfig] = useState<GitHubConfig>({ repos: [], refresh_interval_seconds: 300 });
+  const [githubFetchedAt, setGithubFetchedAt] = useState<string>("");
+  const [githubError, setGithubError] = useState<string | null>(null);
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null);
+  const [githubRepoFilter, setGithubRepoFilter] = useState<string>("all");
+  const [githubStateFilter, setGithubStateFilter] = useState<string>("open");
+  const [githubConfigOpen, setGithubConfigOpen] = useState(false);
+  const [newGithubRepo, setNewGithubRepo] = useState("");
 
   // Tasks state
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -444,11 +495,16 @@ function App() {
     if (currentSection === "tasks") {
       loadTasks();
     }
+    if (currentSection === "github") {
+      loadGithubConfig();
+      loadGithubIssues();
+    }
 
     const interval = setInterval(() => {
       checkStatus();
       checkRemoteStatus();
       if (currentSection === "worktrees") loadWorktrees();
+      if (currentSection === "github") loadGithubIssues();
       if (currentSection === "voice" && voiceView === "history") loadHistory();
     }, 2000);
     return () => clearInterval(interval);
@@ -469,6 +525,43 @@ function App() {
       setWorktrees(result);
     } catch (e) {
       // Ignore errors
+    }
+  }
+
+  async function loadGithubConfig() {
+    try {
+      const result = await invoke<GitHubConfig>("get_github_config");
+      setGithubConfig(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function loadGithubIssues(forceRefresh = false) {
+    setGithubLoading(true);
+    try {
+      const result = await invoke<GitHubIssuesResponse>("get_github_issues", {
+        forceRefresh,
+      });
+      setGithubIssues(result.issues);
+      setGithubFetchedAt(result.fetched_at);
+      setGithubError(result.error);
+    } catch (e) {
+      setGithubError(String(e));
+    } finally {
+      setGithubLoading(false);
+    }
+  }
+
+  async function saveGithubConfig(repos: string[], refreshInterval: number) {
+    try {
+      await invoke("save_github_config", {
+        repos,
+        refreshIntervalSeconds: refreshInterval,
+      });
+      setGithubConfig({ repos, refresh_interval_seconds: refreshInterval });
+    } catch (e) {
+      setGithubError(String(e));
     }
   }
 
@@ -1124,11 +1217,11 @@ function App() {
         </div>
         <nav className="sidebar-nav">
           <button
-            className={`nav-item ${currentSection === "worktrees" ? "active" : ""}`}
-            onClick={() => setCurrentSection("worktrees")}
+            className={`nav-item ${currentSection === "tasks" ? "active" : ""}`}
+            onClick={() => { setCurrentSection("tasks"); loadTasks(); }}
           >
-            <span className="nav-item-icon">&#128193;</span>
-            Worktrees
+            <span className="nav-item-icon">&#9745;</span>
+            Tasks
           </button>
           <button
             className={`nav-item ${currentSection === "notes" ? "active" : ""}`}
@@ -1138,11 +1231,21 @@ function App() {
             Notes
           </button>
           <button
-            className={`nav-item ${currentSection === "tasks" ? "active" : ""}`}
-            onClick={() => { setCurrentSection("tasks"); loadTasks(); }}
+            className={`nav-item ${currentSection === "worktrees" ? "active" : ""}`}
+            onClick={() => setCurrentSection("worktrees")}
           >
-            <span className="nav-item-icon">&#9745;</span>
-            Tasks
+            <span className="nav-item-icon">&#128193;</span>
+            Worktrees
+          </button>
+          <button
+            className={`nav-item ${currentSection === "github" ? "active" : ""}`}
+            onClick={() => setCurrentSection("github")}
+          >
+            <span className="nav-item-icon">&#128025;</span>
+            GitHub
+            {githubIssues.filter(i => i.state === "OPEN").length > 0 && (
+              <span className="nav-badge">{githubIssues.filter(i => i.state === "OPEN").length}</span>
+            )}
           </button>
           <button
             className={`nav-item ${currentSection === "voice" ? "active" : ""}`}
@@ -1395,6 +1498,303 @@ function App() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderGithubSection() {
+    function timeAgo(dateStr: string): string {
+      const date = new Date(dateStr);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 60) return `${diffMins}m ago`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours}h ago`;
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays < 30) return `${diffDays}d ago`;
+      return date.toLocaleDateString();
+    }
+
+    function getRepoColorClass(repo: string): string {
+      let hash = 0;
+      for (let i = 0; i < repo.length; i++) {
+        hash = repo.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return `repo-${Math.abs(hash) % 8}`;
+    }
+
+    const filteredIssues = githubIssues.filter(issue => {
+      if (githubRepoFilter !== "all" && issue.repository !== githubRepoFilter) return false;
+      if (githubStateFilter === "open" && issue.state !== "OPEN") return false;
+      if (githubStateFilter === "closed" && issue.state !== "CLOSED") return false;
+      return true;
+    });
+
+    const repos = [...new Set(githubIssues.map(i => i.repository).filter(Boolean))] as string[];
+    const groupedByRepo = repos
+      .filter(r => githubRepoFilter === "all" || r === githubRepoFilter)
+      .map(repo => ({
+        repo,
+        issues: filteredIssues.filter(i => i.repository === repo),
+      }))
+      .filter(g => g.issues.length > 0);
+
+    return (
+      <div className="github-layout">
+        <div className="github-list">
+          {/* Header */}
+          <div className="github-header">
+            <div className="github-title-row">
+              <h2 style={{ margin: 0, fontSize: "1.1rem" }}>GitHub Issues</h2>
+              <div className="github-header-actions">
+                <span className="github-count">{filteredIssues.length} issues</span>
+                <button
+                  className="github-refresh-btn"
+                  onClick={() => loadGithubIssues(true)}
+                  disabled={githubLoading}
+                  title="Refresh issues"
+                >
+                  {githubLoading ? "⟳" : "↻"}
+                </button>
+                <button
+                  className="github-config-btn"
+                  onClick={() => setGithubConfigOpen(true)}
+                  title="Configure repos"
+                >
+                  ⚙
+                </button>
+              </div>
+            </div>
+            {githubFetchedAt && (
+              <div className="github-fetched">Updated {timeAgo(githubFetchedAt)}</div>
+            )}
+            {githubError && (
+              <div className="github-error">{githubError}</div>
+            )}
+
+            {/* Filters */}
+            <div className="github-filters">
+              <select
+                className="github-filter-select"
+                value={githubRepoFilter}
+                onChange={(e) => setGithubRepoFilter(e.target.value)}
+              >
+                <option value="all">All repos</option>
+                {repos.map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+              <div className="github-state-toggle">
+                <button
+                  className={`github-state-btn ${githubStateFilter === "open" ? "active" : ""}`}
+                  onClick={() => setGithubStateFilter("open")}
+                >
+                  Open
+                </button>
+                <button
+                  className={`github-state-btn ${githubStateFilter === "closed" ? "active" : ""}`}
+                  onClick={() => setGithubStateFilter("closed")}
+                >
+                  Closed
+                </button>
+                <button
+                  className={`github-state-btn ${githubStateFilter === "all" ? "active" : ""}`}
+                  onClick={() => setGithubStateFilter("all")}
+                >
+                  All
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Empty states */}
+          {githubConfig.repos.length === 0 ? (
+            <div className="empty-state">
+              <p>No repos configured</p>
+              <p style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+                Click ⚙ to add GitHub repos to track
+              </p>
+            </div>
+          ) : filteredIssues.length === 0 && !githubLoading ? (
+            <div className="empty-state">
+              <p>No issues assigned to you</p>
+            </div>
+          ) : (
+            /* Issue list grouped by repo */
+            groupedByRepo.map(({ repo, issues }) => (
+              <div key={repo} className="github-repo-group">
+                <div className="github-repo-header">
+                  <span className={`worktree-repo ${getRepoColorClass(repo)}`}>
+                    {repo}
+                  </span>
+                  <span className="github-repo-count">{issues.length}</span>
+                </div>
+                {issues.map(issue => (
+                  <div
+                    key={`${issue.repository}-${issue.number}`}
+                    className={`github-issue-item ${selectedIssue?.number === issue.number && selectedIssue?.repository === issue.repository ? "selected" : ""}`}
+                    onClick={() => setSelectedIssue(
+                      selectedIssue?.number === issue.number && selectedIssue?.repository === issue.repository ? null : issue
+                    )}
+                  >
+                    <div className="github-issue-header">
+                      <span className={`github-issue-number ${issue.state === "OPEN" ? "open" : "closed"}`}>
+                        #{issue.number}
+                      </span>
+                      <span className="github-issue-title">{issue.title}</span>
+                    </div>
+                    <div className="github-issue-meta">
+                      {issue.labels.map(label => (
+                        <span
+                          key={label.name}
+                          className="github-label"
+                          style={{
+                            backgroundColor: `#${label.color}33`,
+                            color: `#${label.color}`,
+                            border: `1px solid #${label.color}66`,
+                          }}
+                        >
+                          {label.name}
+                        </span>
+                      ))}
+                      {issue.milestone && (
+                        <span className="github-milestone">🎯 {issue.milestone.title}</span>
+                      )}
+                      <span className="github-time">{timeAgo(issue.updatedAt)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Detail panel */}
+        {selectedIssue && (
+          <div className="task-panel" style={{ minWidth: "350px" }}>
+            <div className="task-panel-header">
+              <span className="task-panel-title">#{selectedIssue.number}</span>
+              <button
+                className="task-panel-btn primary"
+                onClick={() => {
+                  if (selectedIssue.url) {
+                    window.open(selectedIssue.url, "_blank");
+                  }
+                }}
+              >
+                Open in GitHub
+              </button>
+            </div>
+            <h3 style={{ margin: "0 0 0.75rem", fontSize: "1rem", fontWeight: 500 }}>
+              {selectedIssue.title}
+            </h3>
+            <div className="github-detail-meta">
+              <span className={`github-state-badge ${selectedIssue.state === "OPEN" ? "open" : "closed"}`}>
+                {selectedIssue.state === "OPEN" ? "● Open" : "● Closed"}
+              </span>
+              {selectedIssue.assignees.map(a => (
+                <span key={a.login} className="github-assignee">@{a.login}</span>
+              ))}
+              <span className="github-comments">{selectedIssue.comments.length} comments</span>
+            </div>
+            {selectedIssue.labels.length > 0 && (
+              <div className="github-detail-labels">
+                {selectedIssue.labels.map(label => (
+                  <span
+                    key={label.name}
+                    className="github-label"
+                    style={{
+                      backgroundColor: `#${label.color}33`,
+                      color: `#${label.color}`,
+                      border: `1px solid #${label.color}66`,
+                    }}
+                  >
+                    {label.name}
+                  </span>
+                ))}
+              </div>
+            )}
+            {selectedIssue.body && (
+              <div className="github-issue-body">
+                <pre style={{
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  fontSize: "0.85rem",
+                  lineHeight: 1.5,
+                  color: "#e2e8f0",
+                  margin: 0,
+                  fontFamily: "inherit",
+                }}>
+                  {selectedIssue.body}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Config modal */}
+        {githubConfigOpen && (
+          <div className="modal-overlay" onClick={() => setGithubConfigOpen(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <h3 style={{ margin: "0 0 1rem" }}>GitHub Repos</h3>
+              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+                <input
+                  className="github-repo-input"
+                  type="text"
+                  placeholder="owner/repo"
+                  value={newGithubRepo}
+                  onChange={(e) => setNewGithubRepo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newGithubRepo.includes("/")) {
+                      const updated = [...githubConfig.repos, newGithubRepo.trim()];
+                      saveGithubConfig(updated, githubConfig.refresh_interval_seconds);
+                      setNewGithubRepo("");
+                    }
+                  }}
+                />
+                <button
+                  className="task-panel-btn primary"
+                  onClick={() => {
+                    if (newGithubRepo.includes("/")) {
+                      const updated = [...githubConfig.repos, newGithubRepo.trim()];
+                      saveGithubConfig(updated, githubConfig.refresh_interval_seconds);
+                      setNewGithubRepo("");
+                    }
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+              <div className="github-repo-list">
+                {githubConfig.repos.map((repo, i) => (
+                  <div key={repo} className="github-repo-list-item">
+                    <span>{repo}</span>
+                    <button
+                      className="github-repo-remove"
+                      onClick={() => {
+                        const updated = githubConfig.repos.filter((_, idx) => idx !== i);
+                        saveGithubConfig(updated, githubConfig.refresh_interval_seconds);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                className="task-panel-btn"
+                style={{ marginTop: "1rem" }}
+                onClick={() => {
+                  setGithubConfigOpen(false);
+                  loadGithubIssues(true);
+                }}
+              >
+                Done
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -2749,6 +3149,7 @@ function App() {
       {renderSidebar()}
       <main className="main-content">
         {currentSection === "worktrees" && renderWorktreesSection()}
+        {currentSection === "github" && renderGithubSection()}
         {currentSection === "notes" && renderNotesSection()}
         {currentSection === "tasks" && renderTasksSection()}
         {currentSection === "voice" && renderVoiceSection()}
