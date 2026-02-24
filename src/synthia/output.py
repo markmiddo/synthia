@@ -149,9 +149,9 @@ def _type_with_wezterm_cli(text: str) -> bool:
         return False
 
     try:
-        # Only use wezterm CLI if we can confirm Wezterm is focused
+        # Only use wezterm CLI if Wezterm is focused (or can't detect focused window)
         focused = _get_focused_window_class()
-        if focused is None or "wezterm" not in focused.lower():
+        if focused is not None and "wezterm" not in focused.lower():
             return False
 
         subprocess.run(
