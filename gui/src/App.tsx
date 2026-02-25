@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
 import "./App.css";
 
@@ -546,6 +547,13 @@ function App() {
       expandedFolders.forEach((folder) => loadTreeEntries(folder));
     }
   }, [currentSection]);
+
+  // Refresh GitHub issues when config modal closes
+  useEffect(() => {
+    if (!githubConfigOpen && currentSection === "github") {
+      loadGithubIssues(true);
+    }
+  }, [githubConfigOpen]);
 
   async function loadWordReplacements() {
     try {
@@ -1879,7 +1887,7 @@ function App() {
                   className="task-panel-btn primary"
                   onClick={() => {
                     if (selectedIssue.url) {
-                      window.open(selectedIssue.url, "_blank");
+                      openUrl(selectedIssue.url);
                     }
                   }}
                 >
@@ -1981,12 +1989,9 @@ function App() {
                 ))}
               </div>
               <button
-                className="task-panel-btn"
+                className="task-panel-btn primary"
                 style={{ marginTop: "1rem" }}
-                onClick={() => {
-                  setGithubConfigOpen(false);
-                  loadGithubIssues(true);
-                }}
+                onClick={() => setGithubConfigOpen(false)}
               >
                 Done
               </button>
