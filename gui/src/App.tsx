@@ -320,7 +320,13 @@ interface GitHubIssuesResponse {
   error: string | null;
 }
 
-type Section = "worktrees" | "notes" | "tasks" | "voice" | "memory" | "config" | "github";
+type Section = "worktrees" | "knowledge" | "tasks" | "voice" | "memory" | "config" | "github";
+
+interface KnowledgeMeta {
+  pinned: string[];
+  recent: string[];
+  expanded_folders: string[];
+}
 
 interface NoteEntry {
   name: string;
@@ -351,7 +357,7 @@ function App() {
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [currentSection, setCurrentSection] = useState<Section>("worktrees");
+  const [currentSection, setCurrentSection] = useState<Section>("tasks");
   const [voiceView, setVoiceView] = useState<VoiceView>("main");
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
@@ -391,7 +397,7 @@ function App() {
   const [isNewCommand, setIsNewCommand] = useState(false);
 
   // Notes state
-  const [notesPath, setNotesPath] = useState<string[]>([]);
+  const [notesPath, _setNotesPath] = useState<string[]>([]);
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState("");
@@ -402,7 +408,17 @@ function App() {
   const [newNoteName, setNewNoteName] = useState("");
   const [editingNoteName, setEditingNoteName] = useState(false);
   const [noteNameInput, setNoteNameInput] = useState("");
-  const [notePreview, setNotePreview] = useState(false);
+  const [notePreview, setNotePreview] = useState<boolean | null>(null);
+
+  // Knowledge meta state
+  const [pinnedNotes, setPinnedNotes] = useState<string[]>([]);
+  const [recentNotes, setRecentNotes] = useState<string[]>([]);
+  const [knowledgeSearch, setKnowledgeSearch] = useState("");
+  // drag-and-drop state removed — replaced by tree view
+  const [expandedFolders, setExpandedFolders] = useState<string[]>([]);
+  const [allNoteEntries, setAllNoteEntries] = useState<Record<string, NoteEntry[]>>({});
+  const [pinnedPreviews, setPinnedPreviews] = useState<Record<string, string>>({});
+  const [pinnedModified, setPinnedModified] = useState<Record<string, number>>({});
 
   // GitHub state
   const [githubIssues, setGithubIssues] = useState<GitHubIssue[]>([]);
@@ -426,6 +442,9 @@ function App() {
   const [newTaskDue, setNewTaskDue] = useState("");
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [pinnedNote, setPinnedNote] = useState("");
+  const [pinnedNoteEditing, setPinnedNoteEditing] = useState(false);
+  const [pinnedNoteDraft, setPinnedNoteDraft] = useState("");
 
   // Usage stats state
   const [usageStats, setUsageStats] = useState<{
@@ -488,12 +507,15 @@ function App() {
       loadPlugins();
     }
 
-    if (currentSection === "notes") {
+    if (currentSection === "knowledge") {
       loadNotes(notesPath.join("/"));
+      loadKnowledgeMeta();
+      loadTreeEntries("");
     }
 
     if (currentSection === "tasks") {
       loadTasks();
+      loadPinnedNote();
     }
     if (currentSection === "github") {
       loadGithubConfig();
@@ -507,16 +529,24 @@ function App() {
       if (currentSection === "voice" && voiceView === "history") loadHistory();
     }, 2000);
 
-    // Separate longer interval for GitHub (every 60s, not 2s)
-    let githubInterval: ReturnType<typeof setInterval> | undefined;
-    if (currentSection === "github") {
-      githubInterval = setInterval(() => loadGithubIssues(), 60000);
-    }
     return () => {
       clearInterval(interval);
-      if (githubInterval) clearInterval(githubInterval);
     };
   }, [currentSection, voiceView, memoryFilter]);
+
+  // Load pinned note previews when pinned notes change
+  useEffect(() => {
+    if (currentSection === "knowledge" && pinnedNotes.length > 0) {
+      loadPinnedPreviews(pinnedNotes);
+    }
+  }, [pinnedNotes, currentSection]);
+
+  // Restore expanded folder state when entering knowledge section
+  useEffect(() => {
+    if (currentSection === "knowledge" && expandedFolders.length > 0) {
+      expandedFolders.forEach((folder) => loadTreeEntries(folder));
+    }
+  }, [currentSection]);
 
   async function loadWordReplacements() {
     try {
@@ -727,7 +757,8 @@ function App() {
       setSelectedNote(path);
       setNoteContent(content);
       setNoteEditing(true);
-      setNotePreview(false);
+      setNotePreview(null);
+      trackRecentNote(path);
     } catch (e) {
       setError(String(e));
     }
@@ -752,7 +783,7 @@ function App() {
     setNoteContent("");
     setNoteEditing(false);
     setEditingNoteName(false);
-    setNotePreview(false);
+    setNotePreview(null);
     // Refresh the notes list to show any new or updated notes
     loadNotes(notesPath.join("/"));
   }
@@ -760,6 +791,12 @@ function App() {
   async function handleDeleteNote(path: string) {
     try {
       await invoke("delete_note", { path });
+      // Clean up pinned/recent references
+      const newPinned = pinnedNotes.filter((p) => p !== path);
+      const newRecent = recentNotes.filter((p) => p !== path);
+      setPinnedNotes(newPinned);
+      setRecentNotes(newRecent);
+      saveKnowledgeMeta(newPinned, newRecent);
       if (selectedNote === path) {
         handleCloseNote();
       } else {
@@ -792,23 +829,17 @@ function App() {
 
     try {
       await invoke("rename_note", { oldPath: selectedNote, newPath });
+      // Update pinned/recent references to the new path
+      const newPinned = pinnedNotes.map((p) => p === selectedNote ? newPath : p);
+      const newRecent = recentNotes.map((p) => p === selectedNote ? newPath : p);
+      setPinnedNotes(newPinned);
+      setRecentNotes(newRecent);
+      saveKnowledgeMeta(newPinned, newRecent);
       setSelectedNote(newPath);
       setEditingNoteName(false);
     } catch (e) {
       setError(String(e));
     }
-  }
-
-  function navigateToFolder(path: string) {
-    const parts = path ? path.split("/").filter(Boolean) : [];
-    setNotesPath(parts);
-    loadNotes(path);
-  }
-
-  function navigateUp() {
-    const newPath = notesPath.slice(0, -1);
-    setNotesPath(newPath);
-    loadNotes(newPath.join("/"));
   }
 
   async function handleCreateNote() {
@@ -843,6 +874,123 @@ function App() {
     }
   }
 
+  async function handleCreateFolder() {
+    if (!newNoteName.trim()) return;
+
+    const folderName = newNoteName.trim();
+    const fullPath = notesPath.length > 0
+      ? `${notesPath.join("/")}/${folderName}`
+      : folderName;
+
+    try {
+      await invoke("create_folder", { path: fullPath });
+      setShowNewNote(false);
+      setNewNoteName("");
+      loadNotes(notesPath.join("/"));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function loadKnowledgeMeta() {
+    try {
+      const meta = await invoke<KnowledgeMeta>("get_knowledge_meta");
+      setPinnedNotes(meta.pinned || []);
+      setRecentNotes(meta.recent || []);
+      setExpandedFolders(meta.expanded_folders || []);
+    } catch {
+      // Use empty defaults
+    }
+  }
+
+  async function saveKnowledgeMeta(
+    pinned?: string[],
+    recent?: string[],
+    expanded?: string[]
+  ) {
+    try {
+      const meta: KnowledgeMeta = {
+        pinned: pinned ?? pinnedNotes,
+        recent: recent ?? recentNotes,
+        expanded_folders: expanded ?? expandedFolders,
+      };
+      await invoke("save_knowledge_meta", { meta });
+    } catch {
+      // Ignore save errors
+    }
+  }
+
+  function togglePinNote(path: string) {
+    const isPinned = pinnedNotes.includes(path);
+    const newPinned = isPinned
+      ? pinnedNotes.filter((p) => p !== path)
+      : [...pinnedNotes, path];
+    setPinnedNotes(newPinned);
+    saveKnowledgeMeta(newPinned, recentNotes);
+  }
+
+  function trackRecentNote(path: string) {
+    const deduped = recentNotes.filter((p) => p !== path);
+    const newRecent = [path, ...deduped].slice(0, 6);
+    setRecentNotes(newRecent);
+    saveKnowledgeMeta(pinnedNotes, newRecent);
+  }
+
+  async function loadPinnedPreviews(pinned: string[]) {
+    const previews: Record<string, string> = {};
+    const modified: Record<string, number> = {};
+    for (const path of pinned) {
+      try {
+        const preview: string = await invoke("get_note_preview", { path });
+        previews[path] = preview;
+        const mod: number = await invoke("get_note_modified", { path });
+        modified[path] = mod;
+      } catch {
+        previews[path] = "";
+        modified[path] = 0;
+      }
+    }
+    setPinnedPreviews(previews);
+    setPinnedModified(modified);
+  }
+
+  async function loadTreeEntries(subpath: string) {
+    try {
+      const entries: NoteEntry[] = await invoke("list_notes", {
+        subpath: subpath || null,
+      });
+      setAllNoteEntries((prev) => ({ ...prev, [subpath]: entries }));
+    } catch (e) {
+      console.error("Failed to load tree entries:", e);
+    }
+  }
+
+  async function toggleFolder(folderPath: string) {
+    const isExpanded = expandedFolders.includes(folderPath);
+    let newExpanded: string[];
+    if (isExpanded) {
+      newExpanded = expandedFolders.filter((f) => f !== folderPath);
+    } else {
+      newExpanded = [...expandedFolders, folderPath];
+      if (!allNoteEntries[folderPath]) {
+        await loadTreeEntries(folderPath);
+      }
+    }
+    setExpandedFolders(newExpanded);
+    saveKnowledgeMeta(undefined, undefined, newExpanded);
+  }
+
+  function getRelativeTime(timestamp: number): string {
+    if (!timestamp) return "";
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - timestamp;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+    return `${Math.floor(diff / 604800)}w ago`;
+  }
+
   async function loadUsageStats() {
     try {
       const result = await invoke<typeof usageStats>("get_usage_stats");
@@ -856,6 +1004,25 @@ function App() {
     try {
       const result = await invoke<Task[]>("list_tasks");
       setTasks(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function loadPinnedNote() {
+    try {
+      const result = await invoke<string>("get_pinned_note");
+      setPinnedNote(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function savePinnedNote(content: string) {
+    try {
+      await invoke("save_pinned_note", { content });
+      setPinnedNote(content);
+      setPinnedNoteEditing(false);
     } catch (e) {
       // Ignore errors
     }
@@ -1239,11 +1406,11 @@ function App() {
             Tasks
           </button>
           <button
-            className={`nav-item ${currentSection === "notes" ? "active" : ""}`}
-            onClick={() => { setCurrentSection("notes"); loadNotes(notesPath.join("/")); }}
+            className={`nav-item ${currentSection === "knowledge" ? "active" : ""}`}
+            onClick={() => { setCurrentSection("knowledge"); loadNotes(notesPath.join("/")); loadKnowledgeMeta(); }}
           >
-            <span className="nav-item-icon">&#128221;</span>
-            Notes
+            <span className="nav-item-icon">{"\ud83e\udde0"}</span>
+            Knowledge
           </button>
           <button
             className={`nav-item ${currentSection === "worktrees" ? "active" : ""}`}
@@ -1577,9 +1744,9 @@ function App() {
                   className="github-refresh-btn"
                   onClick={() => loadGithubIssues(true)}
                   disabled={githubLoading}
-                  title="Refresh issues"
+                  title="Sync issues from GitHub"
                 >
-                  {githubLoading ? "⟳" : "↻"}
+                  {githubLoading ? "⟳ Syncing…" : "↻ Sync"}
                 </button>
                 <button
                   className="github-config-btn"
@@ -1699,16 +1866,25 @@ function App() {
           <div className="task-panel" style={{ minWidth: "350px" }}>
             <div className="task-panel-header">
               <span className="task-panel-title">#{selectedIssue.number}</span>
-              <button
-                className="task-panel-btn primary"
-                onClick={() => {
-                  if (selectedIssue.url) {
-                    window.open(selectedIssue.url, "_blank");
-                  }
-                }}
-              >
-                Open in GitHub
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <button
+                  className="task-panel-btn primary"
+                  onClick={() => {
+                    if (selectedIssue.url) {
+                      window.open(selectedIssue.url, "_blank");
+                    }
+                  }}
+                >
+                  Open in GitHub
+                </button>
+                <button
+                  className="task-panel-btn"
+                  onClick={() => setSelectedIssue(null)}
+                  title="Close panel"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             <h3 style={{ margin: "0 0 0.75rem", fontSize: "1rem", fontWeight: 500 }}>
               {selectedIssue.title}
@@ -2931,6 +3107,50 @@ function App() {
             + Add Task
           </button>
         </div>
+        {/* Pinned note */}
+        {pinnedNoteEditing ? (
+          <div className="pinned-note editing">
+            <textarea
+              className="pinned-note-input"
+              value={pinnedNoteDraft}
+              onChange={(e) => setPinnedNoteDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  savePinnedNote(pinnedNoteDraft);
+                }
+                if (e.key === "Escape") setPinnedNoteEditing(false);
+              }}
+              placeholder="Weekly priorities, reminders..."
+              autoFocus
+              rows={2}
+            />
+            <div className="pinned-note-actions">
+              <button className="pinned-note-save" onClick={() => savePinnedNote(pinnedNoteDraft)}>Save</button>
+              <button className="pinned-note-cancel" onClick={() => setPinnedNoteEditing(false)}>Cancel</button>
+              {pinnedNote && (
+                <button className="pinned-note-clear" onClick={() => savePinnedNote("")}>Clear</button>
+              )}
+            </div>
+          </div>
+        ) : pinnedNote ? (
+          <div
+            className="pinned-note"
+            onClick={() => { setPinnedNoteDraft(pinnedNote); setPinnedNoteEditing(true); }}
+            title="Click to edit"
+          >
+            <span className="pinned-note-icon">📌</span>
+            <span className="pinned-note-text">{pinnedNote}</span>
+          </div>
+        ) : (
+          <div
+            className="pinned-note empty"
+            onClick={() => { setPinnedNoteDraft(""); setPinnedNoteEditing(true); }}
+          >
+            <span className="pinned-note-icon">📌</span>
+            <span className="pinned-note-text">Add a pinned reminder...</span>
+          </div>
+        )}
         <div className="kanban-board">
           <div
             className={`kanban-column ${dragOverColumn === "todo" ? "drag-over" : ""}`}
@@ -2994,10 +3214,50 @@ function App() {
     );
   }
 
-  function renderNotesSection() {
+  function renderFolderTree(parentPath: string, depth: number = 0) {
+    const entries = allNoteEntries[parentPath] || [];
+    const folders = entries.filter((e) => e.is_dir).sort((a, b) => a.name.localeCompare(b.name));
+    const files = entries.filter((e) => !e.is_dir).sort((a, b) => a.name.localeCompare(b.name));
+
+    return (
+      <div className="knowledge-tree-level">
+        {folders.map((folder) => {
+          const isExpanded = expandedFolders.includes(folder.path);
+          return (
+            <div key={folder.path}>
+              <button
+                className="knowledge-tree-item knowledge-tree-folder"
+                style={{ paddingLeft: `${12 + depth * 16}px` }}
+                onClick={() => toggleFolder(folder.path)}
+              >
+                <span className="knowledge-tree-arrow">
+                  {isExpanded ? "\u25BE" : "\u25B8"}
+                </span>
+                <span className="knowledge-tree-name">{folder.name}</span>
+              </button>
+              {isExpanded && renderFolderTree(folder.path, depth + 1)}
+            </div>
+          );
+        })}
+        {files.map((file) => (
+          <button
+            key={file.path}
+            className="knowledge-tree-item knowledge-tree-file"
+            style={{ paddingLeft: `${28 + depth * 16}px` }}
+            onClick={() => handleOpenNote(file.path)}
+          >
+            <span className="knowledge-tree-name">{file.name}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderKnowledgeSection() {
     // Editor view
     if (noteEditing && selectedNote) {
       const fileName = selectedNote.split("/").pop() || selectedNote;
+      const isPinned = pinnedNotes.includes(selectedNote);
       return (
         <div className="notes-section">
           <div className="notes-editor-header">
@@ -3033,10 +3293,23 @@ function App() {
             )}
             <div className="notes-header-actions">
               <button
-                className={`notes-preview-btn ${notePreview ? "active" : ""}`}
-                onClick={() => setNotePreview(!notePreview)}
+                className={`notes-pin-btn ${isPinned ? "active" : ""}`}
+                onClick={() => togglePinNote(selectedNote)}
+                title={isPinned ? "Unpin" : "Pin"}
               >
-                {notePreview ? "Edit" : "Preview"}
+                {isPinned ? "Unpin" : "Pin"}
+              </button>
+              <button
+                className={`notes-preview-btn ${notePreview === false ? "active" : ""}`}
+                onClick={() => setNotePreview(notePreview === false ? null : false)}
+              >
+                Edit
+              </button>
+              <button
+                className={`notes-preview-btn ${notePreview === true ? "active" : ""}`}
+                onClick={() => setNotePreview(notePreview === true ? null : true)}
+              >
+                Preview
               </button>
               <button
                 className={`notes-save-btn ${noteSaving ? "saving" : ""} ${noteSaved ? "saved" : ""}`}
@@ -3053,104 +3326,189 @@ function App() {
               </button>
             </div>
           </div>
-          {notePreview ? (
+          {notePreview === true ? (
             <div className="notes-preview">
               <Markdown>{noteContent}</Markdown>
             </div>
-          ) : (
+          ) : notePreview === false ? (
             <textarea
               className="notes-editor"
               value={noteContent}
               onChange={(e) => setNoteContent(e.target.value)}
               spellCheck={false}
             />
+          ) : (
+            <div className="notes-split-pane">
+              <textarea
+                className="notes-editor"
+                value={noteContent}
+                onChange={(e) => setNoteContent(e.target.value)}
+                spellCheck={false}
+              />
+              <div className="notes-preview">
+                <Markdown>{noteContent}</Markdown>
+              </div>
+            </div>
           )}
         </div>
       );
     }
 
-    // File browser view
+    // Dashboard view
     return (
-      <div className="notes-section">
-        <div className="notes-header">
-          <div className="notes-breadcrumb">
-            <button
-              className="breadcrumb-item"
-              onClick={() => { setNotesPath([]); loadNotes(""); }}
-            >
-              docs
-            </button>
-            {notesPath.map((part, idx) => (
-              <span key={idx}>
-                <span className="breadcrumb-sep">/</span>
-                <button
-                  className="breadcrumb-item"
-                  onClick={() => {
-                    const newPath = notesPath.slice(0, idx + 1);
-                    setNotesPath(newPath);
-                    loadNotes(newPath.join("/"));
-                  }}
-                >
-                  {part}
-                </button>
-              </span>
-            ))}
+      <div className="knowledge-dashboard">
+        {/* Full-width search bar */}
+        <div className="knowledge-top-bar">
+          <div className="knowledge-search">
+            <span className="knowledge-search-icon">{"\ud83d\udd0d"}</span>
+            <input
+              type="text"
+              placeholder="Search notes..."
+              value={knowledgeSearch}
+              onChange={(e) => setKnowledgeSearch(e.target.value)}
+              className="knowledge-search-input"
+            />
+            {knowledgeSearch && (
+              <button
+                className="knowledge-search-clear"
+                onClick={() => setKnowledgeSearch("")}
+              >
+                {"\u2715"}
+              </button>
+            )}
           </div>
-          <button className="new-note-btn" onClick={() => setShowNewNote(true)}>
-            + New Note
+          <button
+            className="knowledge-new-btn"
+            onClick={() => setShowNewNote(true)}
+          >
+            + New
           </button>
         </div>
 
+        {/* New note modal */}
         {showNewNote && (
           <div className="new-note-modal">
             <input
               type="text"
-              className="new-note-input"
-              placeholder="Note name (e.g., my-note.md)"
+              placeholder="Note or folder name..."
               value={newNoteName}
               onChange={(e) => setNewNoteName(e.target.value)}
+              className="new-note-input"
+              autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleCreateNote();
-                if (e.key === "Escape") { setShowNewNote(false); setNewNoteName(""); }
+                if (e.key === "Escape") setShowNewNote(false);
               }}
-              autoFocus
             />
-            <div className="new-note-actions">
-              <button className="new-note-create" onClick={handleCreateNote}>Create</button>
-              <button className="new-note-cancel" onClick={() => { setShowNewNote(false); setNewNoteName(""); }}>Cancel</button>
-            </div>
+            <button className="new-note-create" onClick={handleCreateNote}>
+              Note
+            </button>
+            <button
+              className="new-note-create folder"
+              onClick={handleCreateFolder}
+            >
+              Folder
+            </button>
+            <button
+              className="new-note-create"
+              onClick={() => setShowNewNote(false)}
+              style={{ background: "rgba(100,100,100,0.3)" }}
+            >
+              Cancel
+            </button>
           </div>
         )}
 
-        <div className="notes-list">
-          {notesPath.length > 0 && (
-            <div className="notes-item folder" onClick={navigateUp}>
-              <span className="notes-icon">📁</span>
-              <span className="notes-name">..</span>
+        {/* Two-column layout */}
+        <div className="knowledge-columns">
+          {/* Left column - folder tree */}
+          <div className="knowledge-tree-panel">
+            <div className="knowledge-section-label">FOLDERS</div>
+            <div className="knowledge-tree-scroll">
+              {renderFolderTree("")}
             </div>
-          )}
-          {noteEntries.length === 0 && notesPath.length === 0 ? (
-            <div className="empty-state">
-              <p>No markdown files found</p>
-            </div>
-          ) : (
-            noteEntries.map((entry) => (
-              <div
-                key={entry.path}
-                className={`notes-item ${entry.is_dir ? "folder" : "file"}`}
-                onClick={() => {
-                  if (entry.is_dir) {
-                    navigateToFolder(entry.path);
-                  } else {
-                    handleOpenNote(entry.path);
-                  }
-                }}
-              >
-                <span className="notes-icon">{entry.is_dir ? "📁" : "📄"}</span>
-                <span className="notes-name">{entry.name}</span>
+          </div>
+
+          {/* Right column - pinned cards + recent */}
+          <div className="knowledge-content-panel">
+            {knowledgeSearch ? (
+              <div className="knowledge-search-results">
+                <div className="knowledge-section-label">RESULTS</div>
+                {noteEntries
+                  .filter((e) =>
+                    !e.is_dir &&
+                    e.name.toLowerCase().includes(knowledgeSearch.toLowerCase())
+                  )
+                  .map((entry) => (
+                    <button
+                      key={entry.path}
+                      className="knowledge-search-result-item"
+                      onClick={() => handleOpenNote(entry.path)}
+                    >
+                      <span className="knowledge-result-name">{entry.name}</span>
+                      <span className="knowledge-result-path">
+                        {entry.path.split("/").slice(0, -1).join(" / ")}
+                      </span>
+                    </button>
+                  ))}
               </div>
-            ))
-          )}
+            ) : (
+              <>
+                {pinnedNotes.length > 0 && (
+                  <div className="knowledge-pinned-section">
+                    <div className="knowledge-section-label">PINNED</div>
+                    <div className="knowledge-cards-grid">
+                      {pinnedNotes.map((path) => {
+                        const name = path.split("/").pop() || path;
+                        const preview = pinnedPreviews[path] || "";
+                        const modified = pinnedModified[path] || 0;
+                        return (
+                          <button
+                            key={path}
+                            className="knowledge-card"
+                            onClick={() => handleOpenNote(path)}
+                          >
+                            <div className="knowledge-card-title">{name.replace(/\.md$/, "")}</div>
+                            <div className="knowledge-card-preview">
+                              {preview.replace(/^#+ .*/gm, "").trim().slice(0, 120)}
+                            </div>
+                            <div className="knowledge-card-meta">
+                              {getRelativeTime(modified)}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {recentNotes.length > 0 && (
+                  <div className="knowledge-recent-section">
+                    <div className="knowledge-section-label">RECENT</div>
+                    <div className="knowledge-recent-list">
+                      {recentNotes.map((path) => {
+                        const name = path.split("/").pop() || path;
+                        return (
+                          <button
+                            key={path}
+                            className="knowledge-recent-item"
+                            onClick={() => handleOpenNote(path)}
+                          >
+                            <span className="knowledge-recent-name">
+                              {name.replace(/\.md$/, "")}
+                            </span>
+                            <span className="knowledge-recent-time">
+                              {getRelativeTime(pinnedModified[path] || 0)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -3162,7 +3520,7 @@ function App() {
       <main className="main-content">
         {currentSection === "worktrees" && renderWorktreesSection()}
         {currentSection === "github" && renderGithubSection()}
-        {currentSection === "notes" && renderNotesSection()}
+        {currentSection === "knowledge" && renderKnowledgeSection()}
         {currentSection === "tasks" && renderTasksSection()}
         {currentSection === "voice" && renderVoiceSection()}
         {currentSection === "memory" && renderMemorySection()}
