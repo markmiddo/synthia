@@ -418,7 +418,7 @@ function App() {
   const [expandedFolders, setExpandedFolders] = useState<string[]>([]);
   const [allNoteEntries, setAllNoteEntries] = useState<Record<string, NoteEntry[]>>({});
   const [pinnedPreviews, setPinnedPreviews] = useState<Record<string, string>>({});
-  const [pinnedModified, setPinnedModified] = useState<Record<string, number>>({});
+  const [noteModified, setNoteModified] = useState<Record<string, number>>({});
 
   // GitHub state
   const [githubIssues, setGithubIssues] = useState<GitHubIssue[]>([]);
@@ -534,12 +534,12 @@ function App() {
     };
   }, [currentSection, voiceView, memoryFilter]);
 
-  // Load pinned note previews when pinned notes change
+  // Load note metadata (previews for pinned, timestamps for pinned + recent)
   useEffect(() => {
-    if (currentSection === "knowledge" && pinnedNotes.length > 0) {
-      loadPinnedPreviews(pinnedNotes);
+    if (currentSection === "knowledge" && (pinnedNotes.length > 0 || recentNotes.length > 0)) {
+      loadNoteMetadata(pinnedNotes, recentNotes);
     }
-  }, [pinnedNotes, currentSection]);
+  }, [pinnedNotes, recentNotes, currentSection]);
 
   // Restore expanded folder state when entering knowledge section
   useEffect(() => {
@@ -936,9 +936,11 @@ function App() {
     saveKnowledgeMeta(pinnedNotes, newRecent);
   }
 
-  async function loadPinnedPreviews(pinned: string[]) {
+  async function loadNoteMetadata(pinned: string[], recent: string[]) {
     const previews: Record<string, string> = {};
     const modified: Record<string, number> = {};
+
+    // Load previews and timestamps for pinned notes
     for (const path of pinned) {
       try {
         const preview: string = await invoke("get_note_preview", { path });
@@ -950,8 +952,21 @@ function App() {
         modified[path] = 0;
       }
     }
+
+    // Load timestamps for recent notes (skip if already loaded from pinned)
+    for (const path of recent) {
+      if (!modified[path] && modified[path] !== 0) {
+        try {
+          const mod: number = await invoke("get_note_modified", { path });
+          modified[path] = mod;
+        } catch {
+          modified[path] = 0;
+        }
+      }
+    }
+
     setPinnedPreviews(previews);
-    setPinnedModified(modified);
+    setNoteModified(modified);
   }
 
   async function loadTreeEntries(subpath: string) {
@@ -3461,7 +3476,7 @@ function App() {
                       {pinnedNotes.map((path) => {
                         const name = path.split("/").pop() || path;
                         const preview = pinnedPreviews[path] || "";
-                        const modified = pinnedModified[path] || 0;
+                        const modified = noteModified[path] || 0;
                         return (
                           <button
                             key={path}
@@ -3498,7 +3513,7 @@ function App() {
                               {name.replace(/\.md$/, "")}
                             </span>
                             <span className="knowledge-recent-time">
-                              {getRelativeTime(pinnedModified[path] || 0)}
+                              {getRelativeTime(noteModified[path] || 0)}
                             </span>
                           </button>
                         );
