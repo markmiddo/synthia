@@ -397,7 +397,6 @@ function App() {
   const [isNewCommand, setIsNewCommand] = useState(false);
 
   // Notes state
-  const [notesPath, _setNotesPath] = useState<string[]>([]);
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState("");
@@ -508,7 +507,7 @@ function App() {
     }
 
     if (currentSection === "knowledge") {
-      loadNotes(notesPath.join("/"));
+      loadNotes("");
       loadKnowledgeMeta();
       loadTreeEntries("");
     }
@@ -785,7 +784,7 @@ function App() {
     setEditingNoteName(false);
     setNotePreview(null);
     // Refresh the notes list to show any new or updated notes
-    loadNotes(notesPath.join("/"));
+    loadNotes("");
   }
 
   async function handleDeleteNote(path: string) {
@@ -800,7 +799,7 @@ function App() {
       if (selectedNote === path) {
         handleCloseNote();
       } else {
-        loadNotes(notesPath.join("/"));
+        loadNotes("");
       }
     } catch (e) {
       setError(String(e));
@@ -851,10 +850,7 @@ function App() {
       filename += ".md";
     }
 
-    // Build full path
-    const fullPath = notesPath.length > 0
-      ? `${notesPath.join("/")}/${filename}`
-      : filename;
+    const fullPath = filename;
 
     try {
       // Create empty note
@@ -877,16 +873,13 @@ function App() {
   async function handleCreateFolder() {
     if (!newNoteName.trim()) return;
 
-    const folderName = newNoteName.trim();
-    const fullPath = notesPath.length > 0
-      ? `${notesPath.join("/")}/${folderName}`
-      : folderName;
+    const fullPath = newNoteName.trim();
 
     try {
       await invoke("create_folder", { path: fullPath });
       setShowNewNote(false);
       setNewNoteName("");
-      loadNotes(notesPath.join("/"));
+      loadNotes("");
     } catch (e) {
       setError(String(e));
     }
@@ -1422,7 +1415,7 @@ function App() {
           </button>
           <button
             className={`nav-item ${currentSection === "knowledge" ? "active" : ""}`}
-            onClick={() => { setCurrentSection("knowledge"); loadNotes(notesPath.join("/")); loadKnowledgeMeta(); }}
+            onClick={() => { setCurrentSection("knowledge"); loadNotes(""); loadKnowledgeMeta(); }}
           >
             <span className="nav-item-icon">{"\ud83e\udde0"}</span>
             Knowledge
