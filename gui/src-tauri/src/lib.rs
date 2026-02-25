@@ -2287,6 +2287,44 @@ fn get_usage_stats() -> UsageStats {
     stats
 }
 
+// === KNOWLEDGE META COMMANDS ===
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+struct KnowledgeMeta {
+    pinned: Vec<String>,
+    recent: Vec<String>,
+    #[serde(default)]
+    expanded_folders: Vec<String>,
+}
+
+fn get_knowledge_meta_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("synthia")
+        .join("knowledge-meta.json")
+}
+
+#[tauri::command]
+fn get_knowledge_meta() -> KnowledgeMeta {
+    let path = get_knowledge_meta_path();
+    if let Ok(content) = fs::read_to_string(&path) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        KnowledgeMeta::default()
+    }
+}
+
+#[tauri::command]
+fn save_knowledge_meta(meta: KnowledgeMeta) -> Result<String, String> {
+    let path = get_knowledge_meta_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok("saved".to_string())
+}
+
 // === NOTES COMMANDS ===
 
 fn get_notes_base_path() -> PathBuf {
@@ -2378,6 +2416,43 @@ fn read_note(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_note_preview(path: String) -> Result<String, String> {
+    let base = get_notes_base_path();
+    let full = base.join(&path);
+    if !full.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+    match std::fs::read_to_string(&full) {
+        Ok(content) => {
+            let preview: String = content.chars().take(200).collect();
+            Ok(preview)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn get_note_modified(path: String) -> Result<u64, String> {
+    let base = get_notes_base_path();
+    let full = base.join(&path);
+    if !full.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+    match std::fs::metadata(&full) {
+        Ok(meta) => {
+            match meta.modified() {
+                Ok(time) => {
+                    let duration = time.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                    Ok(duration.as_secs())
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
 fn save_note(path: String, content: String) -> Result<String, String> {
     let base = get_notes_base_path();
     let full_path = base.join(&path);
@@ -2414,6 +2489,76 @@ fn rename_note(old_path: String, new_path: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to rename file: {}", e))?;
 
     Ok(new_path)
+}
+
+#[tauri::command]
+fn move_note(path: String, new_parent: String) -> Result<String, String> {
+    let base = get_notes_base_path();
+    let old_full = base.join(&path);
+
+    if !old_full.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+
+    if !old_full.exists() {
+        return Err("File not found".to_string());
+    }
+
+    let filename = old_full.file_name()
+        .ok_or("Invalid filename")?
+        .to_string_lossy()
+        .to_string();
+
+    let new_dir = if new_parent.is_empty() {
+        base.clone()
+    } else {
+        base.join(&new_parent)
+    };
+
+    if !new_dir.starts_with(&base) {
+        return Err("Invalid target path".to_string());
+    }
+
+    // Prevent moving a folder into itself
+    if old_full.is_dir() && new_dir.starts_with(&old_full) {
+        return Err("Cannot move a folder into itself".to_string());
+    }
+
+    let new_full = new_dir.join(&filename);
+
+    if new_full.exists() {
+        return Err("A file with that name already exists in the target folder".to_string());
+    }
+
+    fs::rename(&old_full, &new_full)
+        .map_err(|e| format!("Failed to move file: {}", e))?;
+
+    // Return the new relative path
+    let new_rel = new_full.strip_prefix(&base)
+        .map_err(|_| "Path error".to_string())?
+        .to_string_lossy()
+        .to_string();
+
+    Ok(new_rel)
+}
+
+#[tauri::command]
+fn create_folder(path: String) -> Result<String, String> {
+    let base = get_notes_base_path();
+    let full_path = base.join(&path);
+
+    if !full_path.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+
+    if full_path.exists() {
+        return Err("A folder with that name already exists".to_string());
+    }
+
+    fs::create_dir_all(&full_path)
+        .map_err(|e| format!("Failed to create folder: {}", e))?;
+
+    Ok("Folder created".to_string())
 }
 
 #[tauri::command]
@@ -2463,6 +2608,30 @@ fn resend_to_assistant(text: String) -> Result<String, String> {
     let _ = fs::remove_file(&prompt_file);
 
     Ok("Sent to assistant".to_string())
+}
+
+// === PINNED NOTE COMMANDS ===
+
+fn get_pinned_note_path() -> PathBuf {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("synthia");
+    config_dir.join("pinned-note.txt")
+}
+
+#[tauri::command]
+fn get_pinned_note() -> String {
+    fs::read_to_string(get_pinned_note_path()).unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_pinned_note(content: String) -> Result<String, String> {
+    let path = get_pinned_note_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
+    fs::write(&path, content).map_err(|e| format!("Failed to write pinned note: {}", e))?;
+    Ok("saved".to_string())
 }
 
 // === GITHUB ISSUES COMMANDS ===
@@ -2523,21 +2692,16 @@ fn get_github_issues(force_refresh: bool) -> GitHubIssuesResponse {
         };
     }
 
-    // Check cache freshness
+    // Return cached data immediately unless force refresh is requested
     let cache_path = get_github_cache_path();
     if !force_refresh {
         if let Ok(content) = fs::read_to_string(&cache_path) {
             if let Ok(cache) = serde_json::from_str::<GitHubIssuesCache>(&content) {
-                if let Ok(fetched) = chrono::DateTime::parse_from_rfc3339(&cache.fetched_at) {
-                    let age = chrono::Utc::now().signed_duration_since(fetched);
-                    if age.num_seconds() < config.refresh_interval_seconds as i64 {
-                        return GitHubIssuesResponse {
-                            issues: cache.issues,
-                            fetched_at: cache.fetched_at,
-                            error: None,
-                        };
-                    }
-                }
+                return GitHubIssuesResponse {
+                    issues: cache.issues,
+                    fetched_at: cache.fetched_at,
+                    error: None,
+                };
             }
         }
     }
@@ -2793,10 +2957,16 @@ pub fn run() {
             list_hooks,
             list_plugins,
             toggle_plugin,
+            get_knowledge_meta,
+            save_knowledge_meta,
             list_notes,
             read_note,
+            get_note_preview,
+            get_note_modified,
             save_note,
             rename_note,
+            move_note,
+            create_folder,
             delete_note,
             get_usage_stats,
             list_tasks,
@@ -2804,6 +2974,8 @@ pub fn run() {
             update_task,
             delete_task,
             move_task,
+            get_pinned_note,
+            save_pinned_note,
             get_github_config,
             save_github_config,
             get_github_issues
