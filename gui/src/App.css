@@ -2297,6 +2297,14 @@
   cursor: grabbing;
 }
 
+.task-drop-indicator {
+  height: 3px;
+  background: #6366f1;
+  border-radius: 2px;
+  margin: 2px 0;
+  transition: opacity 0.15s;
+}
+
 .kanban-column.drag-over {
   background: rgba(6, 182, 212, 0.1);
   border-color: rgba(6, 182, 212, 0.4);

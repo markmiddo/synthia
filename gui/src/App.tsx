@@ -344,6 +344,7 @@ interface Task {
   due_date?: string;
   created_at: string;
   completed_at?: string;
+  sort_order?: number;
 }
 type VoiceView = "main" | "history" | "words";
 type MemoryCategory = "bug" | "pattern" | "arch" | "gotcha" | "stack" | null;
@@ -442,6 +443,8 @@ function App() {
   const [newTaskDue, setNewTaskDue] = useState("");
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
+  const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
   const [pinnedNote, setPinnedNote] = useState("");
   const [pinnedNoteEditing, setPinnedNoteEditing] = useState(false);
   const [pinnedNoteDraft, setPinnedNoteDraft] = useState("");
@@ -1094,6 +1097,15 @@ function App() {
   async function handleDeleteTask(id: string) {
     try {
       await invoke("delete_task", { id });
+      loadTasks();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleReorderTask(id: string, sortOrder: number) {
+    try {
+      await invoke("reorder_task", { id, sortOrder });
       loadTasks();
     } catch (e) {
       setError(String(e));
@@ -2979,9 +2991,10 @@ function App() {
   }
 
   function renderTasksSection() {
-    const todoTasks = tasks.filter(t => t.status === "todo");
-    const inProgressTasks = tasks.filter(t => t.status === "in_progress");
-    const doneTasks = tasks.filter(t => t.status === "done");
+    const sortTasks = (t: Task[]) => [...t].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const todoTasks = sortTasks(tasks.filter(t => t.status === "todo"));
+    const inProgressTasks = sortTasks(tasks.filter(t => t.status === "in_progress"));
+    const doneTasks = sortTasks(tasks.filter(t => t.status === "done"));
 
     function formatDate(dateStr?: string) {
       if (!dateStr) return null;
@@ -2994,37 +3007,102 @@ function App() {
       return new Date(dueDate) < new Date();
     }
 
-    function renderTaskCard(task: Task) {
+    function renderTaskCard(task: Task, columnTasks: Task[]) {
+      const isDropTarget = dragOverTaskId === task.id && draggedTaskId !== task.id;
       return (
-        <div
-          key={task.id}
-          className={`task-card ${draggedTaskId === task.id ? "dragging" : ""}`}
-          onClick={() => setEditingTask(task)}
-          draggable
-          onDragStart={(e) => {
-            setDraggedTaskId(task.id);
-            e.dataTransfer.effectAllowed = "move";
-            e.dataTransfer.setData("text/plain", task.id);
-          }}
-          onDragEnd={() => { setDraggedTaskId(null); setDragOverColumn(null); }}
-        >
-          <div className="task-card-title">{task.title}</div>
-          {task.description && (
-            <div className="task-card-desc">{task.description}</div>
+        <div key={task.id}>
+          {isDropTarget && dragOverPosition === "above" && (
+            <div className="task-drop-indicator" />
           )}
-          <div className="task-card-meta">
-            {task.due_date && (
-              <span className={`task-due ${isOverdue(task.due_date) && task.status !== "done" ? "overdue" : ""}`}>
-                {formatDate(task.due_date)}
-              </span>
+          <div
+            className={`task-card ${draggedTaskId === task.id ? "dragging" : ""}`}
+            onClick={() => setEditingTask(task)}
+            draggable
+            onDragStart={(e) => {
+              setDraggedTaskId(task.id);
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", task.id);
+              e.dataTransfer.setData("application/x-task-status", task.status);
+            }}
+            onDragEnd={() => {
+              setDraggedTaskId(null);
+              setDragOverColumn(null);
+              setDragOverTaskId(null);
+              setDragOverPosition(null);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const midY = rect.top + rect.height / 2;
+              setDragOverTaskId(task.id);
+              setDragOverPosition(e.clientY < midY ? "above" : "below");
+            }}
+            onDragLeave={() => {
+              setDragOverTaskId(null);
+              setDragOverPosition(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const taskId = e.dataTransfer.getData("text/plain");
+              const sourceStatus = e.dataTransfer.getData("application/x-task-status");
+              if (!taskId || taskId === task.id) return;
+
+              const idx = columnTasks.findIndex(t => t.id === task.id);
+              const insertIdx = dragOverPosition === "below" ? idx + 1 : idx;
+
+              // Calculate new sort_order
+              const prev = insertIdx > 0 ? columnTasks[insertIdx - 1] : null;
+              const next = insertIdx < columnTasks.length ? columnTasks[insertIdx] : null;
+              const prevOrder = prev && prev.id !== taskId ? (prev.sort_order ?? 0) : null;
+              const nextOrder = next && next.id !== taskId ? (next.sort_order ?? 0) : null;
+
+              let newOrder: number;
+              if (prevOrder !== null && nextOrder !== null) {
+                newOrder = (prevOrder + nextOrder) / 2;
+              } else if (prevOrder !== null) {
+                newOrder = prevOrder + 1000;
+              } else if (nextOrder !== null) {
+                newOrder = nextOrder - 1000;
+              } else {
+                newOrder = 1000;
+              }
+
+              if (sourceStatus !== task.status) {
+                handleMoveTask(taskId, task.status).then(() => {
+                  handleReorderTask(taskId, newOrder);
+                });
+              } else {
+                handleReorderTask(taskId, newOrder);
+              }
+
+              setDragOverTaskId(null);
+              setDragOverPosition(null);
+              setDragOverColumn(null);
+            }}
+          >
+            <div className="task-card-title">{task.title}</div>
+            {task.description && (
+              <div className="task-card-desc">{task.description}</div>
             )}
-            {task.tags.map(tag => {
-              const color = getTagColor(tag);
-              return (
-                <span key={tag} className="task-tag" style={{ background: color.bg, color: color.text }}>{tag}</span>
-              );
-            })}
+            <div className="task-card-meta">
+              {task.due_date && (
+                <span className={`task-due ${isOverdue(task.due_date) && task.status !== "done" ? "overdue" : ""}`}>
+                  {formatDate(task.due_date)}
+                </span>
+              )}
+              {task.tags.map(tag => {
+                const color = getTagColor(tag);
+                return (
+                  <span key={tag} className="task-tag" style={{ background: color.bg, color: color.text }}>{tag}</span>
+                );
+              })}
+            </div>
           </div>
+          {isDropTarget && dragOverPosition === "below" && (
+            <div className="task-drop-indicator" />
+          )}
         </div>
       );
     }
@@ -3172,8 +3250,26 @@ function App() {
             onDrop={(e) => {
               e.preventDefault();
               const taskId = e.dataTransfer.getData("text/plain");
-              if (taskId) handleMoveTask(taskId, "todo");
+              const sourceStatus = e.dataTransfer.getData("application/x-task-status");
+              if (!taskId) return;
+
+              const columnTasks = todoTasks;
+              const lastOrder = columnTasks.length > 0
+                ? Math.max(...columnTasks.filter(t => t.id !== taskId).map(t => t.sort_order ?? 0))
+                : 0;
+              const newOrder = lastOrder + 1000;
+
+              if (sourceStatus !== "todo") {
+                handleMoveTask(taskId, "todo").then(() => {
+                  handleReorderTask(taskId, newOrder);
+                });
+              } else {
+                handleReorderTask(taskId, newOrder);
+              }
+
               setDragOverColumn(null);
+              setDragOverTaskId(null);
+              setDragOverPosition(null);
             }}
           >
             <div className="kanban-column-header">
@@ -3181,7 +3277,7 @@ function App() {
               <span className="kanban-column-count">{todoTasks.length}</span>
             </div>
             <div className="kanban-column-content">
-              {todoTasks.map(renderTaskCard)}
+              {todoTasks.map(t => renderTaskCard(t, todoTasks))}
             </div>
           </div>
           <div
@@ -3191,8 +3287,26 @@ function App() {
             onDrop={(e) => {
               e.preventDefault();
               const taskId = e.dataTransfer.getData("text/plain");
-              if (taskId) handleMoveTask(taskId, "in_progress");
+              const sourceStatus = e.dataTransfer.getData("application/x-task-status");
+              if (!taskId) return;
+
+              const columnTasks = inProgressTasks;
+              const lastOrder = columnTasks.length > 0
+                ? Math.max(...columnTasks.filter(t => t.id !== taskId).map(t => t.sort_order ?? 0))
+                : 0;
+              const newOrder = lastOrder + 1000;
+
+              if (sourceStatus !== "in_progress") {
+                handleMoveTask(taskId, "in_progress").then(() => {
+                  handleReorderTask(taskId, newOrder);
+                });
+              } else {
+                handleReorderTask(taskId, newOrder);
+              }
+
               setDragOverColumn(null);
+              setDragOverTaskId(null);
+              setDragOverPosition(null);
             }}
           >
             <div className="kanban-column-header">
@@ -3200,7 +3314,7 @@ function App() {
               <span className="kanban-column-count">{inProgressTasks.length}</span>
             </div>
             <div className="kanban-column-content">
-              {inProgressTasks.map(renderTaskCard)}
+              {inProgressTasks.map(t => renderTaskCard(t, inProgressTasks))}
             </div>
           </div>
           <div
@@ -3210,8 +3324,26 @@ function App() {
             onDrop={(e) => {
               e.preventDefault();
               const taskId = e.dataTransfer.getData("text/plain");
-              if (taskId) handleMoveTask(taskId, "done");
+              const sourceStatus = e.dataTransfer.getData("application/x-task-status");
+              if (!taskId) return;
+
+              const columnTasks = doneTasks;
+              const lastOrder = columnTasks.length > 0
+                ? Math.max(...columnTasks.filter(t => t.id !== taskId).map(t => t.sort_order ?? 0))
+                : 0;
+              const newOrder = lastOrder + 1000;
+
+              if (sourceStatus !== "done") {
+                handleMoveTask(taskId, "done").then(() => {
+                  handleReorderTask(taskId, newOrder);
+                });
+              } else {
+                handleReorderTask(taskId, newOrder);
+              }
+
               setDragOverColumn(null);
+              setDragOverTaskId(null);
+              setDragOverPosition(null);
             }}
           >
             <div className="kanban-column-header">
@@ -3219,7 +3351,7 @@ function App() {
               <span className="kanban-column-count">{doneTasks.length}</span>
             </div>
             <div className="kanban-column-content">
-              {doneTasks.map(renderTaskCard)}
+              {doneTasks.map(t => renderTaskCard(t, doneTasks))}
             </div>
           </div>
         </div>
