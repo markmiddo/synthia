@@ -1976,6 +1976,8 @@ struct Task {
     due_date: Option<String>,
     created_at: String,
     completed_at: Option<String>,
+    #[serde(default)]
+    sort_order: Option<f64>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -1993,7 +1995,18 @@ fn get_tasks_file() -> PathBuf {
 fn load_tasks() -> TasksData {
     let path = get_tasks_file();
     if let Ok(content) = fs::read_to_string(&path) {
-        serde_json::from_str(&content).unwrap_or_default()
+        let mut data: TasksData = serde_json::from_str(&content).unwrap_or_default();
+        let mut needs_save = false;
+        for (i, task) in data.tasks.iter_mut().enumerate() {
+            if task.sort_order.is_none() {
+                task.sort_order = Some((i as f64 + 1.0) * 1000.0);
+                needs_save = true;
+            }
+        }
+        if needs_save {
+            let _ = save_tasks(&data);
+        }
+        data
     } else {
         TasksData::default()
     }
@@ -2010,7 +2023,13 @@ fn save_tasks(data: &TasksData) -> Result<(), String> {
 
 #[tauri::command]
 fn list_tasks() -> Vec<Task> {
-    load_tasks().tasks
+    let mut tasks = load_tasks().tasks;
+    tasks.sort_by(|a, b| {
+        a.sort_order.unwrap_or(0.0)
+            .partial_cmp(&b.sort_order.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    tasks
 }
 
 #[tauri::command]
@@ -2022,6 +2041,10 @@ fn add_task(
 ) -> Result<Task, String> {
     let mut data = load_tasks();
 
+    let max_order = data.tasks.iter()
+        .filter_map(|t| t.sort_order)
+        .fold(0.0_f64, f64::max);
+
     let task = Task {
         id: uuid::Uuid::new_v4().to_string(),
         title,
@@ -2031,6 +2054,7 @@ fn add_task(
         due_date,
         created_at: chrono::Utc::now().to_rfc3339(),
         completed_at: None,
+        sort_order: Some(max_order + 1000.0),
     };
 
     data.tasks.push(task.clone());
@@ -2096,6 +2120,18 @@ fn delete_task(id: String) -> Result<String, String> {
 #[tauri::command]
 fn move_task(id: String, status: String) -> Result<Task, String> {
     update_task(id, None, None, None, None, Some(status))
+}
+
+#[tauri::command]
+fn reorder_task(id: String, sort_order: f64) -> Result<Task, String> {
+    let mut data = load_tasks();
+    let task = data.tasks.iter_mut()
+        .find(|t| t.id == id)
+        .ok_or("Task not found")?;
+    task.sort_order = Some(sort_order);
+    let updated = task.clone();
+    save_tasks(&data)?;
+    Ok(updated)
 }
 
 // === USAGE COMMANDS ===
@@ -2974,6 +3010,7 @@ pub fn run() {
             update_task,
             delete_task,
             move_task,
+            reorder_task,
             get_pinned_note,
             save_pinned_note,
             get_github_config,
