@@ -420,6 +420,7 @@ function App() {
   const [allNoteEntries, setAllNoteEntries] = useState<Record<string, NoteEntry[]>>({});
   const [pinnedPreviews, setPinnedPreviews] = useState<Record<string, string>>({});
   const [noteModified, setNoteModified] = useState<Record<string, number>>({});
+  const [notesBasePath, setNotesBasePath] = useState("");
 
   // GitHub state
   const [githubIssues, setGithubIssues] = useState<GitHubIssue[]>([]);
@@ -515,6 +516,8 @@ function App() {
       loadKnowledgeMeta();
       loadTreeEntries("");
     }
+
+    invoke<string>("get_notes_base_path_cmd").then(setNotesBasePath).catch(() => {});
 
     if (currentSection === "tasks") {
       loadTasks();
@@ -939,6 +942,18 @@ function App() {
     setRecentNotes(newRecent);
     saveKnowledgeMeta(pinnedNotes, newRecent);
   }
+
+  async function copyNotePath(relativePath: string) {
+    const fullPath = notesBasePath
+      ? `${notesBasePath}/${relativePath}`
+      : relativePath;
+    try {
+      await navigator.clipboard.writeText(fullPath);
+    } catch {
+      // Fallback: some environments block clipboard API
+    }
+  }
+  void copyNotePath; // Will be wired to context menu and copy button
 
   async function loadNoteMetadata(pinned: string[], recent: string[]) {
     const previews: Record<string, string> = {};
@@ -1481,7 +1496,7 @@ function App() {
         {usageStats && (
           <div className="usage-widget">
             <div className="usage-header">
-              <span className="usage-title">Claude Usage</span>
+              <span className="usage-title">Claude Usage <span style={{ fontSize: '0.65em', opacity: 0.5 }}>(est.)</span></span>
               {usageStats.subscription_type && (
                 <span className="usage-badge">{usageStats.subscription_type}</span>
               )}

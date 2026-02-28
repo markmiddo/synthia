@@ -2149,10 +2149,11 @@ struct UsageStats {
     subscription_type: String,
 }
 
-// Estimated limits for Claude Max subscription
-const SESSION_LIMIT: u64 = 800_000;    // ~800K output tokens per 5h session
-const WEEKLY_LIMIT: u64 = 4_000_000;   // ~4M output tokens per week
-const SONNET_WEEKLY_LIMIT: u64 = 8_000_000; // ~8M Sonnet tokens per week
+// Base estimated limits for Claude Max subscription (output tokens)
+// These get multiplied by the tier multiplier (1x, 5x, 20x)
+const BASE_SESSION_LIMIT: u64 = 800_000;       // ~800K output tokens per 5h window
+const BASE_WEEKLY_LIMIT: u64 = 2_500_000;      // ~2.5M output tokens per week
+const BASE_SONNET_WEEKLY_LIMIT: u64 = 5_000_000; // ~5M Sonnet output tokens per week
 
 #[derive(Deserialize, Debug)]
 struct Credentials {
@@ -2164,6 +2165,23 @@ struct Credentials {
 struct CredentialsOAuth {
     #[serde(rename = "subscriptionType")]
     subscription_type: Option<String>,
+    #[serde(rename = "rateLimitTier")]
+    rate_limit_tier: Option<String>,
+}
+
+/// Parse the tier multiplier from the rateLimitTier string.
+/// e.g. "default_claude_max_5x" → 5, "default_claude_max_20x" → 20
+fn parse_tier_multiplier(tier: &str) -> u64 {
+    // Look for patterns like "_5x", "_20x" at the end
+    if let Some(pos) = tier.rfind('_') {
+        let suffix = &tier[pos + 1..];
+        if suffix.ends_with('x') {
+            if let Ok(n) = suffix[..suffix.len() - 1].parse::<u64>() {
+                return n;
+            }
+        }
+    }
+    1 // default/base tier
 }
 
 #[tauri::command]
@@ -2177,18 +2195,28 @@ fn get_usage_stats() -> UsageStats {
     let week_cutoff = now - chrono::Duration::days(7);
 
     let mut stats = UsageStats::default();
+    let mut tier_multiplier: u64 = 1;
 
-    // Get subscription type
+    // Get subscription type and rate limit tier
     if let Ok(content) = fs::read_to_string(&creds_file) {
         if let Ok(creds) = serde_json::from_str::<Credentials>(&content) {
             if let Some(oauth) = creds.claude_ai_oauth {
                 stats.subscription_type = oauth.subscription_type.unwrap_or_default();
+                if let Some(tier) = oauth.rate_limit_tier {
+                    tier_multiplier = parse_tier_multiplier(&tier);
+                }
             }
         }
     }
 
-    // Track oldest message timestamp in the session window for reset calculation
+    // Scale limits by tier
+    let session_limit = BASE_SESSION_LIMIT * tier_multiplier;
+    let weekly_limit = BASE_WEEKLY_LIMIT * tier_multiplier;
+    let sonnet_weekly_limit = BASE_SONNET_WEEKLY_LIMIT * tier_multiplier;
+
+    // Track oldest message timestamps for reset calculation
     let mut oldest_session_ts: Option<chrono::DateTime<chrono::Local>> = None;
+    let mut oldest_week_ts: Option<chrono::DateTime<chrono::Local>> = None;
 
     // Scan JSONL files for token usage
     if projects_dir.exists() {
@@ -2265,6 +2293,17 @@ fn get_usage_stats() -> UsageStats {
                                                 // Weekly totals (all models)
                                                 stats.week_tokens += output_tokens;
 
+                                                // Track oldest weekly message
+                                                match oldest_week_ts {
+                                                    Some(existing) if msg_time < existing => {
+                                                        oldest_week_ts = Some(msg_time);
+                                                    }
+                                                    None => {
+                                                        oldest_week_ts = Some(msg_time);
+                                                    }
+                                                    _ => {}
+                                                }
+
                                                 // Sonnet weekly
                                                 if is_sonnet {
                                                     stats.sonnet_week_tokens += output_tokens;
@@ -2295,13 +2334,13 @@ fn get_usage_stats() -> UsageStats {
         }
     }
 
-    // Calculate percentages
-    stats.session_pct = ((stats.session_tokens as f64 / SESSION_LIMIT as f64) * 100.0).min(100.0);
-    stats.week_pct = ((stats.week_tokens as f64 / WEEKLY_LIMIT as f64) * 100.0).min(100.0);
-    stats.sonnet_week_pct = ((stats.sonnet_week_tokens as f64 / SONNET_WEEKLY_LIMIT as f64) * 100.0).min(100.0);
+    // Calculate percentages using tier-scaled limits
+    stats.session_pct = ((stats.session_tokens as f64 / session_limit as f64) * 100.0).min(100.0);
+    stats.week_pct = ((stats.week_tokens as f64 / weekly_limit as f64) * 100.0).min(100.0);
+    stats.sonnet_week_pct = ((stats.sonnet_week_tokens as f64 / sonnet_weekly_limit as f64) * 100.0).min(100.0);
 
     // Calculate reset times
-    // Session resets 5h from oldest message in the window (or "now" if no messages)
+    // Session resets 5h from oldest message in the window
     let session_reset = match oldest_session_ts {
         Some(oldest) => oldest + chrono::Duration::hours(5),
         None => now,
@@ -2312,12 +2351,15 @@ fn get_usage_stats() -> UsageStats {
         session_reset.format("%-I:%M %p").to_string()
     };
 
-    // Weekly resets 7 days from now (rolling window)
-    let week_reset = now + chrono::Duration::days(1);
+    // Weekly: oldest message ages out 7 days after it was sent
+    let week_reset = match oldest_week_ts {
+        Some(oldest) => oldest + chrono::Duration::days(7),
+        None => now,
+    };
     stats.week_resets_at = if stats.week_tokens == 0 {
         String::new()
     } else {
-        week_reset.format("%a, %-I:%M %p").to_string()
+        week_reset.format("%a %b %-d, %-I:%M %p").to_string()
     };
 
     stats
@@ -2370,6 +2412,11 @@ fn get_notes_base_path() -> PathBuf {
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join("dev/eventflo/docs")
+}
+
+#[tauri::command]
+fn get_notes_base_path_cmd() -> String {
+    get_notes_base_path().to_string_lossy().to_string()
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -3015,7 +3062,8 @@ pub fn run() {
             save_pinned_note,
             get_github_config,
             save_github_config,
-            get_github_issues
+            get_github_issues,
+            get_notes_base_path_cmd
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
