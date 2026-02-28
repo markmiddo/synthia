@@ -4266,3 +4266,23 @@
 .note-context-menu-item:hover {
   background: rgba(137, 180, 250, 0.15);
 }
+
+.notes-copy-path-btn {
+  padding: 4px 10px;
+  background: rgba(137, 180, 250, 0.1);
+  border: 1px solid rgba(137, 180, 250, 0.2);
+  border-radius: 4px;
+  color: #89b4fa;
+  font-size: 0.8em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.notes-copy-path-btn:hover {
+  background: rgba(137, 180, 250, 0.2);
+}
+
+.notes-copy-path-btn.copied {
+  color: #a6e3a1;
+  border-color: rgba(166, 227, 161, 0.3);
+}

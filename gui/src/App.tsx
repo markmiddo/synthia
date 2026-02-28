@@ -423,7 +423,6 @@ function App() {
     notePath: string;
   } | null>(null);
   const [copiedPath, setCopiedPath] = useState(false);
-  void copiedPath; // Will be used for "Copied!" feedback UI
   const [allNoteEntries, setAllNoteEntries] = useState<Record<string, NoteEntry[]>>({});
   const [pinnedPreviews, setPinnedPreviews] = useState<Record<string, string>>({});
   const [noteModified, setNoteModified] = useState<Record<string, number>>({});
@@ -3498,6 +3497,13 @@ function App() {
                 onClick={() => setNotePreview(notePreview === true ? null : true)}
               >
                 Preview
+              </button>
+              <button
+                className={`notes-copy-path-btn ${copiedPath ? "copied" : ""}`}
+                onClick={() => handleCopyPath(selectedNote)}
+                title="Copy file path"
+              >
+                {copiedPath ? "Copied!" : "Copy Path"}
               </button>
               <button
                 className={`notes-save-btn ${noteSaving ? "saving" : ""} ${noteSaved ? "saved" : ""}`}
