@@ -949,14 +949,15 @@ function App() {
     saveKnowledgeMeta(pinnedNotes, newRecent);
   }
 
-  async function copyNotePath(relativePath: string) {
+  async function copyNotePath(relativePath: string): Promise<boolean> {
     const fullPath = notesBasePath
       ? `${notesBasePath}/${relativePath}`
       : relativePath;
     try {
       await navigator.clipboard.writeText(fullPath);
+      return true;
     } catch {
-      // Fallback: some environments block clipboard API
+      return false;
     }
   }
   function handleNoteContextMenu(e: React.MouseEvent, notePath: string) {
@@ -967,18 +968,26 @@ function App() {
   useEffect(() => {
     if (!contextMenu) return;
     const dismiss = () => setContextMenu(null);
-    document.addEventListener("click", dismiss);
-    document.addEventListener("contextmenu", dismiss);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") dismiss();
+    };
+    // Use mousedown instead of click+contextmenu to avoid conflicting
+    // with React's onContextMenu handler (both fire on same event at
+    // different DOM levels, causing the menu to immediately dismiss)
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener("click", dismiss);
-      document.removeEventListener("contextmenu", dismiss);
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [contextMenu]);
 
   async function handleCopyPath(relativePath: string) {
-    await copyNotePath(relativePath);
-    setCopiedPath(true);
-    setTimeout(() => setCopiedPath(false), 1500);
+    const success = await copyNotePath(relativePath);
+    if (success) {
+      setCopiedPath(true);
+      setTimeout(() => setCopiedPath(false), 1500);
+    }
   }
 
   async function loadNoteMetadata(pinned: string[], recent: string[]) {
@@ -3548,6 +3557,7 @@ function App() {
             <div
               className="note-context-menu"
               style={{ top: contextMenu.y, left: contextMenu.x }}
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
               <button
@@ -3728,6 +3738,7 @@ function App() {
           <div
             className="note-context-menu"
             style={{ top: contextMenu.y, left: contextMenu.x }}
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
             <button
