@@ -417,6 +417,13 @@ function App() {
   const [knowledgeSearch, setKnowledgeSearch] = useState("");
   // drag-and-drop state removed — replaced by tree view
   const [expandedFolders, setExpandedFolders] = useState<string[]>([]);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    notePath: string;
+  } | null>(null);
+  const [copiedPath, setCopiedPath] = useState(false);
+  void copiedPath; // Will be used for "Copied!" feedback UI
   const [allNoteEntries, setAllNoteEntries] = useState<Record<string, NoteEntry[]>>({});
   const [pinnedPreviews, setPinnedPreviews] = useState<Record<string, string>>({});
   const [noteModified, setNoteModified] = useState<Record<string, number>>({});
@@ -953,7 +960,27 @@ function App() {
       // Fallback: some environments block clipboard API
     }
   }
-  void copyNotePath; // Will be wired to context menu and copy button
+  function handleNoteContextMenu(e: React.MouseEvent, notePath: string) {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, notePath });
+  }
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const dismiss = () => setContextMenu(null);
+    document.addEventListener("click", dismiss);
+    document.addEventListener("contextmenu", dismiss);
+    return () => {
+      document.removeEventListener("click", dismiss);
+      document.removeEventListener("contextmenu", dismiss);
+    };
+  }, [contextMenu]);
+
+  async function handleCopyPath(relativePath: string) {
+    await copyNotePath(relativePath);
+    setCopiedPath(true);
+    setTimeout(() => setCopiedPath(false), 1500);
+  }
 
   async function loadNoteMetadata(pinned: string[], recent: string[]) {
     const previews: Record<string, string> = {};
@@ -3405,6 +3432,7 @@ function App() {
             className="knowledge-tree-item knowledge-tree-file"
             style={{ paddingLeft: `${28 + depth * 16}px` }}
             onClick={() => handleOpenNote(file.path)}
+            onContextMenu={(e) => handleNoteContextMenu(e, file.path)}
           >
             <span className="knowledge-tree-name">{file.name}</span>
           </button>
@@ -3510,6 +3538,23 @@ function App() {
               </div>
             </div>
           )}
+          {contextMenu && (
+            <div
+              className="note-context-menu"
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="note-context-menu-item"
+                onClick={() => {
+                  handleCopyPath(contextMenu.notePath);
+                  setContextMenu(null);
+                }}
+              >
+                Copy file path
+              </button>
+            </div>
+          )}
         </div>
       );
     }
@@ -3604,6 +3649,7 @@ function App() {
                       key={entry.path}
                       className="knowledge-search-result-item"
                       onClick={() => handleOpenNote(entry.path)}
+                      onContextMenu={(e) => handleNoteContextMenu(e, entry.path)}
                     >
                       <span className="knowledge-result-name">{entry.name}</span>
                       <span className="knowledge-result-path">
@@ -3627,6 +3673,7 @@ function App() {
                             key={path}
                             className="knowledge-card"
                             onClick={() => handleOpenNote(path)}
+                            onContextMenu={(e) => handleNoteContextMenu(e, path)}
                           >
                             <div className="knowledge-card-title">{name.replace(/\.md$/, "")}</div>
                             <div className="knowledge-card-preview">
@@ -3653,6 +3700,7 @@ function App() {
                             key={path}
                             className="knowledge-recent-item"
                             onClick={() => handleOpenNote(path)}
+                            onContextMenu={(e) => handleNoteContextMenu(e, path)}
                           >
                             <span className="knowledge-recent-name">
                               {name.replace(/\.md$/, "")}
@@ -3670,6 +3718,23 @@ function App() {
             )}
           </div>
         </div>
+        {contextMenu && (
+          <div
+            className="note-context-menu"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="note-context-menu-item"
+              onClick={() => {
+                handleCopyPath(contextMenu.notePath);
+                setContextMenu(null);
+              }}
+            >
+              Copy file path
+            </button>
+          </div>
+        )}
       </div>
     );
   }

@@ -4239,3 +4239,30 @@
 .pinned-note-clear:hover {
   background: rgba(248, 113, 113, 0.1);
 }
+
+.note-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #1e1e2e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.note-context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  color: #cdd6f4;
+  font-size: 0.85em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-context-menu-item:hover {
+  background: rgba(137, 180, 250, 0.15);
+}
