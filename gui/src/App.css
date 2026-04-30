@@ -4548,7 +4548,21 @@
   gap: 0.75rem;
   font-size: 0.75rem;
   color: var(--text-muted, #888);
+  flex-wrap: wrap;
 }
+.security-rule-id { font-family: monospace; }
+.security-explain {
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+  padding: 0.5rem 0.7rem;
+  margin: 0.4rem 0 0.4rem 0;
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+.security-explain strong { color: #e2e8f0; }
+.security-explain > div + div { margin-top: 0.25rem; }
 
 .neuralguard-install {
   display: flex;

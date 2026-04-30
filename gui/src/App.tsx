@@ -97,6 +97,149 @@ interface SecurityEvent {
   actor: string;
 }
 
+const RULE_INFO: Record<string, { title: string; what: string; why: string }> = {
+  "destructive-rm": {
+    title: "Recursive delete of a critical path",
+    what: "rm -rf was pointed at /, ~ (home), $HOME, or used --no-preserve-root.",
+    why: "These wipe everything inside the target. A single hijacked or buggy command here destroys your work and may take the whole user account or system with it.",
+  },
+  "dd-block-device": {
+    title: "Raw write to a disk device",
+    what: "dd was given a block device (sd*, nvme*, hd*) as its output.",
+    why: "Writing to /dev/sda et al overwrites the partition table and filesystem. Used to wipe drives or install rootkits.",
+  },
+  "pipe-to-shell": {
+    title: "Run remote script unsupervised",
+    what: "A download (curl/wget/fetch) was piped straight into sh/bash.",
+    why: "Whatever the URL serves runs immediately as you. If the server is hostile or compromised, the agent has just executed arbitrary code without anyone reading it first.",
+  },
+  "base64-exec": {
+    title: "Decode-and-execute payload",
+    what: "base64 -d was piped into a shell or interpreter.",
+    why: "Encoded payloads piped to sh/python/node are the standard pattern for hiding malicious code from review tools and scanners.",
+  },
+  "sudo": {
+    title: "Privilege escalation",
+    what: "Command was prefixed with sudo to run as root.",
+    why: "Once an agent runs as root there is no permission boundary left. A mistake or a prompt-injection from a fetched page now has full system rights.",
+  },
+  "setuid-bit": {
+    title: "Setuid bit set",
+    what: "chmod +s was applied to a file.",
+    why: "A setuid binary runs as its owner regardless of who launches it — the standard local-privilege-escalation backdoor.",
+  },
+  "setcap": {
+    title: "Linux capability granted",
+    what: "setcap was used to grant a binary kernel capabilities.",
+    why: "Capabilities like cap_net_admin or cap_dac_read_search hand a regular binary near-root powers without flipping the setuid bit.",
+  },
+  "ssh-key-access": {
+    title: "Reading or moving SSH keys",
+    what: "An SSH key file (~/.ssh/id_*, authorized_keys, known_hosts) was about to be read or copied.",
+    why: "SSH private keys unlock every server you access. Reading them is the first step toward exfiltrating them.",
+  },
+  "ssh-key-write": {
+    title: "Writing to your SSH key folder",
+    what: "A write was directed at ~/.ssh/id_* or authorized_keys.",
+    why: "Adding a key to authorized_keys is how attackers persist remote access. Overwriting your private key locks you out and can replace it with one they control.",
+  },
+  "gpg-access": {
+    title: "Touching your GPG keyring",
+    what: "An action targeted ~/.gnupg/.",
+    why: "GPG keys sign your commits and decrypt secrets. Exfiltrating them lets others impersonate you or read encrypted data.",
+  },
+  "aws-credentials": {
+    title: "Reading AWS credentials",
+    what: "An AWS credentials file was about to be opened.",
+    why: "Cloud keys grant full account access — usually with a billing limit measured in tens of thousands of dollars.",
+  },
+  "credentials-read": {
+    title: "Reading a credentials file",
+    what: "A read was aimed at .aws/credentials or ~/.gnupg/.",
+    why: "Same risk as above — these files contain long-lived secrets that unlock other systems.",
+  },
+  "secret-exfil": {
+    title: "Network call referencing secrets",
+    what: "curl/wget/scp/rsync was used and the command mentioned ssh, aws, gnupg, credentials, secret, token, or api_key.",
+    why: "A network tool combined with a secret-shaped string is the canonical exfiltration pattern — one HTTP request and the secret is gone.",
+  },
+  "shell-rc-tamper": {
+    title: "Modifying your shell startup file",
+    what: "A redirection wrote to .bashrc / .zshrc / .profile and friends.",
+    why: "Shell rc files run on every new terminal. Anything appended here persists invisibly across reboots and is the most common AI-agent persistence trick.",
+  },
+  "shell-rc-write": {
+    title: "Writing your shell startup file",
+    what: "Write tool targeted .bashrc / .zshrc / .profile.",
+    why: "Same as above — anything here runs every time you open a terminal.",
+  },
+  "env-file-write": {
+    title: "Writing a .env file",
+    what: "A .env file was about to be written.",
+    why: "These usually hold API keys and DB passwords. Overwriting them is silent and easy to miss; injecting a new value lets a future read steal credentials.",
+  },
+  "system-config-write": {
+    title: "Writing into /etc/",
+    what: "A write targeted /etc/.",
+    why: "/etc holds system configuration. Most edits there require sudo and persist for every user — high-impact, high-permanence, often invisible.",
+  },
+  "mass-kill": {
+    title: "Aggressive process kill",
+    what: "pkill or killall was used with -9 (SIGKILL).",
+    why: "SIGKILL skips clean shutdown. Mass-killing system services or dev tools causes data loss and is occasionally used to disable security agents.",
+  },
+  "git-remote-rewrite": {
+    title: "Repointing a git remote",
+    what: "git remote set-url or add was used to change the upstream URL.",
+    why: "Silently moves your pushes to a different repo. Used to capture credentials or exfiltrate code on the next push.",
+  },
+  "history-tamper": {
+    title: "Clearing shell history",
+    what: "history -c was invoked.",
+    why: "Wipes the audit trail of what just happened in the shell. Almost never has a legitimate developer reason.",
+  },
+  "history-redir-tamper": {
+    title: "Truncating shell history file",
+    what: "Redirection truncated .bash_history or .zsh_history.",
+    why: "Same audit-trail concern as history -c — covers tracks of prior commands.",
+  },
+  "fetch-ip-literal": {
+    title: "Fetching a raw IP",
+    what: "WebFetch URL used a numeric IP instead of a hostname.",
+    why: "Bare-IP URLs bypass DNS and TLS hostname checks; common in shellcode/loader hosting.",
+  },
+  "fetch-onion": {
+    title: "Fetching from a .onion address",
+    what: "URL points at a Tor hidden service.",
+    why: "Almost always indicates malware C2 or tooling distribution that wants to be hard to attribute.",
+  },
+  "egress-unknown-host": {
+    title: "Outbound connection to unrecognised host",
+    what: "Agent process opened a TCP connection to an IP not on the dev/AI allowlist.",
+    why: "Unexpected egress is how data leaves your machine. Worth a glance even if benign — it tells you who your agent is talking to.",
+  },
+  "injection-ignore-previous": {
+    title: "Likely prompt injection",
+    what: "Tool result contained 'ignore previous instructions' or a close variant.",
+    why: "Classic jailbreak phrasing planted in fetched content. Successful injection makes the agent do the attacker's bidding using your permissions.",
+  },
+  "injection-roleplay": {
+    title: "Likely prompt injection (roleplay)",
+    what: "Tool result tried to push the model into a 'jailbreak' / 'developer mode' / 'DAN' persona.",
+    why: "Same risk as above — these phrasings are designed to switch the model out of its safety posture.",
+  },
+  "injection-system-marker": {
+    title: "Possible fake system message",
+    what: "Tool result contained [SYSTEM], <system>, or ### system ### markers.",
+    why: "External text impersonating a system role is how injectors smuggle privileged-looking instructions into the conversation.",
+  },
+  "injection-hidden-unicode": {
+    title: "Hidden Unicode in tool result",
+    what: "Tool result contained zero-width or Unicode tag characters.",
+    why: "Invisible characters can encode instructions the model reads but you don't. Often used to slip injection past human review.",
+  },
+};
+
 interface PendingPrompt {
   id: string;
   ts: string;
@@ -512,7 +655,7 @@ function App() {
   }
 
   async function handleUninstallHooks() {
-    if (!confirm("Remove NeuralGuard from Claude Code hooks?")) return;
+    if (!confirm("Remove AI Security hooks from Claude Code?")) return;
     try {
       await invoke<string>("uninstall_neuralguard_hooks");
       loadNeuralguardStatus();
@@ -1525,15 +1668,23 @@ function App() {
                             Security events ({a.risk_events.length})
                           </div>
                           <div className="agent-risk-events">
-                            {a.risk_events.slice(-10).reverse().map((e) => (
-                              <div key={e.id} className={`agent-risk-event sev-${e.severity}`}>
-                                <span className={`severity-pill sev-${e.severity}`}>
-                                  {e.severity.toUpperCase()}
-                                </span>
-                                <span className="agent-risk-event-rule">{e.rule}</span>
-                                <span className="agent-risk-event-match">{e.matched}</span>
-                              </div>
-                            ))}
+                            {a.risk_events.slice(-10).reverse().map((e) => {
+                              const info = RULE_INFO[e.rule];
+                              return (
+                                <div key={e.id} className={`agent-risk-event sev-${e.severity}`}>
+                                  <span className={`severity-pill sev-${e.severity}`}>
+                                    {e.severity.toUpperCase()}
+                                  </span>
+                                  <span
+                                    className="agent-risk-event-rule"
+                                    title={info ? info.why : e.rule}
+                                  >
+                                    {info ? info.title : e.rule}
+                                  </span>
+                                  <span className="agent-risk-event-match">{e.matched}</span>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -1585,9 +1736,9 @@ function App() {
       <div className="security-section">
         <div className="security-header">
           <div>
-            <h2>NeuralGuard Security</h2>
+            <h2>AI Security</h2>
             <div className="security-subhead">
-              Local AI agent runtime monitor — rules-based event feed
+              Local AI agent runtime monitor — flags risky actions before they happen
             </div>
           </div>
           <div className="security-actions">
@@ -1603,12 +1754,12 @@ function App() {
         <div className={`neuralguard-install ${installed ? "installed" : ""}`}>
           <div className="neuralguard-install-text">
             <div className="neuralguard-install-title">
-              {installed ? "NeuralGuard hooks active" : "NeuralGuard hooks not installed"}
+              {installed ? "AI Security hooks active" : "AI Security hooks not installed"}
             </div>
             <div className="neuralguard-install-sub">
               {installed
                 ? "Claude Code calls go through the gate. Critical rules deny by default; edit policy.yaml to add prompt/strict modes."
-                : "Install hooks to make Claude Code consult NeuralGuard before each tool call. Until then this view is observe-only over jsonl logs."}
+                : "Install hooks so Claude Code asks AI Security before each tool call. Until then this view is observe-only over jsonl logs."}
             </div>
           </div>
           <div className="neuralguard-install-actions">
@@ -1686,25 +1837,37 @@ function App() {
               No security events. Run an agent and any flagged tool calls will appear here.
             </div>
           ) : (
-            sortedDesc.map((e) => (
-              <div key={e.id} className={`security-row severity-${e.severity}`}>
-                <div className="security-row-head">
-                  <span className={`severity-pill sev-${e.severity}`}>
-                    {e.severity.toUpperCase()}
-                  </span>
-                  <span className="security-rule">{e.rule}</span>
-                  <span className="security-tool">{e.tool}</span>
-                  <span className="security-ts">{formatTs(e.ts)}</span>
+            sortedDesc.map((e) => {
+              const info = RULE_INFO[e.rule];
+              return (
+                <div key={e.id} className={`security-row severity-${e.severity}`}>
+                  <div className="security-row-head">
+                    <span className={`severity-pill sev-${e.severity}`}>
+                      {e.severity.toUpperCase()}
+                    </span>
+                    <span className="security-rule">
+                      {info ? info.title : e.rule}
+                    </span>
+                    <span className="security-tool">{e.tool}</span>
+                    <span className="security-ts">{formatTs(e.ts)}</span>
+                  </div>
+                  <div className="security-matched">{e.matched}</div>
+                  {info && (
+                    <div className="security-explain">
+                      <div><strong>What:</strong> {info.what}</div>
+                      <div><strong>Why risky:</strong> {info.why}</div>
+                    </div>
+                  )}
+                  <div className="security-meta">
+                    <span className="security-rule-id">rule: {e.rule}</span>
+                    {e.agent_kind && <span>{e.agent_kind}</span>}
+                    {e.agent_pid && <span>pid {e.agent_pid}</span>}
+                    {e.agent_cwd && <span title={e.agent_cwd}>{e.agent_cwd.split("/").slice(-2).join("/")}</span>}
+                    <span>· {e.actor} → {e.decision}</span>
+                  </div>
                 </div>
-                <div className="security-matched">{e.matched}</div>
-                <div className="security-meta">
-                  {e.agent_kind && <span>{e.agent_kind}</span>}
-                  {e.agent_pid && <span>pid {e.agent_pid}</span>}
-                  {e.agent_cwd && <span title={e.agent_cwd}>{e.agent_cwd.split("/").slice(-2).join("/")}</span>}
-                  <span>· {e.actor} → {e.decision}</span>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -3856,20 +4019,23 @@ function App() {
       <div className="prompt-modal-backdrop">
         <div className="prompt-modal">
           <div className="prompt-modal-header">
-            <span className="prompt-modal-title">⛨ NeuralGuard — confirm tool call</span>
+            <span className="prompt-modal-title">⛨ AI Security — confirm tool call</span>
             <span className="prompt-modal-pid">pid {p.agent_pid ?? "?"}</span>
           </div>
           <div className="prompt-modal-body">
             <div className="prompt-modal-tool">{p.tool}</div>
             <pre className="prompt-modal-cmd">{command}</pre>
             <div className="prompt-modal-rules">
-              {p.events.map((ev, i) => (
-                <div key={i} className={`prompt-rule sev-${ev.severity}`}>
-                  <span className={`severity-pill sev-${ev.severity}`}>{ev.severity.toUpperCase()}</span>
-                  <span>{ev.rule}</span>
-                  <span className="prompt-rule-match">{ev.matched}</span>
-                </div>
-              ))}
+              {p.events.map((ev, i) => {
+                const info = RULE_INFO[ev.rule];
+                return (
+                  <div key={i} className={`prompt-rule sev-${ev.severity}`}>
+                    <span className={`severity-pill sev-${ev.severity}`}>{ev.severity.toUpperCase()}</span>
+                    <span title={info ? info.why : ev.rule}>{info ? info.title : ev.rule}</span>
+                    <span className="prompt-rule-match">{ev.matched}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
           <div className="prompt-modal-footer">

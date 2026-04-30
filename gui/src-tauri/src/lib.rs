@@ -2365,6 +2365,39 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
     snap
 }
 
+/// Resolve the jsonl session log this PID is actively writing to by
+/// inspecting /proc/<pid>/fd. Falls back to None when the proc has no
+/// open jsonl handle (e.g. permissions, agent crashed). Critical for
+/// distinguishing multiple Claude agents that share the same cwd —
+/// otherwise they all read the newest jsonl and look identical.
+fn session_jsonl_for_pid(pid: u32) -> Option<(PathBuf, std::time::SystemTime)> {
+    let fd_dir = format!("/proc/{}/fd", pid);
+    let entries = fs::read_dir(&fd_dir).ok()?;
+    let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
+    for entry in entries.flatten() {
+        let target = match fs::read_link(entry.path()) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let s = target.to_string_lossy();
+        if !s.contains("/.claude/projects/") {
+            continue;
+        }
+        if target.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+            continue;
+        }
+        if let Ok(meta) = fs::metadata(&target) {
+            if let Ok(m) = meta.modified() {
+                match &best {
+                    Some((_, prev)) if *prev >= m => {}
+                    _ => best = Some((target.clone(), m)),
+                }
+            }
+        }
+    }
+    best
+}
+
 fn newest_session_jsonl(cwd: &str) -> Option<(PathBuf, std::time::SystemTime)> {
     let claude_dir = get_claude_dir();
     let project_dir = claude_dir.join("projects").join(encode_project_dir(cwd));
@@ -2429,7 +2462,10 @@ fn list_active_agents() -> Vec<AgentInfo> {
             } else { None });
 
         let (jsonl_path, snap, mtime) = if kind == "claude" {
-            match newest_session_jsonl(&cwd) {
+            // Prefer the jsonl this PID is actually writing to so two agents
+            // sharing a cwd don't collapse onto the same session log.
+            let resolved = session_jsonl_for_pid(pid).or_else(|| newest_session_jsonl(&cwd));
+            match resolved {
                 Some((p, m)) => {
                     let snap = snapshot_session(&p);
                     (Some(p.to_string_lossy().to_string()), snap, Some(m))
