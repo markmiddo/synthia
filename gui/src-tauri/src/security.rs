@@ -464,6 +464,27 @@ pub fn append_events(events: &[SecurityEvent]) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn recent_events_for_session(session_id: &str, scan_limit: usize, take: usize) -> Vec<SecurityEvent> {
+    let path = events_path();
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let mut out: Vec<SecurityEvent> = Vec::new();
+    for line in content.lines().rev().take(scan_limit) {
+        if let Ok(e) = serde_json::from_str::<SecurityEvent>(line) {
+            if e.session_id.as_deref() == Some(session_id) {
+                out.push(e);
+                if out.len() >= take {
+                    break;
+                }
+            }
+        }
+    }
+    out.reverse();
+    out
+}
+
 pub fn recent_max_severity_for_session(session_id: &str, scan_limit: usize) -> Option<Severity> {
     let path = events_path();
     let content = fs::read_to_string(&path).ok()?;

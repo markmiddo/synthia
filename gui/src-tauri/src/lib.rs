@@ -2145,6 +2145,7 @@ struct AgentInfo {
     session_id: Option<String>,
     jsonl_path: Option<String>,
     risk: Option<String>, // "info" | "low" | "medium" | "high" | "critical"
+    risk_events: Vec<security::SecurityEvent>,
 }
 
 /// Encode an absolute filesystem path the same way Claude Code does:
@@ -2453,13 +2454,16 @@ fn list_active_agents() -> Vec<AgentInfo> {
         // Combine fresh hits with persisted recent hits for this session so the
         // badge persists past the cursor advance.
         let session_risk = snap.session_id.as_ref().and_then(|sid| {
-            security::recent_max_severity_for_session(sid, 200)
+            security::recent_max_severity_for_session(sid, 400)
         });
         let final_risk = match (risk, session_risk) {
             (Some(a), Some(b)) => Some(if a > b { a } else { b }),
             (Some(a), None) | (None, Some(a)) => Some(a),
             _ => None,
         };
+        let risk_events = snap.session_id.as_deref()
+            .map(|sid| security::recent_events_for_session(sid, 800, 20))
+            .unwrap_or_default();
 
         let status = if kind == "claude" {
             classify_status(mtime).to_string()
@@ -2481,6 +2485,7 @@ fn list_active_agents() -> Vec<AgentInfo> {
             session_id: snap.session_id,
             jsonl_path,
             risk: final_risk.map(|s| s.as_str().to_string()),
+            risk_events,
         });
     }
 

@@ -78,6 +78,7 @@ interface AgentInfo {
   session_id: string | null;
   jsonl_path: string | null;
   risk: "info" | "low" | "medium" | "high" | "critical" | null;
+  risk_events: SecurityEvent[];
 }
 
 interface SecurityEvent {
@@ -1467,7 +1468,11 @@ function App() {
                     {a.risk && (
                       <span
                         className={`agent-risk risk-${a.risk}`}
-                        title={`Security risk: ${a.risk}`}
+                        title={`Security risk: ${a.risk} — ${
+                          a.risk_events.length
+                            ? a.risk_events.slice(-3).map((e) => e.rule).join(", ")
+                            : "expand for details"
+                        }`}
                       >
                         {"⛨"}
                       </span>
@@ -1494,6 +1499,24 @@ function App() {
                         <div className="agent-detail-block">
                           <div className="agent-detail-label">Last action</div>
                           <code>{a.last_action}</code>
+                        </div>
+                      )}
+                      {a.risk_events && a.risk_events.length > 0 && (
+                        <div className="agent-detail-block">
+                          <div className="agent-detail-label">
+                            Security events ({a.risk_events.length})
+                          </div>
+                          <div className="agent-risk-events">
+                            {a.risk_events.slice(-10).reverse().map((e) => (
+                              <div key={e.id} className={`agent-risk-event sev-${e.severity}`}>
+                                <span className={`severity-pill sev-${e.severity}`}>
+                                  {e.severity.toUpperCase()}
+                                </span>
+                                <span className="agent-risk-event-rule">{e.rule}</span>
+                                <span className="agent-risk-event-match">{e.matched}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                       <div className="agent-detail-block agent-meta">
