@@ -85,6 +85,14 @@ interface CommandConfig {
   body: string;
 }
 
+interface SkillConfig {
+  name: string;
+  description: string;
+  body: string;
+  is_dir: boolean;
+  has_resources: boolean;
+}
+
 interface HookConfig {
   event: string;
   command: string;
@@ -166,7 +174,7 @@ interface NoteEntry {
 
 type VoiceView = "main" | "history" | "words";
 type MemoryCategory = "bug" | "pattern" | "arch" | "gotcha" | "stack" | null;
-type ConfigTab = "synthia" | "agents" | "commands" | "hooks" | "plugins";
+type ConfigTab = "synthia" | "agents" | "commands" | "skills" | "hooks" | "plugins";
 
 function App() {
   const [status, setStatus] = useState<Status>("stopped");
@@ -209,12 +217,17 @@ function App() {
   // Claude config state
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [commands, setCommands] = useState<CommandConfig[]>([]);
+  const [skills, setSkills] = useState<SkillConfig[]>([]);
+  const [voiceMuted, setVoiceMuted] = useState(false);
   const [hooks, setHooks] = useState<HookConfig[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
   const [editingCommand, setEditingCommand] = useState<CommandConfig | null>(null);
+  const [editingSkill, setEditingSkill] = useState<SkillConfig | null>(null);
+  const [originalSkillName, setOriginalSkillName] = useState<string | null>(null);
   const [isNewAgent, setIsNewAgent] = useState(false);
   const [isNewCommand, setIsNewCommand] = useState(false);
+  const [isNewSkill, setIsNewSkill] = useState(false);
 
   // Notes state
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
@@ -325,6 +338,7 @@ function App() {
       loadWorktreeRepos();
       loadAgents();
       loadCommands();
+      loadSkills();
       loadHooks();
       loadPlugins();
     }
@@ -382,6 +396,33 @@ function App() {
     const id = setInterval(loadActiveAgents, 5000);
     return () => clearInterval(id);
   }, [currentSection]);
+
+  // Voice mute state - load on mount, refresh periodically (file may be edited externally)
+  useEffect(() => {
+    loadVoiceMuted();
+    const id = setInterval(loadVoiceMuted, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  async function loadVoiceMuted() {
+    try {
+      const muted = await invoke<boolean>("get_voice_muted");
+      setVoiceMuted(muted);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  async function handleToggleVoiceMute() {
+    const next = !voiceMuted;
+    setVoiceMuted(next);
+    try {
+      await invoke("set_voice_muted", { muted: next });
+    } catch (e) {
+      setVoiceMuted(!next);
+      setError(String(e));
+    }
+  }
 
   async function loadWordReplacements() {
     try {
@@ -575,6 +616,15 @@ function App() {
     try {
       const result = await invoke<CommandConfig[]>("list_commands");
       setCommands(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function loadSkills() {
+    try {
+      const result = await invoke<SkillConfig[]>("list_skills");
+      setSkills(result);
     } catch (e) {
       // Ignore errors
     }
@@ -941,6 +991,31 @@ function App() {
     try {
       await invoke("delete_command", { filename });
       loadCommands();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleSaveSkill(skill: SkillConfig) {
+    try {
+      if (originalSkillName && originalSkillName !== skill.name) {
+        await invoke("delete_skill", { name: originalSkillName });
+      }
+      await invoke("save_skill", { skill });
+      setEditingSkill(null);
+      setIsNewSkill(false);
+      setOriginalSkillName(null);
+      loadSkills();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleDeleteSkill(name: string) {
+    if (!confirm(`Delete skill "${name}"?`)) return;
+    try {
+      await invoke("delete_skill", { name });
+      loadSkills();
     } catch (e) {
       setError(String(e));
     }
@@ -1327,6 +1402,14 @@ function App() {
       <div className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-logo">SYNTHIA</div>
+          <button
+            className={`voice-toggle ${voiceMuted ? "muted" : ""}`}
+            onClick={() => handleToggleVoiceMute()}
+            title={voiceMuted ? "Voice muted — click to unmute" : "Voice on — click to mute"}
+            aria-label={voiceMuted ? "Unmute voice" : "Mute voice"}
+          >
+            {voiceMuted ? "🔇" : "🔊"}
+          </button>
         </div>
         <nav className="sidebar-nav">
           <button
@@ -2501,6 +2584,70 @@ function App() {
       );
     }
 
+    // Skill edit modal
+    if (editingSkill) {
+      return (
+        <div className="config-section">
+          <div className="claude-modal">
+            <div className="claude-modal-header">
+              <span>{isNewSkill ? "New Skill" : `Edit: ${editingSkill.name}`}</span>
+              <button
+                className="claude-modal-close"
+                onClick={() => { setEditingSkill(null); setIsNewSkill(false); setOriginalSkillName(null); }}
+              >×</button>
+            </div>
+            <div className="claude-modal-body">
+              {editingSkill.has_resources && !isNewSkill && (
+                <div className="claude-edit-warning">
+                  This skill has additional resource files; only SKILL.md is edited here.
+                </div>
+              )}
+              <div className="claude-edit-field">
+                <label>Name:</label>
+                <input
+                  type="text"
+                  value={editingSkill.name}
+                  onChange={(e) => setEditingSkill({ ...editingSkill, name: e.target.value })}
+                  placeholder="my-skill"
+                />
+              </div>
+              <div className="claude-edit-field">
+                <label>Description:</label>
+                <input
+                  type="text"
+                  value={editingSkill.description}
+                  onChange={(e) => setEditingSkill({ ...editingSkill, description: e.target.value })}
+                  placeholder="Use when... (trigger phrase guides the model)"
+                />
+              </div>
+              <div className="claude-edit-field">
+                <label>Body (markdown):</label>
+                <textarea
+                  value={editingSkill.body}
+                  onChange={(e) => setEditingSkill({ ...editingSkill, body: e.target.value })}
+                  rows={18}
+                />
+              </div>
+            </div>
+            <div className="claude-modal-footer">
+              <button
+                className="claude-btn primary"
+                onClick={() => handleSaveSkill(editingSkill)}
+              >
+                Save
+              </button>
+              <button
+                className="claude-btn"
+                onClick={() => { setEditingSkill(null); setIsNewSkill(false); setOriginalSkillName(null); }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // Command edit modal
     if (editingCommand) {
       return (
@@ -2573,6 +2720,12 @@ function App() {
             onClick={() => setConfigTab("commands")}
           >
             Commands
+          </button>
+          <button
+            className={`config-tab ${configTab === "skills" ? "active" : ""}`}
+            onClick={() => setConfigTab("skills")}
+          >
+            Skills
           </button>
           <button
             className={`config-tab ${configTab === "hooks" ? "active" : ""}`}
@@ -2873,6 +3026,71 @@ function App() {
                     <div className="claude-item-actions">
                       <button className="claude-btn" onClick={() => setEditingCommand(cmd)}>Edit</button>
                       <button className="claude-btn danger" onClick={() => handleDeleteCommand(cmd.filename)}>Delete</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {configTab === "skills" && (
+          <div className="claude-list-section">
+            <div className="claude-list-header">
+              <span>Skills ({skills.length})</span>
+              <button
+                className="claude-btn primary"
+                onClick={() => {
+                  setEditingSkill({
+                    name: "new-skill",
+                    description: "",
+                    body: "",
+                    is_dir: true,
+                    has_resources: false,
+                  });
+                  setOriginalSkillName(null);
+                  setIsNewSkill(true);
+                }}
+              >
+                + New Skill
+              </button>
+            </div>
+            <div className="claude-list">
+              {skills.length === 0 ? (
+                <div className="claude-empty">No user skills found</div>
+              ) : (
+                skills.map((skill) => (
+                  <div key={skill.name} className="claude-item">
+                    <div className="claude-item-main">
+                      <div className="claude-item-info">
+                        <div className="claude-item-name">
+                          {skill.name}
+                          {skill.has_resources && (
+                            <span className="claude-item-badge" title="Has additional files in skill folder">
+                              + files
+                            </span>
+                          )}
+                        </div>
+                        <div className="claude-item-desc">{skill.description || "No description"}</div>
+                      </div>
+                    </div>
+                    <div className="claude-item-actions">
+                      <button
+                        className="claude-btn"
+                        onClick={() => {
+                          setEditingSkill(skill);
+                          setOriginalSkillName(skill.name);
+                          setIsNewSkill(false);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="claude-btn danger"
+                        onClick={() => handleDeleteSkill(skill.name)}
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 ))

@@ -953,6 +953,10 @@
   padding: 0 1rem 1rem;
   border-bottom: 1px solid rgba(6, 182, 212, 0.1);
   margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .sidebar-logo {
@@ -961,6 +965,33 @@
   color: #06b6d4;
   letter-spacing: 0.2em;
   text-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+}
+
+.voice-toggle {
+  background: transparent;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  color: #06b6d4;
+  font-size: 1.1rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+.voice-toggle:hover {
+  background: rgba(6, 182, 212, 0.1);
+  border-color: rgba(6, 182, 212, 0.6);
+}
+.voice-toggle.muted {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+.voice-toggle.muted:hover {
+  background: rgba(239, 68, 68, 0.15);
 }
 
 .sidebar-nav {
@@ -3537,6 +3568,30 @@
   font-weight: 500;
   color: #e2e8f0;
   font-size: 0.85rem;
+}
+
+.claude-item-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  background: rgba(125, 211, 252, 0.1);
+  color: #7dd3fc;
+  border: 1px solid rgba(125, 211, 252, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
+
+.claude-edit-warning {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  background: rgba(251, 191, 36, 0.1);
+  border-left: 3px solid #fbbf24;
+  border-radius: 0.25rem;
+  color: #fbbf24;
+  font-size: 0.8rem;
 }
 
 .claude-item-desc {

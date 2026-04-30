@@ -183,6 +183,15 @@ struct CommandConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+struct SkillConfig {
+    name: String,
+    description: String,
+    body: String,
+    is_dir: bool,
+    has_resources: bool,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
 struct HookConfig {
     event: String,
     command: String,
@@ -363,6 +372,10 @@ fn get_agents_dir() -> PathBuf {
 
 fn get_commands_dir() -> PathBuf {
     get_claude_dir().join("commands")
+}
+
+fn get_skills_dir() -> PathBuf {
+    get_claude_dir().join("skills")
 }
 
 fn get_settings_file() -> PathBuf {
@@ -1069,6 +1082,42 @@ fn clear_history() -> Result<String, String> {
 fn get_config_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/synthia/config.yaml")
+}
+
+fn get_runtime_state_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".config/synthia/runtime.json")
+}
+
+#[tauri::command]
+fn get_voice_muted() -> bool {
+    let path = get_runtime_state_path();
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    serde_json::from_str::<serde_json::Value>(&content)
+        .ok()
+        .and_then(|v| v.get("tts_muted").and_then(|b| b.as_bool()))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_voice_muted(muted: bool) -> Result<(), String> {
+    let path = get_runtime_state_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut state: serde_json::Value = fs::read_to_string(&path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = state.as_object_mut() {
+        obj.insert("tts_muted".to_string(), serde_json::Value::Bool(muted));
+    }
+    let serialized = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    fs::write(&path, serialized).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1830,6 +1879,117 @@ fn delete_command(filename: String) -> Result<String, String> {
         fs::remove_file(&filepath).map_err(|e| e.to_string())?;
     }
     Ok("Command deleted".to_string())
+}
+
+#[tauri::command]
+fn list_skills() -> Vec<SkillConfig> {
+    let skills_dir = get_skills_dir();
+    if !skills_dir.exists() {
+        return Vec::new();
+    }
+
+    let mut skills = Vec::new();
+    let entries = match fs::read_dir(&skills_dir) {
+        Ok(e) => e,
+        Err(_) => return skills,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let skill_md = path.join("SKILL.md");
+            if !skill_md.is_file() {
+                continue;
+            }
+            let content = match fs::read_to_string(&skill_md) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let (fm, body) = parse_frontmatter(&content);
+            let name = fm.get("name").cloned().unwrap_or_else(|| {
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string()
+            });
+            let has_resources = fs::read_dir(&path)
+                .map(|d| d.flatten().any(|e| e.file_name() != "SKILL.md"))
+                .unwrap_or(false);
+            skills.push(SkillConfig {
+                name,
+                description: fm.get("description").cloned().unwrap_or_default(),
+                body: body.trim().to_string(),
+                is_dir: true,
+                has_resources,
+            });
+        } else if path.extension().map(|e| e == "md").unwrap_or(false) {
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let (fm, body) = parse_frontmatter(&content);
+            let stem = path.file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let name = fm.get("name").cloned().unwrap_or(stem);
+            skills.push(SkillConfig {
+                name,
+                description: fm.get("description").cloned().unwrap_or_default(),
+                body: body.trim().to_string(),
+                is_dir: false,
+                has_resources: false,
+            });
+        }
+    }
+
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills
+}
+
+fn validate_skill_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Skill name cannot be empty".to_string());
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("Invalid skill name".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn save_skill(skill: SkillConfig) -> Result<String, String> {
+    validate_skill_name(&skill.name)?;
+    let skills_dir = get_skills_dir();
+    fs::create_dir_all(&skills_dir).map_err(|e| e.to_string())?;
+
+    let content = format!(
+        "---\nname: {}\ndescription: {}\n---\n\n{}",
+        skill.name, skill.description, skill.body.trim()
+    );
+
+    let target_dir = skills_dir.join(&skill.name);
+    fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+    let target_file = target_dir.join("SKILL.md");
+    fs::write(&target_file, content).map_err(|e| e.to_string())?;
+    Ok("Skill saved".to_string())
+}
+
+#[tauri::command]
+fn delete_skill(name: String) -> Result<String, String> {
+    validate_skill_name(&name)?;
+    let skills_dir = get_skills_dir();
+    let dir_path = skills_dir.join(&name);
+    if dir_path.is_dir() {
+        fs::remove_dir_all(&dir_path).map_err(|e| e.to_string())?;
+        return Ok("Skill deleted".to_string());
+    }
+    let file_path = skills_dir.join(format!("{}.md", name));
+    if file_path.is_file() {
+        fs::remove_file(&file_path).map_err(|e| e.to_string())?;
+        return Ok("Skill deleted".to_string());
+    }
+    Err("Skill not found".to_string())
 }
 
 #[tauri::command]
@@ -3202,6 +3362,11 @@ pub fn run() {
             list_commands,
             save_command,
             delete_command,
+            list_skills,
+            save_skill,
+            delete_skill,
+            get_voice_muted,
+            set_voice_muted,
             list_hooks,
             list_plugins,
             toggle_plugin,
