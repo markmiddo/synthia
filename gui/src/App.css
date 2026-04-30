@@ -4350,3 +4350,13 @@
   font-size: 0.85rem;
 }
 .agent-kill-btn:hover { background: #991b1b; }
+.usage-error {
+  padding: 0.75rem; color: var(--text-muted, #888); font-size: 0.85rem;
+}
+.usage-error-detail {
+  font-size: 0.7rem; opacity: 0.6; margin-top: 0.25rem;
+  font-family: monospace; word-break: break-all;
+}
+.usage-meta {
+  font-size: 0.7rem; color: var(--text-muted, #888); margin-top: 0.15rem;
+}

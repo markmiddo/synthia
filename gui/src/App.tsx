@@ -264,15 +264,17 @@ function App() {
 
   // Usage stats state
   const [usageStats, setUsageStats] = useState<{
-    session_tokens: number;
-    session_pct: number;
-    session_resets_at: string;
-    week_tokens: number;
-    week_pct: number;
-    week_resets_at: string;
-    sonnet_week_tokens: number;
-    sonnet_week_pct: number;
-    subscription_type: string;
+    five_hour_pct: number;
+    five_hour_resets_at: string;
+    five_hour_resets_in: string;
+    seven_day_pct: number;
+    seven_day_resets_at: string;
+    seven_day_resets_in: string;
+    seven_day_opus_pct: number | null;
+    seven_day_opus_resets_at: string | null;
+    seven_day_opus_resets_in: string | null;
+    subscription_type: string | null;
+    error: string | null;
   } | null>(null);
 
   useEffect(() => {
@@ -1278,16 +1280,10 @@ function App() {
     );
   }
 
-  function formatTokens(n: number): string {
-    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-    return n.toString();
-  }
-
   function usageBarColor(pct: number): string {
     if (pct >= 80) return "#ef4444";
-    if (pct >= 50) return "#eab308";
-    return "#06b6d4";
+    if (pct >= 50) return "#f59e0b";
+    return "#22c55e";
   }
 
   function renderSidebar() {
@@ -1352,65 +1348,91 @@ function App() {
         {usageStats && (
           <div className="usage-widget">
             <div className="usage-header">
-              <span className="usage-title">Claude Usage <span style={{ fontSize: '0.65em', opacity: 0.5 }}>(est.)</span></span>
+              <span className="usage-title">Claude Usage</span>
               {usageStats.subscription_type && (
                 <span className="usage-badge">{usageStats.subscription_type}</span>
               )}
             </div>
-            <div className="usage-section">
-              <div className="usage-label">Current session</div>
-              <div className="usage-bar-row">
-                <div className="usage-bar">
-                  <div
-                    className="usage-bar-fill"
-                    style={{ width: `${usageStats.session_pct}%`, background: usageBarColor(usageStats.session_pct) }}
-                  />
+
+            {usageStats.error ? (
+              <div className="usage-error">
+                Usage unavailable
+                <div className="usage-error-detail">{usageStats.error}</div>
+              </div>
+            ) : (
+              <>
+                <div className="usage-section">
+                  <div className="usage-label">5-hour</div>
+                  <div className="usage-bar-row">
+                    <div className="usage-bar">
+                      <div
+                        className="usage-bar-fill"
+                        style={{
+                          width: `${Math.min(100, usageStats.five_hour_pct)}%`,
+                          background: usageBarColor(usageStats.five_hour_pct),
+                        }}
+                      />
+                    </div>
+                    <span className="usage-pct">
+                      {Math.round(usageStats.five_hour_pct)}%
+                    </span>
+                  </div>
+                  {usageStats.five_hour_resets_in && (
+                    <div className="usage-meta">
+                      Resets in {usageStats.five_hour_resets_in}
+                    </div>
+                  )}
                 </div>
-                <span className="usage-pct">{Math.round(usageStats.session_pct)}%</span>
-              </div>
-              <div className="usage-details">
-                <span className="usage-tokens">{formatTokens(usageStats.session_tokens)} tokens</span>
-                {usageStats.session_resets_at && (
-                  <span className="usage-reset">Resets {usageStats.session_resets_at}</span>
-                )}
-              </div>
-            </div>
-            <div className="usage-section">
-              <div className="usage-label">Current week</div>
-              <div className="usage-bar-row">
-                <div className="usage-bar">
-                  <div
-                    className="usage-bar-fill"
-                    style={{ width: `${usageStats.week_pct}%`, background: usageBarColor(usageStats.week_pct) }}
-                  />
+
+                <div className="usage-section">
+                  <div className="usage-label">7-day</div>
+                  <div className="usage-bar-row">
+                    <div className="usage-bar">
+                      <div
+                        className="usage-bar-fill"
+                        style={{
+                          width: `${Math.min(100, usageStats.seven_day_pct)}%`,
+                          background: usageBarColor(usageStats.seven_day_pct),
+                        }}
+                      />
+                    </div>
+                    <span className="usage-pct">
+                      {Math.round(usageStats.seven_day_pct)}%
+                    </span>
+                  </div>
+                  {usageStats.seven_day_resets_in && (
+                    <div className="usage-meta">
+                      Resets in {usageStats.seven_day_resets_in}
+                    </div>
+                  )}
                 </div>
-                <span className="usage-pct">{Math.round(usageStats.week_pct)}%</span>
-              </div>
-              <div className="usage-details">
-                <span className="usage-tokens">{formatTokens(usageStats.week_tokens)} tokens</span>
-                {usageStats.week_resets_at && (
-                  <span className="usage-reset">Resets {usageStats.week_resets_at}</span>
+
+                {usageStats.seven_day_opus_pct !== null && (
+                  <div className="usage-section">
+                    <div className="usage-label">7-day Opus</div>
+                    <div className="usage-bar-row">
+                      <div className="usage-bar">
+                        <div
+                          className="usage-bar-fill"
+                          style={{
+                            width: `${Math.min(100, usageStats.seven_day_opus_pct ?? 0)}%`,
+                            background: usageBarColor(usageStats.seven_day_opus_pct ?? 0),
+                          }}
+                        />
+                      </div>
+                      <span className="usage-pct">
+                        {Math.round(usageStats.seven_day_opus_pct ?? 0)}%
+                      </span>
+                    </div>
+                    {usageStats.seven_day_opus_resets_in && (
+                      <div className="usage-meta">
+                        Resets in {usageStats.seven_day_opus_resets_in}
+                      </div>
+                    )}
+                  </div>
                 )}
-              </div>
-            </div>
-            <div className="usage-section">
-              <div className="usage-label">Sonnet (weekly)</div>
-              <div className="usage-bar-row">
-                <div className="usage-bar">
-                  <div
-                    className="usage-bar-fill"
-                    style={{ width: `${usageStats.sonnet_week_pct}%`, background: usageBarColor(usageStats.sonnet_week_pct) }}
-                  />
-                </div>
-                <span className="usage-pct">{Math.round(usageStats.sonnet_week_pct)}%</span>
-              </div>
-              <div className="usage-details">
-                <span className="usage-tokens">{formatTokens(usageStats.sonnet_week_tokens)} tokens</span>
-                {usageStats.week_resets_at && (
-                  <span className="usage-reset">Resets {usageStats.week_resets_at}</span>
-                )}
-              </div>
-            </div>
+              </>
+            )}
           </div>
         )}
       </div>
