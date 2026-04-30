@@ -273,6 +273,9 @@ function App() {
     seven_day_opus_pct: number | null;
     seven_day_opus_resets_at: string | null;
     seven_day_opus_resets_in: string | null;
+    seven_day_sonnet_pct: number | null;
+    seven_day_sonnet_resets_at: string | null;
+    seven_day_sonnet_resets_in: string | null;
     subscription_type: string | null;
     error: string | null;
   } | null>(null);
@@ -1427,6 +1430,31 @@ function App() {
                     {usageStats.seven_day_opus_resets_in && (
                       <div className="usage-meta">
                         Resets in {usageStats.seven_day_opus_resets_in}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {usageStats.seven_day_sonnet_pct !== null && (
+                  <div className="usage-section">
+                    <div className="usage-label">7-day Sonnet</div>
+                    <div className="usage-bar-row">
+                      <div className="usage-bar">
+                        <div
+                          className="usage-bar-fill"
+                          style={{
+                            width: `${Math.min(100, usageStats.seven_day_sonnet_pct ?? 0)}%`,
+                            background: usageBarColor(usageStats.seven_day_sonnet_pct ?? 0),
+                          }}
+                        />
+                      </div>
+                      <span className="usage-pct">
+                        {Math.round(usageStats.seven_day_sonnet_pct ?? 0)}%
+                      </span>
+                    </div>
+                    {usageStats.seven_day_sonnet_resets_in && (
+                      <div className="usage-meta">
+                        Resets in {usageStats.seven_day_sonnet_resets_in}
                       </div>
                     )}
                   </div>

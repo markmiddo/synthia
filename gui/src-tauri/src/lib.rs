@@ -2257,6 +2257,9 @@ struct UsageStats {
     seven_day_opus_pct: Option<f64>,
     seven_day_opus_resets_at: Option<String>,
     seven_day_opus_resets_in: Option<String>,
+    seven_day_sonnet_pct: Option<f64>,
+    seven_day_sonnet_resets_at: Option<String>,
+    seven_day_sonnet_resets_in: Option<String>,
     subscription_type: Option<String>,
     error: Option<String>,
 }
@@ -2280,6 +2283,7 @@ struct UsageResponse {
     five_hour: Option<UsageWindow>,
     seven_day: Option<UsageWindow>,
     seven_day_opus: Option<UsageWindow>,
+    seven_day_sonnet: Option<UsageWindow>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -2420,6 +2424,13 @@ fn get_usage_stats() -> UsageStats {
         if let Some(r) = w.resets_at {
             stats.seven_day_opus_resets_in = Some(humanize_duration_until(&r));
             stats.seven_day_opus_resets_at = Some(r);
+        }
+    }
+    if let Some(w) = body.seven_day_sonnet {
+        stats.seven_day_sonnet_pct = w.utilization;
+        if let Some(r) = w.resets_at {
+            stats.seven_day_sonnet_resets_in = Some(humanize_duration_until(&r));
+            stats.seven_day_sonnet_resets_at = Some(r);
         }
     }
 
