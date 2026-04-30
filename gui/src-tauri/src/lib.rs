@@ -1966,6 +1966,284 @@ fn toggle_plugin(name: String, enabled: bool) -> Result<String, String> {
 
 // === (Tasks/Kanban code removed — superseded by agents monitor) ===
 
+// === AGENTS COMMANDS ===
+
+#[derive(Serialize, Debug, Clone)]
+struct AgentInfo {
+    pid: u32,
+    cwd: String,
+    project_name: String,
+    branch: Option<String>,
+    status: String, // "active" | "idle" | "stale"
+    started_at: String,
+    last_activity: Option<String>,
+    last_user_msg: Option<String>,
+    last_action: Option<String>,
+    session_id: Option<String>,
+    jsonl_path: Option<String>,
+}
+
+/// Encode an absolute filesystem path the same way Claude Code does:
+/// replace `/` with `-`. Leading slash → leading `-`.
+/// e.g. "/home/markmiddo/dev/misc/synthia" → "-home-markmiddo-dev-misc-synthia"
+fn encode_project_dir(cwd: &str) -> String {
+    cwd.replace('/', "-")
+}
+
+/// Read /proc/<pid>/cwd symlink. Returns None on permission error.
+fn read_proc_cwd(pid: u32) -> Option<String> {
+    let link = format!("/proc/{}/cwd", pid);
+    fs::read_link(&link).ok().and_then(|p| p.to_str().map(|s| s.to_string()))
+}
+
+/// Parse `ps -eo etime` (e.g. "01:23", "1-02:03:04", "1234:56") into seconds.
+fn parse_etime(etime: &str) -> u64 {
+    let etime = etime.trim();
+    let (days, rest) = match etime.split_once('-') {
+        Some((d, r)) => (d.parse::<u64>().unwrap_or(0), r),
+        None => (0, etime),
+    };
+    let parts: Vec<&str> = rest.split(':').collect();
+    let (h, m, s) = match parts.as_slice() {
+        [h, m, s] => (h.parse().unwrap_or(0), m.parse().unwrap_or(0), s.parse().unwrap_or(0)),
+        [m, s] => (0u64, m.parse().unwrap_or(0), s.parse().unwrap_or(0)),
+        _ => (0, 0, 0),
+    };
+    days * 86400 + h * 3600 + m * 60 + s
+}
+
+/// Returns Vec of (pid, etime_seconds, full_argv).
+fn list_claude_processes(self_pid: u32) -> Vec<(u32, u64, String)> {
+    use std::process::Command;
+    let output = match Command::new("ps")
+        .args(["-eo", "pid=,etime=,args="])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim_start();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.splitn(3, char::is_whitespace).filter(|s| !s.is_empty());
+        let pid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
+            Some(p) => p,
+            None => continue,
+        };
+        if pid == self_pid {
+            continue;
+        }
+        let etime_str = match parts.next() { Some(s) => s, None => continue };
+        let argv = match parts.next() { Some(s) => s.to_string(), None => continue };
+
+        let argv_lc = argv.to_lowercase();
+        if argv_lc.contains("grep ") || argv_lc.contains("statusline") {
+            continue;
+        }
+        let first = argv.split_whitespace().next().unwrap_or("");
+        let first_base = std::path::Path::new(first).file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let looks_like_claude = first_base == "claude"
+            || argv.contains("/claude/cli")
+            || argv.contains("@anthropic-ai/claude-code");
+        if !looks_like_claude {
+            continue;
+        }
+
+        out.push((pid, parse_etime(etime_str), argv));
+    }
+    out
+}
+
+#[derive(Default)]
+struct SessionSnapshot {
+    last_user_msg: Option<String>,
+    last_action: Option<String>,
+    session_id: Option<String>,
+    last_activity: Option<String>,
+}
+
+fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
+    let content = match fs::read_to_string(jsonl_path) {
+        Ok(c) => c,
+        Err(_) => return SessionSnapshot::default(),
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(400);
+    let tail = &lines[start..];
+
+    let mut snap = SessionSnapshot::default();
+    for line in tail {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if snap.session_id.is_none() {
+            if let Some(sid) = v.get("sessionId").and_then(|s| s.as_str()) {
+                snap.session_id = Some(sid.to_string());
+            }
+        }
+        if let Some(ts) = v.get("timestamp").and_then(|s| s.as_str()) {
+            snap.last_activity = Some(ts.to_string());
+        }
+        let msg_type = v.get("type").and_then(|s| s.as_str()).unwrap_or("");
+        if msg_type == "user" {
+            let text = v.get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| {
+                    if let Some(s) = c.as_str() { return Some(s.to_string()); }
+                    if let Some(arr) = c.as_array() {
+                        for item in arr {
+                            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
+                                    return Some(t.to_string());
+                                }
+                            }
+                        }
+                    }
+                    None
+                });
+            if let Some(t) = text {
+                let trimmed = t.trim();
+                if !trimmed.is_empty() && !trimmed.starts_with('<') {
+                    let truncated: String = trimmed.chars().take(200).collect();
+                    snap.last_user_msg = Some(truncated);
+                }
+            }
+        } else if msg_type == "assistant" {
+            if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
+                for item in content {
+                    if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                        let name = item.get("name").and_then(|s| s.as_str()).unwrap_or("tool");
+                        let input = item.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                        let target = input.get("file_path").and_then(|s| s.as_str())
+                            .or_else(|| input.get("command").and_then(|s| s.as_str()))
+                            .or_else(|| input.get("pattern").and_then(|s| s.as_str()))
+                            .or_else(|| input.get("description").and_then(|s| s.as_str()))
+                            .unwrap_or("");
+                        let target_short: String = target.chars().take(60).collect();
+                        snap.last_action = Some(if target_short.is_empty() {
+                            name.to_string()
+                        } else {
+                            format!("{}: {}", name, target_short)
+                        });
+                    }
+                }
+            }
+        }
+    }
+    snap
+}
+
+fn newest_session_jsonl(cwd: &str) -> Option<(PathBuf, std::time::SystemTime)> {
+    let claude_dir = get_claude_dir();
+    let project_dir = claude_dir.join("projects").join(encode_project_dir(cwd));
+    if !project_dir.is_dir() {
+        return None;
+    }
+    let mut newest: Option<(PathBuf, std::time::SystemTime)> = None;
+    if let Ok(entries) = fs::read_dir(&project_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") { continue; }
+            if let Ok(meta) = p.metadata() {
+                if let Ok(m) = meta.modified() {
+                    match &newest {
+                        Some((_, prev)) if *prev >= m => {}
+                        _ => newest = Some((p, m)),
+                    }
+                }
+            }
+        }
+    }
+    newest
+}
+
+fn classify_status(mtime: Option<std::time::SystemTime>) -> &'static str {
+    let now = std::time::SystemTime::now();
+    match mtime.and_then(|m| now.duration_since(m).ok()) {
+        Some(d) if d.as_secs() < 30 => "active",
+        Some(d) if d.as_secs() < 300 => "idle",
+        _ => "stale",
+    }
+}
+
+fn started_at_from_etime(etime_secs: u64) -> String {
+    let started = chrono::Local::now() - chrono::Duration::seconds(etime_secs as i64);
+    started.to_rfc3339()
+}
+
+#[tauri::command]
+fn list_active_agents() -> Vec<AgentInfo> {
+    let self_pid = std::process::id();
+    let mut agents = Vec::new();
+
+    for (pid, etime_secs, _argv) in list_claude_processes(self_pid) {
+        let cwd = match read_proc_cwd(pid) {
+            Some(c) => c,
+            None => continue,
+        };
+        let project_name = std::path::Path::new(&cwd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
+
+        let branch = std::process::Command::new("git")
+            .args(["-C", &cwd, "branch", "--show-current"])
+            .output()
+            .ok()
+            .and_then(|o| if o.status.success() {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if s.is_empty() { None } else { Some(s) }
+            } else { None });
+
+        let (jsonl_path, snap, mtime) = match newest_session_jsonl(&cwd) {
+            Some((p, m)) => {
+                let snap = snapshot_session(&p);
+                (Some(p.to_string_lossy().to_string()), snap, Some(m))
+            }
+            None => (None, SessionSnapshot::default(), None),
+        };
+
+        agents.push(AgentInfo {
+            pid,
+            cwd,
+            project_name,
+            branch,
+            status: classify_status(mtime).to_string(),
+            started_at: started_at_from_etime(etime_secs),
+            last_activity: snap.last_activity,
+            last_user_msg: snap.last_user_msg,
+            last_action: snap.last_action,
+            session_id: snap.session_id,
+            jsonl_path,
+        });
+    }
+
+    agents.sort_by(|a, b| {
+        let order = |s: &str| match s { "active" => 0, "idle" => 1, _ => 2 };
+        order(&a.status).cmp(&order(&b.status))
+            .then(b.started_at.cmp(&a.started_at))
+    });
+    agents
+}
+
+#[tauri::command]
+fn kill_agent(pid: u32) -> Result<(), String> {
+    let status = std::process::Command::new("kill")
+        .arg(pid.to_string())
+        .status()
+        .map_err(|e| format!("Failed to spawn kill: {}", e))?;
+    if !status.success() {
+        return Err(format!("kill exited with status {:?}", status.code()));
+    }
+    Ok(())
+}
+
 // === USAGE COMMANDS ===
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -2906,8 +3184,38 @@ pub fn run() {
             get_github_config,
             save_github_config,
             get_github_issues,
-            get_notes_base_path_cmd
+            get_notes_base_path_cmd,
+            list_active_agents,
+            kill_agent
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn etime_parses_mm_ss() {
+        assert_eq!(parse_etime("01:23"), 83);
+    }
+
+    #[test]
+    fn etime_parses_hh_mm_ss() {
+        assert_eq!(parse_etime("1:02:03"), 3723);
+    }
+
+    #[test]
+    fn etime_parses_days() {
+        assert_eq!(parse_etime("2-03:04:05"), 2 * 86400 + 3 * 3600 + 4 * 60 + 5);
+    }
+
+    #[test]
+    fn encodes_project_dir() {
+        assert_eq!(
+            encode_project_dir("/home/markmiddo/dev/misc/synthia"),
+            "-home-markmiddo-dev-misc-synthia"
+        );
+    }
 }
