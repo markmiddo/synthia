@@ -52,26 +52,72 @@ def _re(pattern: str):
     return re.compile(pattern, re.IGNORECASE)
 
 
+# Bash rules are scoped to a specific binary so they only fire when that
+# program is actually being invoked at a shell-segment boundary, not when
+# the same string appears inside an `echo`/`gh`/`git commit` quoted arg.
+#
+# (rule, severity, binaries, arg_pattern)
+#   - binaries: list of basenames; "*" matches any.
+#   - arg_pattern: regex tested against the joined args (or whole segment
+#     when binaries == "*").
 BASH_RULES = [
-    ("destructive-rm", CRITICAL, _re(r"rm\s+-rf?\s+(/|~|\$home|--no-preserve-root)")),
-    ("dd-block-device", CRITICAL, _re(r"\bdd\b.+of=/dev/(sd|nvme|hd)")),
-    ("pipe-to-shell", CRITICAL, _re(r"(curl|wget|fetch)[^|]*\|\s*(sh|bash|zsh|fish)\b")),
-    ("base64-exec", CRITICAL, _re(r"base64\s+(-d|--decode)[^|]*\|\s*(sh|bash|python|node)")),
-    ("sudo", HIGH, _re(r"\bsudo\b")),
-    ("setuid-bit", HIGH, _re(r"chmod\s+\+s\b")),
-    ("setcap", HIGH, _re(r"\bsetcap\b")),
-    ("shell-rc-tamper", HIGH, _re(r">+\s*~?/?\.(bashrc|zshrc|profile|bash_profile|zprofile)\b")),
-    ("ssh-key-access", HIGH, _re(r"~?/?\.ssh/(id_|authorized_keys|known_hosts)")),
-    ("gpg-access", HIGH, _re(r"~?/?\.gnupg/")),
-    ("aws-credentials", HIGH, _re(r"~?/?\.aws/credentials")),
+    (
+        "destructive-rm",
+        CRITICAL,
+        ["rm"],
+        _re(r"-[rR]f?\b.*(?:^|\s)(/|~|\$home|--no-preserve-root)"),
+    ),
+    ("dd-block-device", CRITICAL, ["dd"], _re(r"of=/dev/(sd|nvme|hd)")),
+    ("setuid-bit", HIGH, ["chmod"], _re(r"\+s\b")),
+    ("setcap", HIGH, ["setcap"], None),
+    (
+        "ssh-key-access",
+        HIGH,
+        ["cat", "less", "more", "head", "tail", "cp", "mv", "rm"],
+        _re(r"~?/?\.ssh/(id_|authorized_keys|known_hosts)"),
+    ),
+    (
+        "gpg-access",
+        HIGH,
+        ["cat", "less", "more", "head", "tail", "cp", "mv", "rm", "tar", "zip"],
+        _re(r"~?/?\.gnupg/"),
+    ),
+    (
+        "aws-credentials",
+        HIGH,
+        ["cat", "less", "more", "head", "tail", "cp", "mv"],
+        _re(r"~?/?\.aws/credentials"),
+    ),
     (
         "secret-exfil",
         CRITICAL,
-        _re(r"(curl|wget|scp|rsync)[^|;&\n]*(\.ssh|\.aws|\.gnupg|credentials|secret|token)"),
+        ["curl", "wget", "scp", "rsync"],
+        _re(r"(\.ssh|\.aws|\.gnupg|credentials|secret|token|api[_-]?key)"),
     ),
-    ("mass-kill", MEDIUM, _re(r"\bpkill\s+-9\b|\bkillall\s+-9\b")),
-    ("git-remote-rewrite", MEDIUM, _re(r"git\s+remote\s+(set-url|add)\s+\S+\s+(http|git@)")),
-    ("history-tamper", MEDIUM, _re(r"history\s+-c|>\s*~?/?\.(bash_history|zsh_history)")),
+    ("mass-kill", MEDIUM, ["pkill", "killall"], _re(r"-9\b")),
+    (
+        "git-remote-rewrite",
+        MEDIUM,
+        ["git"],
+        _re(r"\bremote\s+(set-url|add)\s+\S+\s+(https?:|git@)"),
+    ),
+    ("history-tamper", MEDIUM, ["history"], _re(r"-c\b")),
+]
+
+
+# Whole-segment rules — match across the segment string, not bound to one
+# binary. Used for shell features (pipes, redirections) that don't have a
+# single binary owner.
+SEGMENT_RULES = [
+    (
+        "pipe-to-shell",
+        CRITICAL,
+        _re(r"(?:^|[\s;&|])(curl|wget|fetch)\b[^|]*\|\s*(sh|bash|zsh|fish)\b"),
+    ),
+    ("base64-exec", CRITICAL, _re(r"\bbase64\s+(-d|--decode)\b[^|]*\|\s*(sh|bash|python|node)\b")),
+    ("shell-rc-tamper", HIGH, _re(r">>?\s*~?/?\.(bashrc|zshrc|profile|bash_profile|zprofile)\b")),
+    ("history-redir-tamper", MEDIUM, _re(r">\s*~?/?\.(bash_history|zsh_history)\b")),
+    ("sudo", HIGH, _re(r"(?:^|[\s;&|])sudo\b")),
 ]
 
 WRITE_RULES = [
@@ -102,14 +148,113 @@ INJECTION_RULES = [
 ]
 
 
+STATEMENT_SPLIT = re.compile(r"\s*(?:;|&&|\|\|)\s*")
+PIPE_SPLIT = re.compile(r"\s*\|(?!\|)\s*")
+ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _split_statements(cmd: str) -> list[str]:
+    return [s.strip() for s in STATEMENT_SPLIT.split(cmd) if s.strip()]
+
+
+def _split_pipeline_stages(stmt: str) -> list[str]:
+    return [s.strip() for s in PIPE_SPLIT.split(stmt) if s.strip()]
+
+
+def _binary_of(segment: str) -> tuple[str | None, list[str]]:
+    """Return (basename, argv) for a shell segment.
+
+    Skips leading VAR=val env assignments. Falls back to whitespace split
+    if shlex chokes (e.g. unbalanced quote in an arg).
+    """
+    import shlex
+
+    try:
+        tokens = shlex.split(segment, posix=True)
+    except ValueError:
+        tokens = segment.split()
+    while tokens and ENV_ASSIGN.match(tokens[0]):
+        tokens = tokens[1:]
+    if not tokens:
+        return None, []
+    bin_name = tokens[0]
+    # strip path
+    if "/" in bin_name:
+        bin_name = bin_name.rsplit("/", 1)[-1]
+    return bin_name, tokens[1:]
+
+
+QUOTING_BINARIES = {
+    "echo",
+    "printf",
+    "gh",
+    "git",
+    "jq",
+    "awk",
+    "sed",
+    "python",
+    "python3",
+    "node",
+    "ruby",
+    "perl",
+}
+
+
+def _evaluate_bash(cmd: str) -> list[dict]:
+    hits: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def emit(rule: str, sev: str, matched: str) -> None:
+        key = (rule, matched)
+        if key in seen:
+            return
+        seen.add(key)
+        hits.append({"rule": rule, "severity": sev, "matched": matched})
+
+    for stmt in _split_statements(cmd):
+        # Statement-level rules see the full pipeline (curl ... | sh) and
+        # any redirections.
+        for name, sev, pat in SEGMENT_RULES:
+            m = pat.search(stmt)
+            if m:
+                emit(name, sev, m.group(0))
+
+        # If the statement starts with a quoting/reporting binary (echo, gh,
+        # git commit, etc.), its quoted args are not real commands — skip
+        # binary-bound rules entirely for the whole statement.
+        head_bin, _ = _binary_of(stmt)
+        if head_bin in QUOTING_BINARIES:
+            continue
+
+        # Otherwise iterate pipeline stages — only the binary-bound rules
+        # for the actual program in each stage fire.
+        for stage in _split_pipeline_stages(stmt):
+            binary, args = _binary_of(stage)
+            if not binary:
+                continue
+            if binary in QUOTING_BINARIES:
+                continue
+            joined = " ".join(args)
+            for name, sev, bins, pat in BASH_RULES:
+                if bins != "*" and binary not in bins:
+                    continue
+                if pat is None:
+                    matched = binary
+                else:
+                    m = pat.search(joined)
+                    if not m:
+                        continue
+                    matched = m.group(0)
+                emit(name, sev, matched)
+
+    return hits
+
+
 def evaluate(tool: str, tool_input: dict) -> list[dict]:
     hits: list[dict] = []
     if tool == "Bash":
         cmd = tool_input.get("command", "") or ""
-        for name, sev, pat in BASH_RULES:
-            m = pat.search(cmd)
-            if m:
-                hits.append({"rule": name, "severity": sev, "matched": m.group(0)})
+        hits.extend(_evaluate_bash(cmd))
     elif tool in ("Write", "Edit", "NotebookEdit"):
         path = tool_input.get("file_path", "") or ""
         for name, sev, pat in WRITE_RULES:

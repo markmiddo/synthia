@@ -111,84 +111,228 @@ pub fn evaluate_tool(tool: &str, input: &Value) -> Vec<RuleHit> {
     hits
 }
 
+// Binaries whose args are usually quoted strings or scripts, not real
+// commands. Skip binary-bound rules for the entire statement when one of
+// these is the head binary.
+fn is_quoting_binary(name: &str) -> bool {
+    matches!(
+        name,
+        "echo" | "printf" | "gh" | "git" | "jq" | "awk" | "sed"
+            | "python" | "python3" | "node" | "ruby" | "perl"
+    )
+}
+
+fn split_statements(cmd: &str) -> Vec<&str> {
+    // Split on `;`, `&&`, `||`. NOT on `|` — pipelines remain intact for
+    // statement-level rules.
+    let mut out = Vec::new();
+    let bytes = cmd.as_bytes();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let split_len = if b == b';' {
+            1
+        } else if i + 1 < bytes.len()
+            && ((b == b'&' && bytes[i + 1] == b'&')
+                || (b == b'|' && bytes[i + 1] == b'|'))
+        {
+            2
+        } else {
+            0
+        };
+        if split_len > 0 {
+            let part = cmd[start..i].trim();
+            if !part.is_empty() {
+                out.push(part);
+            }
+            i += split_len;
+            start = i;
+            continue;
+        }
+        i += 1;
+    }
+    let last = cmd[start..].trim();
+    if !last.is_empty() {
+        out.push(last);
+    }
+    out
+}
+
+fn split_pipeline(stmt: &str) -> Vec<&str> {
+    // Split on `|` but skip `||`.
+    let mut out = Vec::new();
+    let bytes = stmt.as_bytes();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'|' && (i + 1 >= bytes.len() || bytes[i + 1] != b'|')
+            && (i == 0 || bytes[i - 1] != b'|')
+        {
+            let part = stmt[start..i].trim();
+            if !part.is_empty() {
+                out.push(part);
+            }
+            i += 1;
+            start = i;
+            continue;
+        }
+        i += 1;
+    }
+    let last = stmt[start..].trim();
+    if !last.is_empty() {
+        out.push(last);
+    }
+    out
+}
+
+fn shlex_split(s: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '\\' if !in_single => {
+                if let Some(&next) = chars.peek() {
+                    cur.push(next);
+                    chars.next();
+                }
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            _ => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+fn is_env_assign(tok: &str) -> bool {
+    let bytes = tok.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let first = bytes[0];
+    if !(first.is_ascii_alphabetic() || first == b'_') {
+        return false;
+    }
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'=' {
+            return i > 0;
+        }
+        if !(b.is_ascii_alphanumeric() || b == b'_') {
+            return false;
+        }
+    }
+    false
+}
+
+fn binary_of(segment: &str) -> Option<(String, String)> {
+    let mut tokens = shlex_split(segment);
+    while !tokens.is_empty() && is_env_assign(&tokens[0]) {
+        tokens.remove(0);
+    }
+    if tokens.is_empty() {
+        return None;
+    }
+    let bin_full = tokens.remove(0);
+    let basename = std::path::Path::new(&bin_full)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&bin_full)
+        .to_string();
+    Some((basename, tokens.join(" ")))
+}
+
+// (rule, severity, &[binary basenames], optional arg-pattern)
+type BinRule = (&'static str, Severity, &'static [&'static str], Option<&'static str>);
+
+const BASH_RULES: &[BinRule] = &[
+    ("destructive-rm", Severity::Critical, &["rm"], Some(r"-[rR]f?\b.*(?:^|\s)(/|~|\$home|--no-preserve-root)")),
+    ("dd-block-device", Severity::Critical, &["dd"], Some(r"of=/dev/(sd|nvme|hd)")),
+    ("setuid-bit", Severity::High, &["chmod"], Some(r"\+s\b")),
+    ("setcap", Severity::High, &["setcap"], None),
+    ("ssh-key-access", Severity::High, &["cat", "less", "more", "head", "tail", "cp", "mv", "rm"], Some(r"~?/?\.ssh/(id_|authorized_keys|known_hosts)")),
+    ("gpg-access", Severity::High, &["cat", "less", "more", "head", "tail", "cp", "mv", "rm", "tar", "zip"], Some(r"~?/?\.gnupg/")),
+    ("aws-credentials", Severity::High, &["cat", "less", "more", "head", "tail", "cp", "mv"], Some(r"~?/?\.aws/credentials")),
+    ("secret-exfil", Severity::Critical, &["curl", "wget", "scp", "rsync"], Some(r"(\.ssh|\.aws|\.gnupg|credentials|secret|token|api[_-]?key)")),
+    ("mass-kill", Severity::Medium, &["pkill", "killall"], Some(r"-9\b")),
+    ("git-remote-rewrite", Severity::Medium, &["git"], Some(r"\bremote\s+(set-url|add)\s+\S+\s+(https?:|git@)")),
+    ("history-tamper", Severity::Medium, &["history"], Some(r"-c\b")),
+];
+
+const STMT_RULES: &[(&'static str, Severity, &'static str)] = &[
+    ("pipe-to-shell", Severity::Critical, r"(?:^|[\s;&|])(curl|wget|fetch)\b[^|]*\|\s*(sh|bash|zsh|fish)\b"),
+    ("base64-exec", Severity::Critical, r"\bbase64\s+(-d|--decode)\b[^|]*\|\s*(sh|bash|python|node)\b"),
+    ("shell-rc-tamper", Severity::High, r">>?\s*~?/?\.(bashrc|zshrc|profile|bash_profile|zprofile)\b"),
+    ("history-redir-tamper", Severity::Medium, r">\s*~?/?\.(bash_history|zsh_history)\b"),
+    ("sudo", Severity::High, r"(?:^|[\s;&|])sudo\b"),
+];
+
 fn evaluate_bash(cmd: &str) -> Vec<RuleHit> {
-    let mut hits = Vec::new();
-    let lower = cmd.to_lowercase();
+    let mut hits: Vec<RuleHit> = Vec::new();
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
 
-    // Destructive rm
-    if let Some(m) = match_first(&lower, &[
-        r"rm\s+-rf?\s+/",
-        r"rm\s+-rf?\s+~",
-        r"rm\s+-rf?\s+\$home",
-        r"rm\s+-rf?\s+--no-preserve-root",
-    ]) {
-        hits.push(RuleHit { rule: "destructive-rm", severity: Severity::Critical, matched: m });
-    }
+    let mut emit = |rule: &'static str, sev: Severity, matched: String,
+                    seen: &mut std::collections::HashSet<(String, String)>,
+                    hits: &mut Vec<RuleHit>| {
+        let key = (rule.to_string(), matched.clone());
+        if seen.insert(key) {
+            hits.push(RuleHit { rule, severity: sev, matched });
+        }
+    };
 
-    // dd to block device
-    if regex_match(&lower, r"\bdd\b.+of=/dev/(sd|nvme|hd)") {
-        hits.push(RuleHit { rule: "dd-block-device", severity: Severity::Critical, matched: "dd of=/dev/...".to_string() });
-    }
+    let lower_full = cmd.to_lowercase();
+    for stmt in split_statements(&lower_full) {
+        // statement-level rules (full pipeline visible)
+        for (rule, sev, pat) in STMT_RULES {
+            if let Ok(re) = regex::Regex::new(pat) {
+                if let Some(m) = re.find(stmt) {
+                    emit(rule, *sev, m.as_str().to_string(), &mut seen, &mut hits);
+                }
+            }
+        }
 
-    // Pipe to shell
-    if regex_match(&lower, r"(curl|wget|fetch)[^|]*\|\s*(sh|bash|zsh|fish)\b") {
-        hits.push(RuleHit { rule: "pipe-to-shell", severity: Severity::Critical, matched: "curl/wget | sh".to_string() });
-    }
+        let head = binary_of(stmt).map(|(b, _)| b);
+        if head.as_deref().map(is_quoting_binary).unwrap_or(false) {
+            continue;
+        }
 
-    // Base64 + exec
-    if regex_match(&lower, r"base64\s+(-d|--decode)[^|]*\|\s*(sh|bash|python|node)") {
-        hits.push(RuleHit { rule: "base64-exec", severity: Severity::Critical, matched: "base64 -d | sh".to_string() });
+        for stage in split_pipeline(stmt) {
+            let (binary, args) = match binary_of(stage) {
+                Some(t) => t,
+                None => continue,
+            };
+            if is_quoting_binary(&binary) {
+                continue;
+            }
+            for (rule, sev, bins, pat) in BASH_RULES {
+                if !bins.contains(&binary.as_str()) {
+                    continue;
+                }
+                let matched = match pat {
+                    None => binary.clone(),
+                    Some(p) => match regex::Regex::new(p)
+                        .ok()
+                        .and_then(|r| r.find(&args).map(|m| m.as_str().to_string()))
+                    {
+                        Some(s) => s,
+                        None => continue,
+                    },
+                };
+                emit(rule, *sev, matched, &mut seen, &mut hits);
+            }
+        }
     }
-
-    // Privilege escalation
-    if regex_match(&lower, r"\bsudo\b") {
-        hits.push(RuleHit { rule: "sudo", severity: Severity::High, matched: "sudo".to_string() });
-    }
-    if regex_match(&lower, r"chmod\s+\+s\b") {
-        hits.push(RuleHit { rule: "setuid-bit", severity: Severity::High, matched: "chmod +s".to_string() });
-    }
-    if regex_match(&lower, r"\bsetcap\b") {
-        hits.push(RuleHit { rule: "setcap", severity: Severity::High, matched: "setcap".to_string() });
-    }
-
-    // Shell-rc tamper
-    if regex_match(&lower, r">+\s*~?/?\.(bashrc|zshrc|profile|bash_profile|zprofile)\b") {
-        hits.push(RuleHit { rule: "shell-rc-tamper", severity: Severity::High, matched: "rc-file write".to_string() });
-    }
-
-    // SSH key read
-    if regex_match(&lower, r"~?/?\.ssh/(id_|authorized_keys|known_hosts)") {
-        hits.push(RuleHit { rule: "ssh-key-access", severity: Severity::High, matched: "~/.ssh/...".to_string() });
-    }
-
-    // GPG / credentials
-    if regex_match(&lower, r"~?/?\.gnupg/") {
-        hits.push(RuleHit { rule: "gpg-access", severity: Severity::High, matched: "~/.gnupg/...".to_string() });
-    }
-    if regex_match(&lower, r"~?/?\.aws/credentials") {
-        hits.push(RuleHit { rule: "aws-credentials", severity: Severity::High, matched: "~/.aws/credentials".to_string() });
-    }
-
-    // Network exfil pattern: tar/zip + curl/scp to non-localhost
-    if regex_match(&lower, r"(curl|wget|scp|rsync)[^|;&\n]*(\.ssh|\.aws|\.gnupg|credentials|secret|token)") {
-        hits.push(RuleHit { rule: "secret-exfil", severity: Severity::Critical, matched: "secret + network".to_string() });
-    }
-
-    // Mass kill
-    if regex_match(&lower, r"\bpkill\s+-9\b|\bkillall\s+-9\b") {
-        hits.push(RuleHit { rule: "mass-kill", severity: Severity::Medium, matched: "pkill -9".to_string() });
-    }
-
-    // Git remote rewrite
-    if regex_match(&lower, r"git\s+remote\s+(set-url|add)\s+\S+\s+(http|git@)") {
-        hits.push(RuleHit { rule: "git-remote-rewrite", severity: Severity::Medium, matched: "git remote set-url".to_string() });
-    }
-
-    // History tamper
-    if regex_match(&lower, r"history\s+-c|>\s*~?/?\.(bash_history|zsh_history)") {
-        hits.push(RuleHit { rule: "history-tamper", severity: Severity::Medium, matched: "history clear".to_string() });
-    }
-
     hits
 }
 
