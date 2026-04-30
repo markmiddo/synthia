@@ -4299,8 +4299,8 @@
 .agent-row { border-bottom: 1px solid var(--border, #2a2a2a); }
 .agent-row.expanded { background: var(--surface-2, #1a1a1a); }
 .agent-summary {
-  display: grid;
-  grid-template-columns: 16px 1fr auto auto 2fr;
+  display: flex;
+  flex-wrap: nowrap;
   gap: 0.75rem;
   align-items: center;
   width: 100%;
@@ -4311,6 +4311,21 @@
   text-align: left;
   cursor: pointer;
   font-size: 0.9rem;
+  min-width: 0;
+}
+.agent-summary > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-summary .agent-last-action {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+.agent-summary .agent-project {
+  min-width: 7rem;
 }
 .agent-summary:hover { background: var(--surface-2, #1a1a1a); }
 .agent-status-dot {
@@ -4321,7 +4336,23 @@
 .status-idle   { background: #fbbf24; }
 .status-stale  { background: #555; }
 .agent-project { font-weight: 600; }
+.agent-cwd     { color: var(--text-muted, #888); font-family: monospace; font-size: 0.8em; }
 .agent-branch  { color: var(--text-muted, #888); font-family: monospace; font-size: 0.85em; }
+.agent-kind {
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.25rem;
+  background: var(--surface-2, #1f1f1f);
+  color: var(--text-muted, #aaa);
+  border: 1px solid var(--border, #333);
+}
+.kind-claude   { color: #d4a373; border-color: #d4a37340; }
+.kind-opencode { color: #7dd3fc; border-color: #7dd3fc40; }
+.kind-kimi     { color: #c4b5fd; border-color: #c4b5fd40; }
+.kind-codex    { color: #86efac; border-color: #86efac40; }
 .agent-elapsed { color: var(--text-muted, #888); font-size: 0.85em; min-width: 5em; }
 .agent-last-action {
   color: var(--text-muted, #aaa);

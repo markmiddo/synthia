@@ -1971,6 +1971,7 @@ fn toggle_plugin(name: String, enabled: bool) -> Result<String, String> {
 #[derive(Serialize, Debug, Clone)]
 struct AgentInfo {
     pid: u32,
+    kind: String, // "claude" | "opencode" | "kimi" | "codex"
     cwd: String,
     project_name: String,
     branch: Option<String>,
@@ -2012,8 +2013,59 @@ fn parse_etime(etime: &str) -> u64 {
     days * 86400 + h * 3600 + m * 60 + s
 }
 
-/// Returns Vec of (pid, etime_seconds, full_argv).
-fn list_claude_processes(self_pid: u32) -> Vec<(u32, u64, String)> {
+/// Identify which AI CLI is running, if any. Returns kind name or None.
+fn classify_ai_argv(argv: &str) -> Option<&'static str> {
+    let argv_lc = argv.to_lowercase();
+    if argv_lc.contains("grep ") || argv_lc.contains("statusline") {
+        return None;
+    }
+    let mut tokens = argv.split_whitespace();
+    let first = tokens.next().unwrap_or("");
+    let first_base = std::path::Path::new(first)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let second = tokens.next().unwrap_or("");
+    let second_base = std::path::Path::new(second)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+
+    // Claude Code
+    if first_base == "claude"
+        || argv.contains("/claude/cli")
+        || argv.contains("@anthropic-ai/claude-code")
+    {
+        return Some("claude");
+    }
+    // OpenCode
+    if first_base == "opencode"
+        || argv.contains(".opencode/bin/opencode")
+        || argv.contains("/opencode/bin/opencode")
+    {
+        return Some("opencode");
+    }
+    // Kimi (python wrapper)
+    if first_base == "kimi"
+        || second_base == "kimi"
+        || argv.contains("kimi-cli/bin/kimi")
+        || argv.contains("/.kimi/bin/")
+    {
+        return Some("kimi");
+    }
+    // Codex (node script)
+    if first_base == "codex"
+        || second_base == "codex"
+        || argv.contains("@openai/codex")
+        || argv.contains("/codex.js")
+    {
+        return Some("codex");
+    }
+    None
+}
+
+/// Returns Vec of (pid, etime_seconds, full_argv, kind).
+fn list_ai_processes(self_pid: u32) -> Vec<(u32, u64, String, &'static str)> {
     use std::process::Command;
     let output = match Command::new("ps")
         .args(["-eo", "pid=,etime=,args="])
@@ -2029,31 +2081,27 @@ fn list_claude_processes(self_pid: u32) -> Vec<(u32, u64, String)> {
         if line.is_empty() {
             continue;
         }
-        let mut parts = line.splitn(3, char::is_whitespace).filter(|s| !s.is_empty());
-        let pid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
+        let mut tokens = line.split_whitespace();
+        let pid: u32 = match tokens.next().and_then(|s| s.parse().ok()) {
             Some(p) => p,
             None => continue,
         };
         if pid == self_pid {
             continue;
         }
-        let etime_str = match parts.next() { Some(s) => s, None => continue };
-        let argv = match parts.next() { Some(s) => s.to_string(), None => continue };
-
-        let argv_lc = argv.to_lowercase();
-        if argv_lc.contains("grep ") || argv_lc.contains("statusline") {
+        let etime_str = match tokens.next() { Some(s) => s, None => continue };
+        let argv_parts: Vec<&str> = tokens.collect();
+        if argv_parts.is_empty() {
             continue;
         }
-        let first = argv.split_whitespace().next().unwrap_or("");
-        let first_base = std::path::Path::new(first).file_name().and_then(|s| s.to_str()).unwrap_or("");
-        let looks_like_claude = first_base == "claude"
-            || argv.contains("/claude/cli")
-            || argv.contains("@anthropic-ai/claude-code");
-        if !looks_like_claude {
-            continue;
-        }
+        let argv = argv_parts.join(" ");
 
-        out.push((pid, parse_etime(etime_str), argv));
+        let kind = match classify_ai_argv(&argv) {
+            Some(k) => k,
+            None => continue,
+        };
+
+        out.push((pid, parse_etime(etime_str), argv, kind));
     }
     out
 }
@@ -2119,12 +2167,26 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
                     if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
                         let name = item.get("name").and_then(|s| s.as_str()).unwrap_or("tool");
                         let input = item.get("input").cloned().unwrap_or(serde_json::Value::Null);
-                        let target = input.get("file_path").and_then(|s| s.as_str())
-                            .or_else(|| input.get("command").and_then(|s| s.as_str()))
-                            .or_else(|| input.get("pattern").and_then(|s| s.as_str()))
-                            .or_else(|| input.get("description").and_then(|s| s.as_str()))
-                            .unwrap_or("");
-                        let target_short: String = target.chars().take(60).collect();
+                        let target = match name {
+                            "Bash" => input.get("description").and_then(|s| s.as_str())
+                                .or_else(|| input.get("command").and_then(|s| s.as_str())),
+                            "Read" | "Edit" | "Write" | "NotebookEdit" =>
+                                input.get("file_path").and_then(|s| s.as_str()),
+                            "Grep" | "Glob" =>
+                                input.get("pattern").and_then(|s| s.as_str()),
+                            "Agent" | "Task" | "TaskCreate" | "TaskUpdate" =>
+                                input.get("description").and_then(|s| s.as_str())
+                                    .or_else(|| input.get("prompt").and_then(|s| s.as_str())),
+                            "WebFetch" | "WebSearch" =>
+                                input.get("url").and_then(|s| s.as_str())
+                                    .or_else(|| input.get("query").and_then(|s| s.as_str())),
+                            _ => input.get("description").and_then(|s| s.as_str())
+                                .or_else(|| input.get("file_path").and_then(|s| s.as_str()))
+                                .or_else(|| input.get("command").and_then(|s| s.as_str()))
+                                .or_else(|| input.get("pattern").and_then(|s| s.as_str())),
+                        }.unwrap_or("");
+                        let target_clean = target.split('\n').next().unwrap_or("").trim();
+                        let target_short: String = target_clean.chars().take(80).collect();
                         snap.last_action = Some(if target_short.is_empty() {
                             name.to_string()
                         } else {
@@ -2181,7 +2243,7 @@ fn list_active_agents() -> Vec<AgentInfo> {
     let self_pid = std::process::id();
     let mut agents = Vec::new();
 
-    for (pid, etime_secs, _argv) in list_claude_processes(self_pid) {
+    for (pid, etime_secs, _argv, kind) in list_ai_processes(self_pid) {
         let cwd = match read_proc_cwd(pid) {
             Some(c) => c,
             None => continue,
@@ -2201,20 +2263,31 @@ fn list_active_agents() -> Vec<AgentInfo> {
                 if s.is_empty() { None } else { Some(s) }
             } else { None });
 
-        let (jsonl_path, snap, mtime) = match newest_session_jsonl(&cwd) {
-            Some((p, m)) => {
-                let snap = snapshot_session(&p);
-                (Some(p.to_string_lossy().to_string()), snap, Some(m))
+        let (jsonl_path, snap, mtime) = if kind == "claude" {
+            match newest_session_jsonl(&cwd) {
+                Some((p, m)) => {
+                    let snap = snapshot_session(&p);
+                    (Some(p.to_string_lossy().to_string()), snap, Some(m))
+                }
+                None => (None, SessionSnapshot::default(), None),
             }
-            None => (None, SessionSnapshot::default(), None),
+        } else {
+            (None, SessionSnapshot::default(), None)
+        };
+
+        let status = if kind == "claude" {
+            classify_status(mtime).to_string()
+        } else {
+            "active".to_string()
         };
 
         agents.push(AgentInfo {
             pid,
+            kind: kind.to_string(),
             cwd,
             project_name,
             branch,
-            status: classify_status(mtime).to_string(),
+            status,
             started_at: started_at_from_etime(etime_secs),
             last_activity: snap.last_activity,
             last_user_msg: snap.last_user_msg,
