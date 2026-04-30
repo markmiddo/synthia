@@ -327,6 +327,124 @@ def is_paused() -> bool:
         return False
 
 
+# ---- LLM classifier (optional second-pass intent check) ----
+
+LLM_CACHE_PATH = SECURITY_DIR / "llm_cache.json"
+LLM_CACHE_TTL_S = 3600
+LLM_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+LLM_TIMEOUT_S = 6
+
+
+def _llm_cache_load() -> dict:
+    try:
+        return json.loads(LLM_CACHE_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _llm_cache_save(data: dict) -> None:
+    SECURITY_DIR.mkdir(parents=True, exist_ok=True)
+    LLM_CACHE_PATH.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _llm_cache_key(tool: str, tool_input: dict) -> str:
+    import hashlib
+
+    blob = json.dumps({"tool": tool, "input": tool_input}, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def _read_oauth_token() -> str | None:
+    try:
+        creds = json.loads(
+            (Path.home() / ".claude" / ".credentials.json").read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    return (creds.get("claudeAiOauth") or {}).get("accessToken")
+
+
+def llm_classify(
+    tool: str, tool_input: dict, hits: list[dict], cfg: dict
+) -> tuple[str, str] | None:
+    """Second-pass LLM intent check.
+
+    Returns (severity, reason) or None when classification is unavailable
+    or skipped (no creds, library missing, cached miss, etc).
+    """
+    if not cfg.get("enabled"):
+        return None
+    threshold = cfg.get("threshold", "medium")
+    threshold_rank = SEV_RANK.get(threshold, SEV_RANK[MEDIUM])
+    max_rank = max((SEV_RANK.get(h["severity"], 0) for h in hits), default=0)
+    if max_rank < threshold_rank:
+        return None
+
+    cache = _llm_cache_load()
+    key = _llm_cache_key(tool, tool_input)
+    now = time.time()
+    cached = cache.get(key)
+    if cached and now - cached.get("ts", 0) < LLM_CACHE_TTL_S:
+        return cached.get("severity"), cached.get("reason", "")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or _read_oauth_token()
+    if not api_key:
+        return None
+
+    try:
+        import anthropic  # type: ignore
+    except Exception:
+        return None
+
+    model = cfg.get("model", LLM_DEFAULT_MODEL)
+    rule_summary = ", ".join(f"{h['rule']}({h['severity']})" for h in hits)
+    user_block = json.dumps({"tool": tool, "input": tool_input}, indent=2)[:2000]
+
+    prompt = (
+        "You are a security analyst auditing a tool call about to be run "
+        "by a developer's local AI coding agent. Local rules already "
+        f"flagged this call (rule hits: {rule_summary}). Decide if this "
+        "is genuinely malicious / dangerous given the visible intent, or "
+        "a benign developer action that the static rules over-flagged. "
+        "Reply with strict JSON only: "
+        '{"severity":"info|low|medium|high|critical","reason":"<one short sentence>"}'
+    )
+
+    try:
+        kwargs: dict = {"timeout": LLM_TIMEOUT_S}
+        if api_key.startswith("sk-ant-oat"):
+            # OAuth token from Claude Code
+            client = anthropic.Anthropic(auth_token=api_key, **kwargs)
+        else:
+            client = anthropic.Anthropic(api_key=api_key, **kwargs)
+        msg = client.messages.create(
+            model=model,
+            max_tokens=200,
+            system=prompt,
+            messages=[{"role": "user", "content": f"Tool call:\n{user_block}"}],
+        )
+    except Exception:
+        return None
+
+    text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip()
+    sev = MEDIUM
+    reason = ""
+    try:
+        # Tolerate fenced code or stray prose
+        m = re.search(r"\{[^{}]*\"severity\"[^{}]*\}", text, re.DOTALL)
+        data = json.loads(m.group(0) if m else text)
+        sev = (data.get("severity") or MEDIUM).lower()
+        if sev not in SEV_RANK:
+            sev = MEDIUM
+        reason = (data.get("reason") or "").strip()
+    except Exception:
+        return None
+
+    cache[key] = {"ts": now, "severity": sev, "reason": reason}
+    _llm_cache_save(cache)
+    return sev, reason
+
+
 # ---- event recording ----
 
 
@@ -432,10 +550,28 @@ def main() -> int:
     mode = policy.get("mode", "permissive")
     paused = is_paused()
 
+    # Optional second-pass: ask Claude Haiku whether the static-rule
+    # flags really look malicious. Result can DOWNGRADE (treat as info,
+    # let the call through) or UPGRADE (force a deny on a high hit).
+    llm_cfg = policy.get("llm_classifier") or {}
+    llm_result = llm_classify(tool, tool_input, hits, llm_cfg) if not paused else None
+    llm_severity, llm_reason = llm_result if llm_result else (None, None)
+
     max_rank = max(SEV_RANK.get(h["severity"], 0) for h in hits)
+    if llm_severity is not None:
+        llm_rank = SEV_RANK.get(llm_severity, max_rank)
+        # Always defer to LLM verdict when it is available (it has more
+        # context than the regex). Annotate every hit with the new
+        # severity so the event log reflects the verdict.
+        max_rank = llm_rank
+        for h in hits:
+            h["severity"] = llm_severity
+            h["matched"] = (h.get("matched", "") + f"  [llm: {llm_reason}]").strip()
     severity_max = next(name for name, r in SEV_RANK.items() if r == max_rank)
     should_block = severity_max in block_on or (mode == "strict" and max_rank >= SEV_RANK[MEDIUM])
     should_prompt = mode == "prompt" or (severity_max == HIGH and "high" not in block_on)
+
+    actor = "llm-classifier" if llm_severity is not None else "rule-engine"
 
     if paused:
         for h in hits:
@@ -444,10 +580,12 @@ def main() -> int:
 
     if should_block:
         for h in hits:
-            append_event(make_event(h, tool, tool_input, "denied", "policy-default", ctx))
+            append_event(make_event(h, tool, tool_input, "denied", actor, ctx))
+        suffix = f" — {llm_reason}" if llm_reason else ""
         sys.stderr.write(
             f"NeuralGuard blocked {tool} call. Rule(s): "
             + ", ".join(h["rule"] for h in hits)
+            + suffix
             + ". Edit ~/.config/synthia/security/policy.yaml to adjust.\n"
         )
         return 2
