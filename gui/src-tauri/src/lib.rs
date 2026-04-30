@@ -2502,6 +2502,181 @@ fn clear_security_events() -> Result<(), String> {
     security::clear_events().map_err(|e| e.to_string())
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct PendingPrompt {
+    id: String,
+    ts: String,
+    tool: String,
+    raw: serde_json::Value,
+    events: Vec<serde_json::Value>,
+    agent_pid: Option<u32>,
+    timeout_s: Option<u64>,
+}
+
+fn pending_prompts_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".config/synthia/security/pending-prompts")
+}
+
+fn prompt_responses_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".config/synthia/security/prompt-responses")
+}
+
+#[tauri::command]
+fn list_pending_prompts() -> Vec<PendingPrompt> {
+    let dir = pending_prompts_dir();
+    if !dir.is_dir() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if entry.path().extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(text) = fs::read_to_string(entry.path()) {
+                if let Ok(p) = serde_json::from_str::<PendingPrompt>(&text) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.ts.cmp(&b.ts));
+    out
+}
+
+#[tauri::command]
+fn respond_to_prompt(id: String, decision: String) -> Result<(), String> {
+    let allow = decision == "allow";
+    let dir = prompt_responses_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let payload = serde_json::json!({
+        "id": id,
+        "decision": if allow { "allow" } else { "deny" },
+        "ts": chrono::Utc::now().to_rfc3339(),
+    });
+    let file = dir.join(format!("{}.json", id));
+    fs::write(&file, payload.to_string()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn synthia_python_path() -> PathBuf {
+    let root = get_synthia_root();
+    root.join("venv/bin/python")
+}
+
+fn security_gate_path() -> PathBuf {
+    let root = get_synthia_root();
+    root.join("src/synthia/hooks/security_gate.py")
+}
+
+#[tauri::command]
+fn neuralguard_status() -> serde_json::Value {
+    let settings = get_settings_file();
+    let installed = match fs::read_to_string(&settings) {
+        Ok(c) => c.contains("security_gate.py"),
+        Err(_) => false,
+    };
+    serde_json::json!({
+        "installed": installed,
+        "events_path": security::events_path_for_display(),
+        "policy_path": security::policy_path_for_display(),
+        "gate_script": security_gate_path().to_string_lossy(),
+    })
+}
+
+#[tauri::command]
+fn install_neuralguard_hooks() -> Result<String, String> {
+    let settings = get_settings_file();
+    fs::create_dir_all(settings.parent().ok_or("no parent")?).map_err(|e| e.to_string())?;
+    let mut root: serde_json::Value = if settings.exists() {
+        let txt = fs::read_to_string(&settings).map_err(|e| e.to_string())?;
+        serde_json::from_str(&txt).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    let py = synthia_python_path();
+    let gate = security_gate_path();
+    let cmd = format!("{} {}", py.to_string_lossy(), gate.to_string_lossy());
+
+    let entry = serde_json::json!({
+        "matcher": "",
+        "hooks": [
+            { "type": "command", "command": cmd, "timeout": 35 }
+        ]
+    });
+
+    for event in ["PreToolUse", "PostToolUse"] {
+        let hooks = root
+            .as_object_mut()
+            .unwrap()
+            .entry("hooks")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .ok_or("hooks not object")?;
+        let arr = hooks
+            .entry(event.to_string())
+            .or_insert_with(|| serde_json::json!([]))
+            .as_array_mut()
+            .ok_or("event not array")?;
+        // dedupe: drop existing security_gate entries first
+        arr.retain(|item| {
+            !item
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.contains("security_gate.py"))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        });
+        arr.push(entry.clone());
+    }
+
+    let serialized = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    fs::write(&settings, serialized).map_err(|e| e.to_string())?;
+    security::ensure_dir().map_err(|e| e.to_string())?;
+    Ok("NeuralGuard hooks installed".to_string())
+}
+
+#[tauri::command]
+fn uninstall_neuralguard_hooks() -> Result<String, String> {
+    let settings = get_settings_file();
+    if !settings.exists() {
+        return Ok("Nothing to remove".to_string());
+    }
+    let txt = fs::read_to_string(&settings).map_err(|e| e.to_string())?;
+    let mut root: serde_json::Value = serde_json::from_str(&txt).map_err(|e| e.to_string())?;
+    if let Some(hooks) = root.get_mut("hooks").and_then(|v| v.as_object_mut()) {
+        for event in ["PreToolUse", "PostToolUse"] {
+            if let Some(arr) = hooks.get_mut(event).and_then(|v| v.as_array_mut()) {
+                arr.retain(|item| {
+                    !item
+                        .get("hooks")
+                        .and_then(|h| h.as_array())
+                        .map(|hs| {
+                            hs.iter().any(|h| {
+                                h.get("command")
+                                    .and_then(|c| c.as_str())
+                                    .map(|s| s.contains("security_gate.py"))
+                                    .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false)
+                });
+            }
+        }
+    }
+    let serialized = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    fs::write(&settings, serialized).map_err(|e| e.to_string())?;
+    Ok("NeuralGuard hooks removed".to_string())
+}
+
 #[tauri::command]
 fn scan_all_sessions() -> Result<usize, String> {
     let self_pid = std::process::id();
@@ -3423,6 +3598,11 @@ pub fn run() {
             list_security_events,
             clear_security_events,
             scan_all_sessions,
+            list_pending_prompts,
+            respond_to_prompt,
+            neuralguard_status,
+            install_neuralguard_hooks,
+            uninstall_neuralguard_hooks,
             list_hooks,
             list_plugins,
             toggle_plugin,

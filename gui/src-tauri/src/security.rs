@@ -74,6 +74,14 @@ pub fn ensure_dir() -> std::io::Result<()> {
     fs::create_dir_all(security_dir())
 }
 
+pub fn events_path_for_display() -> String {
+    events_path().to_string_lossy().to_string()
+}
+
+pub fn policy_path_for_display() -> String {
+    security_dir().join("policy.yaml").to_string_lossy().to_string()
+}
+
 /// Returns Vec<RuleHit> for a given tool_use input. Empty on clean.
 pub fn evaluate_tool(tool: &str, input: &Value) -> Vec<RuleHit> {
     let mut hits = Vec::new();

@@ -96,6 +96,16 @@ interface SecurityEvent {
   actor: string;
 }
 
+interface PendingPrompt {
+  id: string;
+  ts: string;
+  tool: string;
+  raw: unknown;
+  events: Array<{ rule: string; severity: string; matched: string }>;
+  agent_pid: number | null;
+  timeout_s: number | null;
+}
+
 interface CommandConfig {
   filename: string;
   description: string;
@@ -238,6 +248,13 @@ function App() {
   const [voiceMuted, setVoiceMuted] = useState(false);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
   const [securityFilter, setSecurityFilter] = useState<"all" | "high+">("all");
+  const [neuralguardStatus, setNeuralguardStatus] = useState<{
+    installed: boolean;
+    events_path: string;
+    policy_path: string;
+    gate_script: string;
+  } | null>(null);
+  const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>([]);
   const [hooks, setHooks] = useState<HookConfig[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
@@ -427,9 +444,63 @@ function App() {
   useEffect(() => {
     if (currentSection !== "security") return;
     loadSecurityEvents();
+    loadNeuralguardStatus();
     const id = setInterval(loadSecurityEvents, 4000);
     return () => clearInterval(id);
   }, [currentSection]);
+
+  // Pending security prompts poll (runs always so modal can interrupt anywhere)
+  useEffect(() => {
+    loadPendingPrompts();
+    const id = setInterval(loadPendingPrompts, 1500);
+    return () => clearInterval(id);
+  }, []);
+
+  async function loadPendingPrompts() {
+    try {
+      const list = await invoke<PendingPrompt[]>("list_pending_prompts");
+      setPendingPrompts(list);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  async function handlePromptDecision(id: string, decision: "allow" | "deny") {
+    try {
+      await invoke("respond_to_prompt", { id, decision });
+      setPendingPrompts((prev) => prev.filter((p) => p.id !== id));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function loadNeuralguardStatus() {
+    try {
+      const s = await invoke<typeof neuralguardStatus>("neuralguard_status");
+      setNeuralguardStatus(s);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  async function handleInstallHooks() {
+    try {
+      await invoke<string>("install_neuralguard_hooks");
+      loadNeuralguardStatus();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleUninstallHooks() {
+    if (!confirm("Remove NeuralGuard from Claude Code hooks?")) return;
+    try {
+      await invoke<string>("uninstall_neuralguard_hooks");
+      loadNeuralguardStatus();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   async function loadSecurityEvents() {
     try {
@@ -1467,6 +1538,8 @@ function App() {
       }
     }
 
+    const installed = neuralguardStatus?.installed ?? false;
+
     return (
       <div className="security-section">
         <div className="security-header">
@@ -1483,6 +1556,30 @@ function App() {
             <button className="claude-btn danger" onClick={handleClearSecurityEvents}>
               Clear events
             </button>
+          </div>
+        </div>
+
+        <div className={`neuralguard-install ${installed ? "installed" : ""}`}>
+          <div className="neuralguard-install-text">
+            <div className="neuralguard-install-title">
+              {installed ? "NeuralGuard hooks active" : "NeuralGuard hooks not installed"}
+            </div>
+            <div className="neuralguard-install-sub">
+              {installed
+                ? "Claude Code calls go through the gate. Critical rules deny by default; edit policy.yaml to add prompt/strict modes."
+                : "Install hooks to make Claude Code consult NeuralGuard before each tool call. Until then this view is observe-only over jsonl logs."}
+            </div>
+          </div>
+          <div className="neuralguard-install-actions">
+            {installed ? (
+              <button className="claude-btn danger" onClick={handleUninstallHooks}>
+                Uninstall
+              </button>
+            ) : (
+              <button className="claude-btn primary" onClick={handleInstallHooks}>
+                Install hooks
+              </button>
+            )}
           </div>
         </div>
 
@@ -3683,9 +3780,52 @@ function App() {
     );
   }
 
+  function renderPromptModal() {
+    if (pendingPrompts.length === 0) return null;
+    const p = pendingPrompts[0];
+    const raw = (p.raw ?? {}) as Record<string, unknown>;
+    const command =
+      (raw.command as string | undefined) ??
+      (raw.file_path as string | undefined) ??
+      (raw.url as string | undefined) ??
+      JSON.stringify(p.raw, null, 2);
+    return (
+      <div className="prompt-modal-backdrop">
+        <div className="prompt-modal">
+          <div className="prompt-modal-header">
+            <span className="prompt-modal-title">⛨ NeuralGuard — confirm tool call</span>
+            <span className="prompt-modal-pid">pid {p.agent_pid ?? "?"}</span>
+          </div>
+          <div className="prompt-modal-body">
+            <div className="prompt-modal-tool">{p.tool}</div>
+            <pre className="prompt-modal-cmd">{command}</pre>
+            <div className="prompt-modal-rules">
+              {p.events.map((ev, i) => (
+                <div key={i} className={`prompt-rule sev-${ev.severity}`}>
+                  <span className={`severity-pill sev-${ev.severity}`}>{ev.severity.toUpperCase()}</span>
+                  <span>{ev.rule}</span>
+                  <span className="prompt-rule-match">{ev.matched}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="prompt-modal-footer">
+            <button className="claude-btn danger" onClick={() => handlePromptDecision(p.id, "deny")}>
+              Deny
+            </button>
+            <button className="claude-btn primary" onClick={() => handlePromptDecision(p.id, "allow")}>
+              Allow once
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-layout">
       {renderSidebar()}
+      {renderPromptModal()}
       <main className="main-content">
         {currentSection === "agents" && renderAgentsSection()}
         {currentSection === "security" && renderSecuritySection()}

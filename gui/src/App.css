@@ -4524,6 +4524,100 @@
   font-size: 0.75rem;
   color: var(--text-muted, #888);
 }
+
+.neuralguard-install {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(251, 146, 60, 0.4);
+  background: rgba(251, 146, 60, 0.08);
+}
+.neuralguard-install.installed {
+  border-color: rgba(125, 211, 252, 0.4);
+  background: rgba(125, 211, 252, 0.07);
+}
+.neuralguard-install-title { font-weight: 600; color: #e2e8f0; }
+.neuralguard-install-sub { font-size: 0.85rem; color: var(--text-muted, #aaa); margin-top: 0.2rem; }
+
+.prompt-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.prompt-modal {
+  background: #0e0e0e;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 0.5rem;
+  width: min(640px, 95vw);
+  max-height: 85vh;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(239, 68, 68, 0.2);
+}
+.prompt-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid #2a2a2a;
+}
+.prompt-modal-title { font-weight: 700; color: #ef4444; }
+.prompt-modal-pid { font-size: 0.8rem; color: var(--text-muted, #888); font-family: monospace; }
+.prompt-modal-body { padding: 1rem; }
+.prompt-modal-tool {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #fb923c;
+  margin-bottom: 0.5rem;
+}
+.prompt-modal-cmd {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid #2a2a2a;
+  border-radius: 0.35rem;
+  padding: 0.6rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 0.75rem;
+  max-height: 200px;
+  overflow: auto;
+}
+.prompt-modal-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.prompt-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.3rem;
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+.prompt-rule-match {
+  font-family: monospace;
+  color: var(--text-muted, #888);
+  margin-left: auto;
+}
+.prompt-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid #2a2a2a;
+}
 .agent-elapsed { color: var(--text-muted, #888); font-size: 0.85em; min-width: 5em; }
 .agent-last-action {
   color: var(--text-muted, #aaa);
