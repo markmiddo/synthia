@@ -66,6 +66,7 @@ interface AgentConfig {
 
 interface AgentInfo {
   pid: number;
+  kind: string;
   cwd: string;
   project_name: string;
   branch: string | null;
@@ -1213,10 +1214,31 @@ function App() {
       return `${s}s`;
     }
 
+    function shortenCwd(cwd: string): string {
+      const home = "/home/markmiddo";
+      const p = cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
+      const parts = p.split("/").filter(Boolean);
+      if (parts.length <= 3) return p;
+      return parts.slice(-3).join("/");
+    }
+
+    function agentHeadline(a: AgentInfo): string {
+      const action = (a.last_action ?? "").trim();
+      const msg = (a.last_user_msg ?? "").trim();
+      const noisy = /^Bash:\s*[\{\(]|^Bash:\s*\w+\s*\(\)\s*\{|;|\b(kill|sleep|cd|ls|cat|grep|sudo|tail|head)\b/;
+      const looksNoisy =
+        action.startsWith("Bash: ") &&
+        (noisy.test(action) || /[{}();$]/.test(action));
+      if (looksNoisy && msg) {
+        return msg.length > 80 ? msg.slice(0, 80) + "…" : msg;
+      }
+      return action || msg || "—";
+    }
+
     return (
       <div className="agents-section">
         <div className="agents-header">
-          <h2>Claude Code Agents</h2>
+          <h2>AI Agents</h2>
           <span className="agents-count">
             {activeAgents.length} {activeAgents.length === 1 ? "agent" : "agents"} running
           </span>
@@ -1225,7 +1247,7 @@ function App() {
         {activeAgentsLoading && activeAgents.length === 0 ? (
           <div className="agents-loading">Scanning…</div>
         ) : activeAgents.length === 0 ? (
-          <div className="agents-empty">No Claude Code agents running</div>
+          <div className="agents-empty">No AI agents running</div>
         ) : (
           <ul className="agents-list">
             {activeAgents.map((a) => {
@@ -1240,11 +1262,15 @@ function App() {
                     onClick={() => setExpandedAgentPid(expanded ? null : a.pid)}
                   >
                     <span className={`agent-status-dot status-${a.status}`} />
+                    <span className={`agent-kind kind-${a.kind}`}>{a.kind}</span>
                     <span className="agent-project">{a.project_name}</span>
+                    <span className="agent-cwd" title={a.cwd}>
+                      {shortenCwd(a.cwd)}
+                    </span>
                     {a.branch && <span className="agent-branch">{a.branch}</span>}
                     <span className="agent-elapsed">{elapsedSince(a.started_at)}</span>
                     <span className="agent-last-action">
-                      {a.last_action ?? "—"}
+                      {agentHeadline(a)}
                     </span>
                   </button>
                   {expanded && (
@@ -1287,6 +1313,13 @@ function App() {
     if (pct >= 80) return "#ef4444";
     if (pct >= 50) return "#f59e0b";
     return "#22c55e";
+  }
+
+  function formatPct(pct: number): string {
+    if (pct <= 0) return "0%";
+    if (pct < 1) return `${pct.toFixed(1)}%`;
+    if (pct < 10) return `${pct.toFixed(1)}%`;
+    return `${Math.round(pct)}%`;
   }
 
   function renderSidebar() {
@@ -1377,7 +1410,7 @@ function App() {
                       />
                     </div>
                     <span className="usage-pct">
-                      {Math.round(usageStats.five_hour_pct)}%
+                      {formatPct(usageStats.five_hour_pct)}
                     </span>
                   </div>
                   {usageStats.five_hour_resets_in && (
@@ -1400,7 +1433,7 @@ function App() {
                       />
                     </div>
                     <span className="usage-pct">
-                      {Math.round(usageStats.seven_day_pct)}%
+                      {formatPct(usageStats.seven_day_pct)}
                     </span>
                   </div>
                   {usageStats.seven_day_resets_in && (
@@ -1424,7 +1457,7 @@ function App() {
                         />
                       </div>
                       <span className="usage-pct">
-                        {Math.round(usageStats.seven_day_opus_pct ?? 0)}%
+                        {formatPct(usageStats.seven_day_opus_pct ?? 0)}
                       </span>
                     </div>
                     {usageStats.seven_day_opus_resets_in && (
@@ -1449,7 +1482,7 @@ function App() {
                         />
                       </div>
                       <span className="usage-pct">
-                        {Math.round(usageStats.seven_day_sonnet_pct ?? 0)}%
+                        {formatPct(usageStats.seven_day_sonnet_pct ?? 0)}
                       </span>
                     </div>
                     {usageStats.seven_day_sonnet_resets_in && (
