@@ -10,7 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 /// Get the Synthia project root directory.
@@ -207,6 +207,60 @@ struct WorktreeInfo {
     tasks: Vec<WorktreeTask>,
     completed_tasks: Vec<WorktreeTask>,
     status: Option<String>,
+}
+
+// GitHub Issues types
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct GitHubLabel {
+    name: String,
+    color: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct GitHubIssue {
+    number: u32,
+    title: String,
+    state: String,
+    labels: Vec<GitHubLabel>,
+    assignees: Vec<GitHubAssignee>,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
+    url: String,
+    body: String,
+    milestone: Option<GitHubMilestone>,
+    comments: Vec<serde_json::Value>,
+    repository: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct GitHubAssignee {
+    login: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct GitHubMilestone {
+    title: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct GitHubConfig {
+    repos: Vec<String>,
+    refresh_interval_seconds: u64,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct GitHubIssuesCache {
+    fetched_at: String,
+    issues: Vec<GitHubIssue>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct GitHubIssuesResponse {
+    issues: Vec<GitHubIssue>,
+    fetched_at: String,
+    error: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -1910,327 +1964,535 @@ fn toggle_plugin(name: String, enabled: bool) -> Result<String, String> {
     Ok("Plugin toggled".to_string())
 }
 
-// === TASKS COMMANDS ===
+// === (Tasks/Kanban code removed — superseded by agents monitor) ===
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-struct Task {
-    id: String,
-    title: String,
-    description: Option<String>,
-    status: String,  // "todo", "in_progress", "done"
-    tags: Vec<String>,
-    due_date: Option<String>,
-    created_at: String,
-    completed_at: Option<String>,
+// === AGENTS COMMANDS ===
+
+#[derive(Serialize, Debug, Clone)]
+struct AgentInfo {
+    pid: u32,
+    cwd: String,
+    project_name: String,
+    branch: Option<String>,
+    status: String, // "active" | "idle" | "stale"
+    started_at: String,
+    last_activity: Option<String>,
+    last_user_msg: Option<String>,
+    last_action: Option<String>,
+    session_id: Option<String>,
+    jsonl_path: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Default)]
-struct TasksData {
-    tasks: Vec<Task>,
+/// Encode an absolute filesystem path the same way Claude Code does:
+/// replace `/` with `-`. Leading slash → leading `-`.
+/// e.g. "/home/markmiddo/dev/misc/synthia" → "-home-markmiddo-dev-misc-synthia"
+fn encode_project_dir(cwd: &str) -> String {
+    cwd.replace('/', "-")
 }
 
-fn get_tasks_file() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("synthia")
-        .join("tasks.json")
+/// Read /proc/<pid>/cwd symlink. Returns None on permission error.
+fn read_proc_cwd(pid: u32) -> Option<String> {
+    let link = format!("/proc/{}/cwd", pid);
+    fs::read_link(&link).ok().and_then(|p| p.to_str().map(|s| s.to_string()))
 }
 
-fn load_tasks() -> TasksData {
-    let path = get_tasks_file();
-    if let Ok(content) = fs::read_to_string(&path) {
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        TasksData::default()
-    }
-}
-
-fn save_tasks(data: &TasksData) -> Result<(), String> {
-    let path = get_tasks_file();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let content = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
-    fs::write(&path, content).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn list_tasks() -> Vec<Task> {
-    load_tasks().tasks
-}
-
-#[tauri::command]
-fn add_task(
-    title: String,
-    description: Option<String>,
-    tags: Vec<String>,
-    due_date: Option<String>,
-) -> Result<Task, String> {
-    let mut data = load_tasks();
-
-    let task = Task {
-        id: uuid::Uuid::new_v4().to_string(),
-        title,
-        description,
-        status: "todo".to_string(),
-        tags,
-        due_date,
-        created_at: chrono::Utc::now().to_rfc3339(),
-        completed_at: None,
+/// Parse `ps -eo etime` (e.g. "01:23", "1-02:03:04", "1234:56") into seconds.
+fn parse_etime(etime: &str) -> u64 {
+    let etime = etime.trim();
+    let (days, rest) = match etime.split_once('-') {
+        Some((d, r)) => (d.parse::<u64>().unwrap_or(0), r),
+        None => (0, etime),
     };
-
-    data.tasks.push(task.clone());
-    save_tasks(&data)?;
-    Ok(task)
+    let parts: Vec<&str> = rest.split(':').collect();
+    let (h, m, s) = match parts.as_slice() {
+        [h, m, s] => (h.parse().unwrap_or(0), m.parse().unwrap_or(0), s.parse().unwrap_or(0)),
+        [m, s] => (0u64, m.parse().unwrap_or(0), s.parse().unwrap_or(0)),
+        _ => (0, 0, 0),
+    };
+    days * 86400 + h * 3600 + m * 60 + s
 }
 
-#[tauri::command]
-fn update_task(
-    id: String,
-    title: Option<String>,
-    description: Option<String>,
-    tags: Option<Vec<String>>,
-    due_date: Option<String>,
-    status: Option<String>,
-) -> Result<Task, String> {
-    let mut data = load_tasks();
-
-    let task = data.tasks.iter_mut()
-        .find(|t| t.id == id)
-        .ok_or("Task not found")?;
-
-    if let Some(t) = title {
-        task.title = t;
-    }
-    if let Some(d) = description {
-        task.description = Some(d);
-    }
-    if let Some(t) = tags {
-        task.tags = t;
-    }
-    if due_date.is_some() {
-        task.due_date = due_date;
-    }
-    if let Some(s) = status {
-        if s == "done" && task.status != "done" {
-            task.completed_at = Some(chrono::Utc::now().to_rfc3339());
-        } else if s != "done" {
-            task.completed_at = None;
+/// Returns Vec of (pid, etime_seconds, full_argv).
+fn list_claude_processes(self_pid: u32) -> Vec<(u32, u64, String)> {
+    use std::process::Command;
+    let output = match Command::new("ps")
+        .args(["-eo", "pid=,etime=,args="])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim_start();
+        if line.is_empty() {
+            continue;
         }
-        task.status = s;
+        let mut parts = line.splitn(3, char::is_whitespace).filter(|s| !s.is_empty());
+        let pid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
+            Some(p) => p,
+            None => continue,
+        };
+        if pid == self_pid {
+            continue;
+        }
+        let etime_str = match parts.next() { Some(s) => s, None => continue };
+        let argv = match parts.next() { Some(s) => s.to_string(), None => continue };
+
+        let argv_lc = argv.to_lowercase();
+        if argv_lc.contains("grep ") || argv_lc.contains("statusline") {
+            continue;
+        }
+        let first = argv.split_whitespace().next().unwrap_or("");
+        let first_base = std::path::Path::new(first).file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let looks_like_claude = first_base == "claude"
+            || argv.contains("/claude/cli")
+            || argv.contains("@anthropic-ai/claude-code");
+        if !looks_like_claude {
+            continue;
+        }
+
+        out.push((pid, parse_etime(etime_str), argv));
     }
-
-    let updated = task.clone();
-    save_tasks(&data)?;
-    Ok(updated)
+    out
 }
 
-#[tauri::command]
-fn delete_task(id: String) -> Result<String, String> {
-    let mut data = load_tasks();
-    let initial_len = data.tasks.len();
-    data.tasks.retain(|t| t.id != id);
-
-    if data.tasks.len() == initial_len {
-        return Err("Task not found".to_string());
-    }
-
-    save_tasks(&data)?;
-    Ok("Task deleted".to_string())
+#[derive(Default)]
+struct SessionSnapshot {
+    last_user_msg: Option<String>,
+    last_action: Option<String>,
+    session_id: Option<String>,
+    last_activity: Option<String>,
 }
 
-#[tauri::command]
-fn move_task(id: String, status: String) -> Result<Task, String> {
-    update_task(id, None, None, None, None, Some(status))
-}
+fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
+    let content = match fs::read_to_string(jsonl_path) {
+        Ok(c) => c,
+        Err(_) => return SessionSnapshot::default(),
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(400);
+    let tail = &lines[start..];
 
-// === USAGE COMMANDS ===
-
-#[derive(Deserialize, Serialize, Debug, Clone, Default)]
-struct UsageStats {
-    session_tokens: u64,
-    session_pct: f64,
-    session_resets_at: String,
-    week_tokens: u64,
-    week_pct: f64,
-    week_resets_at: String,
-    sonnet_week_tokens: u64,
-    sonnet_week_pct: f64,
-    subscription_type: String,
-}
-
-// Estimated limits for Claude Max subscription
-const SESSION_LIMIT: u64 = 800_000;    // ~800K output tokens per 5h session
-const WEEKLY_LIMIT: u64 = 4_000_000;   // ~4M output tokens per week
-const SONNET_WEEKLY_LIMIT: u64 = 8_000_000; // ~8M Sonnet tokens per week
-
-#[derive(Deserialize, Debug)]
-struct Credentials {
-    #[serde(rename = "claudeAiOauth")]
-    claude_ai_oauth: Option<CredentialsOAuth>,
-}
-
-#[derive(Deserialize, Debug)]
-struct CredentialsOAuth {
-    #[serde(rename = "subscriptionType")]
-    subscription_type: Option<String>,
-}
-
-#[tauri::command]
-fn get_usage_stats() -> UsageStats {
-    let claude_dir = get_claude_dir();
-    let creds_file = claude_dir.join(".credentials.json");
-    let projects_dir = claude_dir.join("projects");
-
-    let now = chrono::Local::now();
-    let session_cutoff = now - chrono::Duration::hours(5);
-    let week_cutoff = now - chrono::Duration::days(7);
-
-    let mut stats = UsageStats::default();
-
-    // Get subscription type
-    if let Ok(content) = fs::read_to_string(&creds_file) {
-        if let Ok(creds) = serde_json::from_str::<Credentials>(&content) {
-            if let Some(oauth) = creds.claude_ai_oauth {
-                stats.subscription_type = oauth.subscription_type.unwrap_or_default();
+    let mut snap = SessionSnapshot::default();
+    for line in tail {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if snap.session_id.is_none() {
+            if let Some(sid) = v.get("sessionId").and_then(|s| s.as_str()) {
+                snap.session_id = Some(sid.to_string());
             }
         }
-    }
-
-    // Track oldest message timestamp in the session window for reset calculation
-    let mut oldest_session_ts: Option<chrono::DateTime<chrono::Local>> = None;
-
-    // Scan JSONL files for token usage
-    if projects_dir.exists() {
-        let week_cutoff_systime = std::time::SystemTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_secs(
-                week_cutoff.timestamp() as u64
-            )
-        );
-
-        if let Ok(project_entries) = fs::read_dir(&projects_dir) {
-            for project_entry in project_entries.flatten() {
-                let project_path = project_entry.path();
-                if !project_path.is_dir() {
-                    continue;
-                }
-
-                if let Ok(session_entries) = fs::read_dir(&project_path) {
-                    for session_entry in session_entries.flatten() {
-                        let session_path = session_entry.path();
-
-                        if session_path.is_file() {
-                            if let Some(ext) = session_path.extension() {
-                                if ext == "jsonl" {
-                                    // Skip files not modified in the last 7 days
-                                    if let Ok(metadata) = session_path.metadata() {
-                                        if let Ok(modified) = metadata.modified() {
-                                            if modified < week_cutoff_systime {
-                                                continue;
-                                            }
-                                        }
-                                    }
-
-                                    if let Ok(content) = fs::read_to_string(&session_path) {
-                                        for line in content.lines() {
-                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(line) {
-                                                if data.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-                                                    continue;
-                                                }
-
-                                                // Parse timestamp
-                                                let ts_str = match data.get("timestamp").and_then(|t| t.as_str()) {
-                                                    Some(s) => s,
-                                                    None => continue,
-                                                };
-
-                                                let msg_time = match chrono::DateTime::parse_from_rfc3339(ts_str) {
-                                                    Ok(t) => t.with_timezone(&chrono::Local),
-                                                    Err(_) => continue,
-                                                };
-
-                                                // Skip messages older than 7 days
-                                                if msg_time < week_cutoff {
-                                                    continue;
-                                                }
-
-                                                // Extract output tokens
-                                                let output_tokens = data.get("message")
-                                                    .and_then(|m| m.get("usage"))
-                                                    .and_then(|u| u.get("output_tokens"))
-                                                    .and_then(|v| v.as_u64())
-                                                    .unwrap_or(0);
-
-                                                if output_tokens == 0 {
-                                                    continue;
-                                                }
-
-                                                // Check if Sonnet model
-                                                let model = data.get("message")
-                                                    .and_then(|m| m.get("model"))
-                                                    .and_then(|m| m.as_str())
-                                                    .unwrap_or("");
-                                                let is_sonnet = model.contains("sonnet");
-
-                                                // Weekly totals (all models)
-                                                stats.week_tokens += output_tokens;
-
-                                                // Sonnet weekly
-                                                if is_sonnet {
-                                                    stats.sonnet_week_tokens += output_tokens;
-                                                }
-
-                                                // Session window (last 5 hours)
-                                                if msg_time >= session_cutoff {
-                                                    stats.session_tokens += output_tokens;
-                                                    match oldest_session_ts {
-                                                        Some(existing) if msg_time < existing => {
-                                                            oldest_session_ts = Some(msg_time);
-                                                        }
-                                                        None => {
-                                                            oldest_session_ts = Some(msg_time);
-                                                        }
-                                                        _ => {}
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+        if let Some(ts) = v.get("timestamp").and_then(|s| s.as_str()) {
+            snap.last_activity = Some(ts.to_string());
+        }
+        let msg_type = v.get("type").and_then(|s| s.as_str()).unwrap_or("");
+        if msg_type == "user" {
+            let text = v.get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| {
+                    if let Some(s) = c.as_str() { return Some(s.to_string()); }
+                    if let Some(arr) = c.as_array() {
+                        for item in arr {
+                            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
+                                    return Some(t.to_string());
                                 }
                             }
                         }
+                    }
+                    None
+                });
+            if let Some(t) = text {
+                let trimmed = t.trim();
+                if !trimmed.is_empty() && !trimmed.starts_with('<') {
+                    let truncated: String = trimmed.chars().take(200).collect();
+                    snap.last_user_msg = Some(truncated);
+                }
+            }
+        } else if msg_type == "assistant" {
+            if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
+                for item in content {
+                    if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                        let name = item.get("name").and_then(|s| s.as_str()).unwrap_or("tool");
+                        let input = item.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                        let target = input.get("file_path").and_then(|s| s.as_str())
+                            .or_else(|| input.get("command").and_then(|s| s.as_str()))
+                            .or_else(|| input.get("pattern").and_then(|s| s.as_str()))
+                            .or_else(|| input.get("description").and_then(|s| s.as_str()))
+                            .unwrap_or("");
+                        let target_short: String = target.chars().take(60).collect();
+                        snap.last_action = Some(if target_short.is_empty() {
+                            name.to_string()
+                        } else {
+                            format!("{}: {}", name, target_short)
+                        });
                     }
                 }
             }
         }
     }
+    snap
+}
 
-    // Calculate percentages
-    stats.session_pct = ((stats.session_tokens as f64 / SESSION_LIMIT as f64) * 100.0).min(100.0);
-    stats.week_pct = ((stats.week_tokens as f64 / WEEKLY_LIMIT as f64) * 100.0).min(100.0);
-    stats.sonnet_week_pct = ((stats.sonnet_week_tokens as f64 / SONNET_WEEKLY_LIMIT as f64) * 100.0).min(100.0);
+fn newest_session_jsonl(cwd: &str) -> Option<(PathBuf, std::time::SystemTime)> {
+    let claude_dir = get_claude_dir();
+    let project_dir = claude_dir.join("projects").join(encode_project_dir(cwd));
+    if !project_dir.is_dir() {
+        return None;
+    }
+    let mut newest: Option<(PathBuf, std::time::SystemTime)> = None;
+    if let Ok(entries) = fs::read_dir(&project_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") { continue; }
+            if let Ok(meta) = p.metadata() {
+                if let Ok(m) = meta.modified() {
+                    match &newest {
+                        Some((_, prev)) if *prev >= m => {}
+                        _ => newest = Some((p, m)),
+                    }
+                }
+            }
+        }
+    }
+    newest
+}
 
-    // Calculate reset times
-    // Session resets 5h from oldest message in the window (or "now" if no messages)
-    let session_reset = match oldest_session_ts {
-        Some(oldest) => oldest + chrono::Duration::hours(5),
-        None => now,
+fn classify_status(mtime: Option<std::time::SystemTime>) -> &'static str {
+    let now = std::time::SystemTime::now();
+    match mtime.and_then(|m| now.duration_since(m).ok()) {
+        Some(d) if d.as_secs() < 30 => "active",
+        Some(d) if d.as_secs() < 300 => "idle",
+        _ => "stale",
+    }
+}
+
+fn started_at_from_etime(etime_secs: u64) -> String {
+    let started = chrono::Local::now() - chrono::Duration::seconds(etime_secs as i64);
+    started.to_rfc3339()
+}
+
+#[tauri::command]
+fn list_active_agents() -> Vec<AgentInfo> {
+    let self_pid = std::process::id();
+    let mut agents = Vec::new();
+
+    for (pid, etime_secs, _argv) in list_claude_processes(self_pid) {
+        let cwd = match read_proc_cwd(pid) {
+            Some(c) => c,
+            None => continue,
+        };
+        let project_name = std::path::Path::new(&cwd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
+
+        let branch = std::process::Command::new("git")
+            .args(["-C", &cwd, "branch", "--show-current"])
+            .output()
+            .ok()
+            .and_then(|o| if o.status.success() {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if s.is_empty() { None } else { Some(s) }
+            } else { None });
+
+        let (jsonl_path, snap, mtime) = match newest_session_jsonl(&cwd) {
+            Some((p, m)) => {
+                let snap = snapshot_session(&p);
+                (Some(p.to_string_lossy().to_string()), snap, Some(m))
+            }
+            None => (None, SessionSnapshot::default(), None),
+        };
+
+        agents.push(AgentInfo {
+            pid,
+            cwd,
+            project_name,
+            branch,
+            status: classify_status(mtime).to_string(),
+            started_at: started_at_from_etime(etime_secs),
+            last_activity: snap.last_activity,
+            last_user_msg: snap.last_user_msg,
+            last_action: snap.last_action,
+            session_id: snap.session_id,
+            jsonl_path,
+        });
+    }
+
+    agents.sort_by(|a, b| {
+        let order = |s: &str| match s { "active" => 0, "idle" => 1, _ => 2 };
+        order(&a.status).cmp(&order(&b.status))
+            .then(b.started_at.cmp(&a.started_at))
+    });
+    agents
+}
+
+#[tauri::command]
+fn kill_agent(pid: u32) -> Result<(), String> {
+    let status = std::process::Command::new("kill")
+        .arg(pid.to_string())
+        .status()
+        .map_err(|e| format!("Failed to spawn kill: {}", e))?;
+    if !status.success() {
+        return Err(format!("kill exited with status {:?}", status.code()));
+    }
+    Ok(())
+}
+
+// === USAGE COMMANDS ===
+
+#[derive(Serialize, Debug, Clone, Default)]
+struct UsageStats {
+    five_hour_pct: f64,
+    five_hour_resets_at: String,
+    five_hour_resets_in: String,
+    seven_day_pct: f64,
+    seven_day_resets_at: String,
+    seven_day_resets_in: String,
+    seven_day_opus_pct: Option<f64>,
+    seven_day_opus_resets_at: Option<String>,
+    seven_day_opus_resets_in: Option<String>,
+    seven_day_sonnet_pct: Option<f64>,
+    seven_day_sonnet_resets_at: Option<String>,
+    seven_day_sonnet_resets_in: Option<String>,
+    subscription_type: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct CredsFile {
+    #[serde(rename = "claudeAiOauth")]
+    claude_ai_oauth: Option<CredsOAuth>,
+}
+
+#[derive(Deserialize, Debug)]
+struct CredsOAuth {
+    #[serde(rename = "accessToken")]
+    access_token: Option<String>,
+    #[serde(rename = "subscriptionType")]
+    subscription_type: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct UsageResponse {
+    five_hour: Option<UsageWindow>,
+    seven_day: Option<UsageWindow>,
+    seven_day_opus: Option<UsageWindow>,
+    seven_day_sonnet: Option<UsageWindow>,
+}
+
+#[derive(Deserialize, Debug)]
+struct UsageWindow {
+    utilization: Option<f64>,
+    resets_at: Option<String>,
+}
+
+static USAGE_TOKEN_CACHE: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+static USAGE_RESPONSE_CACHE: Mutex<Option<(UsageStats, Instant)>> = Mutex::new(None);
+
+const TOKEN_TTL: Duration = Duration::from_secs(900);
+const RESPONSE_TTL: Duration = Duration::from_secs(60);
+const STALE_OK: Duration = Duration::from_secs(600);
+
+fn read_oauth_token_cached() -> Option<(String, Option<String>)> {
+    {
+        let cache = USAGE_TOKEN_CACHE.lock().ok()?;
+        if let Some((tok, when)) = cache.as_ref() {
+            if when.elapsed() < TOKEN_TTL {
+                return Some((tok.clone(), None));
+            }
+        }
+    }
+    let creds_path = get_claude_dir().join(".credentials.json");
+    let content = fs::read_to_string(&creds_path).ok()?;
+    let creds: CredsFile = serde_json::from_str(&content).ok()?;
+    let oauth = creds.claude_ai_oauth?;
+    let token = oauth.access_token?;
+    if let Ok(mut cache) = USAGE_TOKEN_CACHE.lock() {
+        *cache = Some((token.clone(), Instant::now()));
+    }
+    Some((token, oauth.subscription_type))
+}
+
+fn humanize_duration_until(iso: &str) -> String {
+    let target = match chrono::DateTime::parse_from_rfc3339(iso) {
+        Ok(t) => t,
+        Err(_) => return String::new(),
     };
-    stats.session_resets_at = if stats.session_tokens == 0 {
-        String::new()
+    let now = chrono::Utc::now();
+    let delta = target.with_timezone(&chrono::Utc) - now;
+    let secs = delta.num_seconds();
+    if secs <= 0 {
+        return "now".to_string();
+    }
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    if h > 0 {
+        format!("{}h {}m", h, m)
     } else {
-        session_reset.format("%-I:%M %p").to_string()
+        format!("{}m", m)
+    }
+}
+
+fn cached_or_error(err: String) -> UsageStats {
+    if let Ok(cache) = USAGE_RESPONSE_CACHE.lock() {
+        if let Some((stats, when)) = cache.as_ref() {
+            if when.elapsed() < STALE_OK {
+                let mut s = stats.clone();
+                s.error = Some(format!("{} (showing cached)", err));
+                return s;
+            }
+        }
+    }
+    UsageStats { error: Some(err), ..Default::default() }
+}
+
+#[tauri::command]
+fn get_usage_stats() -> UsageStats {
+    if let Ok(cache) = USAGE_RESPONSE_CACHE.lock() {
+        if let Some((stats, when)) = cache.as_ref() {
+            if when.elapsed() < RESPONSE_TTL {
+                return stats.clone();
+            }
+        }
+    }
+
+    let (token, subscription_type) = match read_oauth_token_cached() {
+        Some(v) => v,
+        None => {
+            return UsageStats {
+                error: Some("No Claude credentials found".to_string()),
+                ..Default::default()
+            };
+        }
     };
 
-    // Weekly resets 7 days from now (rolling window)
-    let week_reset = now + chrono::Duration::days(1);
-    stats.week_resets_at = if stats.week_tokens == 0 {
-        String::new()
-    } else {
-        week_reset.format("%a, %-I:%M %p").to_string()
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return UsageStats {
+            error: Some(format!("HTTP client error: {}", e)),
+            ..Default::default()
+        },
     };
 
+    let resp = client
+        .get("https://api.anthropic.com/oauth/usage")
+        .header("authorization", format!("Bearer {}", token))
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("accept", "application/json")
+        .header("user-agent", "synthia-gui/0.1")
+        .send();
+
+    let body: UsageResponse = match resp {
+        Ok(r) if r.status().is_success() => match r.json::<UsageResponse>() {
+            Ok(b) => b,
+            Err(e) => return cached_or_error(format!("parse error: {}", e)),
+        },
+        Ok(r) => return cached_or_error(format!("HTTP {}", r.status())),
+        Err(e) => return cached_or_error(format!("network: {}", e)),
+    };
+
+    let mut stats = UsageStats {
+        subscription_type,
+        ..Default::default()
+    };
+
+    if let Some(w) = body.five_hour {
+        stats.five_hour_pct = w.utilization.unwrap_or(0.0);
+        if let Some(r) = w.resets_at {
+            stats.five_hour_resets_in = humanize_duration_until(&r);
+            stats.five_hour_resets_at = r;
+        }
+    }
+    if let Some(w) = body.seven_day {
+        stats.seven_day_pct = w.utilization.unwrap_or(0.0);
+        if let Some(r) = w.resets_at {
+            stats.seven_day_resets_in = humanize_duration_until(&r);
+            stats.seven_day_resets_at = r;
+        }
+    }
+    if let Some(w) = body.seven_day_opus {
+        stats.seven_day_opus_pct = w.utilization;
+        if let Some(r) = w.resets_at {
+            stats.seven_day_opus_resets_in = Some(humanize_duration_until(&r));
+            stats.seven_day_opus_resets_at = Some(r);
+        }
+    }
+    if let Some(w) = body.seven_day_sonnet {
+        stats.seven_day_sonnet_pct = w.utilization;
+        if let Some(r) = w.resets_at {
+            stats.seven_day_sonnet_resets_in = Some(humanize_duration_until(&r));
+            stats.seven_day_sonnet_resets_at = Some(r);
+        }
+    }
+
+    if let Ok(mut cache) = USAGE_RESPONSE_CACHE.lock() {
+        *cache = Some((stats.clone(), Instant::now()));
+    }
     stats
+}
+
+// === KNOWLEDGE META COMMANDS ===
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+struct KnowledgeMeta {
+    pinned: Vec<String>,
+    recent: Vec<String>,
+    #[serde(default)]
+    expanded_folders: Vec<String>,
+}
+
+fn get_knowledge_meta_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("synthia")
+        .join("knowledge-meta.json")
+}
+
+#[tauri::command]
+fn get_knowledge_meta() -> KnowledgeMeta {
+    let path = get_knowledge_meta_path();
+    let mut meta: KnowledgeMeta = if let Ok(content) = fs::read_to_string(&path) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        return KnowledgeMeta::default();
+    };
+
+    // Filter out pinned/recent entries whose files were deleted externally
+    let base = get_notes_base_path();
+    let orig_pinned_len = meta.pinned.len();
+    let orig_recent_len = meta.recent.len();
+
+    meta.pinned.retain(|p| base.join(p).exists());
+    meta.recent.retain(|p| base.join(p).exists());
+
+    // Persist cleaned meta if any entries were removed
+    if meta.pinned.len() != orig_pinned_len || meta.recent.len() != orig_recent_len {
+        if let Ok(content) = serde_json::to_string_pretty(&meta) {
+            let _ = fs::write(&path, content);
+        }
+    }
+
+    meta
+}
+
+#[tauri::command]
+fn save_knowledge_meta(meta: KnowledgeMeta) -> Result<String, String> {
+    let path = get_knowledge_meta_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok("saved".to_string())
 }
 
 // === NOTES COMMANDS ===
@@ -2242,6 +2504,11 @@ fn get_notes_base_path() -> PathBuf {
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join("dev/eventflo/docs")
+}
+
+#[tauri::command]
+fn get_notes_base_path_cmd() -> String {
+    get_notes_base_path().to_string_lossy().to_string()
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -2324,6 +2591,43 @@ fn read_note(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_note_preview(path: String) -> Result<String, String> {
+    let base = get_notes_base_path();
+    let full = base.join(&path);
+    if !full.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+    match std::fs::read_to_string(&full) {
+        Ok(content) => {
+            let preview: String = content.chars().take(200).collect();
+            Ok(preview)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn get_note_modified(path: String) -> Result<u64, String> {
+    let base = get_notes_base_path();
+    let full = base.join(&path);
+    if !full.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+    match std::fs::metadata(&full) {
+        Ok(meta) => {
+            match meta.modified() {
+                Ok(time) => {
+                    let duration = time.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                    Ok(duration.as_secs())
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
 fn save_note(path: String, content: String) -> Result<String, String> {
     let base = get_notes_base_path();
     let full_path = base.join(&path);
@@ -2360,6 +2664,76 @@ fn rename_note(old_path: String, new_path: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to rename file: {}", e))?;
 
     Ok(new_path)
+}
+
+#[tauri::command]
+fn move_note(path: String, new_parent: String) -> Result<String, String> {
+    let base = get_notes_base_path();
+    let old_full = base.join(&path);
+
+    if !old_full.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+
+    if !old_full.exists() {
+        return Err("File not found".to_string());
+    }
+
+    let filename = old_full.file_name()
+        .ok_or("Invalid filename")?
+        .to_string_lossy()
+        .to_string();
+
+    let new_dir = if new_parent.is_empty() {
+        base.clone()
+    } else {
+        base.join(&new_parent)
+    };
+
+    if !new_dir.starts_with(&base) {
+        return Err("Invalid target path".to_string());
+    }
+
+    // Prevent moving a folder into itself
+    if old_full.is_dir() && new_dir.starts_with(&old_full) {
+        return Err("Cannot move a folder into itself".to_string());
+    }
+
+    let new_full = new_dir.join(&filename);
+
+    if new_full.exists() {
+        return Err("A file with that name already exists in the target folder".to_string());
+    }
+
+    fs::rename(&old_full, &new_full)
+        .map_err(|e| format!("Failed to move file: {}", e))?;
+
+    // Return the new relative path
+    let new_rel = new_full.strip_prefix(&base)
+        .map_err(|_| "Path error".to_string())?
+        .to_string_lossy()
+        .to_string();
+
+    Ok(new_rel)
+}
+
+#[tauri::command]
+fn create_folder(path: String) -> Result<String, String> {
+    let base = get_notes_base_path();
+    let full_path = base.join(&path);
+
+    if !full_path.starts_with(&base) {
+        return Err("Invalid path".to_string());
+    }
+
+    if full_path.exists() {
+        return Err("A folder with that name already exists".to_string());
+    }
+
+    fs::create_dir_all(&full_path)
+        .map_err(|e| format!("Failed to create folder: {}", e))?;
+
+    Ok("Folder created".to_string())
 }
 
 #[tauri::command]
@@ -2409,6 +2783,173 @@ fn resend_to_assistant(text: String) -> Result<String, String> {
     let _ = fs::remove_file(&prompt_file);
 
     Ok("Sent to assistant".to_string())
+}
+
+// === PINNED NOTE COMMANDS ===
+
+fn get_pinned_note_path() -> PathBuf {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("synthia");
+    config_dir.join("pinned-note.txt")
+}
+
+#[tauri::command]
+fn get_pinned_note() -> String {
+    fs::read_to_string(get_pinned_note_path()).unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_pinned_note(content: String) -> Result<String, String> {
+    let path = get_pinned_note_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
+    fs::write(&path, content).map_err(|e| format!("Failed to write pinned note: {}", e))?;
+    Ok("saved".to_string())
+}
+
+// === GITHUB ISSUES COMMANDS ===
+
+fn get_github_config_path() -> PathBuf {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("synthia");
+    config_dir.join("github.json")
+}
+
+fn get_github_cache_path() -> PathBuf {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("synthia");
+    config_dir.join("github-issues-cache.json")
+}
+
+#[tauri::command]
+fn get_github_config() -> GitHubConfig {
+    let path = get_github_config_path();
+    if let Ok(content) = fs::read_to_string(&path) {
+        if let Ok(config) = serde_json::from_str::<GitHubConfig>(&content) {
+            return config;
+        }
+    }
+    GitHubConfig {
+        repos: Vec::new(),
+        refresh_interval_seconds: 300,
+    }
+}
+
+#[tauri::command]
+fn save_github_config(repos: Vec<String>, refresh_interval_seconds: u64) -> Result<String, String> {
+    let config = GitHubConfig {
+        repos,
+        refresh_interval_seconds,
+    };
+    let path = get_github_config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
+    let json = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write config: {}", e))?;
+    Ok("saved".to_string())
+}
+
+#[tauri::command]
+fn get_github_issues(force_refresh: bool) -> GitHubIssuesResponse {
+    let config = get_github_config();
+
+    if config.repos.is_empty() {
+        return GitHubIssuesResponse {
+            issues: Vec::new(),
+            fetched_at: String::new(),
+            error: None,
+        };
+    }
+
+    // Return cached data immediately unless force refresh is requested
+    let cache_path = get_github_cache_path();
+    if !force_refresh {
+        if let Ok(content) = fs::read_to_string(&cache_path) {
+            if let Ok(cache) = serde_json::from_str::<GitHubIssuesCache>(&content) {
+                return GitHubIssuesResponse {
+                    issues: cache.issues,
+                    fetched_at: cache.fetched_at,
+                    error: None,
+                };
+            }
+        }
+    }
+
+    // Check if gh is installed
+    if Command::new("gh").arg("--version").output().is_err() {
+        return GitHubIssuesResponse {
+            issues: Vec::new(),
+            fetched_at: String::new(),
+            error: Some("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/".to_string()),
+        };
+    }
+
+    // Fetch issues from each repo
+    let mut all_issues: Vec<GitHubIssue> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+
+    for repo in &config.repos {
+        match Command::new("gh")
+            .args([
+                "issue", "list",
+                "--assignee", "@me",
+                "--repo", repo,
+                "--json", "number,title,state,labels,assignees,createdAt,updatedAt,url,body,milestone,comments",
+                "--state", "all",
+                "--limit", "100",
+            ])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    match serde_json::from_str::<Vec<GitHubIssue>>(&stdout) {
+                        Ok(mut issues) => {
+                            for issue in &mut issues {
+                                issue.repository = Some(repo.clone());
+                            }
+                            all_issues.extend(issues);
+                        }
+                        Err(e) => {
+                            errors.push(format!("{}: parse error: {}", repo, e));
+                        }
+                    }
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    errors.push(format!("{}: {}", repo, stderr.trim()));
+                }
+            }
+            Err(e) => {
+                errors.push(format!("{}: {}", repo, e));
+            }
+        }
+    }
+
+    // Sort by updated_at descending
+    all_issues.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+    let fetched_at = chrono::Utc::now().to_rfc3339();
+
+    // Write cache
+    let cache = GitHubIssuesCache {
+        fetched_at: fetched_at.clone(),
+        issues: all_issues.clone(),
+    };
+    if let Ok(json) = serde_json::to_string_pretty(&cache) {
+        let _ = fs::write(&cache_path, json);
+    }
+
+    GitHubIssuesResponse {
+        issues: all_issues,
+        fetched_at,
+        error: if errors.is_empty() { None } else { Some(errors.join("; ")) },
+    }
 }
 
 pub fn run() {
@@ -2591,18 +3132,55 @@ pub fn run() {
             list_hooks,
             list_plugins,
             toggle_plugin,
+            get_knowledge_meta,
+            save_knowledge_meta,
             list_notes,
             read_note,
+            get_note_preview,
+            get_note_modified,
             save_note,
             rename_note,
+            move_note,
+            create_folder,
             delete_note,
             get_usage_stats,
-            list_tasks,
-            add_task,
-            update_task,
-            delete_task,
-            move_task
+            get_pinned_note,
+            save_pinned_note,
+            get_github_config,
+            save_github_config,
+            get_github_issues,
+            get_notes_base_path_cmd,
+            list_active_agents,
+            kill_agent
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn etime_parses_mm_ss() {
+        assert_eq!(parse_etime("01:23"), 83);
+    }
+
+    #[test]
+    fn etime_parses_hh_mm_ss() {
+        assert_eq!(parse_etime("1:02:03"), 3723);
+    }
+
+    #[test]
+    fn etime_parses_days() {
+        assert_eq!(parse_etime("2-03:04:05"), 2 * 86400 + 3 * 3600 + 4 * 60 + 5);
+    }
+
+    #[test]
+    fn encodes_project_dir() {
+        assert_eq!(
+            encode_project_dir("/home/markmiddo/dev/misc/synthia"),
+            "-home-markmiddo-dev-misc-synthia"
+        );
+    }
 }

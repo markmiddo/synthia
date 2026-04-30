@@ -1,193 +1,8 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
 import "./App.css";
-
-function DatePicker({ value, onChange }: { value: string; onChange: (val: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [viewDate, setViewDate] = useState(() => {
-    if (value) {
-      const [y, m] = value.split("-").map(Number);
-      return { year: y, month: m - 1 };
-    }
-    const now = new Date();
-    return { year: now.getFullYear(), month: now.getMonth() };
-  });
-
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-
-  const daysInMonth = new Date(viewDate.year, viewDate.month + 1, 0).getDate();
-  const firstDayOfWeek = new Date(viewDate.year, viewDate.month, 1).getDay();
-
-  const monthNames = ["January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"];
-
-  const prevMonth = () => {
-    setViewDate((v) => v.month === 0
-      ? { year: v.year - 1, month: 11 }
-      : { year: v.year, month: v.month - 1 });
-  };
-
-  const nextMonth = () => {
-    setViewDate((v) => v.month === 11
-      ? { year: v.year + 1, month: 0 }
-      : { year: v.year, month: v.month + 1 });
-  };
-
-  const selectDay = (day: number) => {
-    const dateStr = `${viewDate.year}-${String(viewDate.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    onChange(dateStr);
-    setOpen(false);
-  };
-
-  const handleToggle = () => {
-    if (!open && value) {
-      const [y, m] = value.split("-").map(Number);
-      setViewDate({ year: y, month: m - 1 });
-    }
-    setOpen(!open);
-  };
-
-  const formatDisplay = (val: string) => {
-    if (!val) return "";
-    const [y, m, d] = val.split("-").map(Number);
-    return `${monthNames[m - 1]} ${d}, ${y}`;
-  };
-
-  const days: (number | null)[] = [];
-  for (let i = 0; i < firstDayOfWeek; i++) days.push(null);
-  for (let d = 1; d <= daysInMonth; d++) days.push(d);
-
-  return (
-    <div className="datepicker-wrapper">
-      <button type="button" className="datepicker-trigger" onClick={handleToggle}>
-        <span className={value ? "datepicker-value" : "datepicker-placeholder"}>
-          {value ? formatDisplay(value) : "Select date..."}
-        </span>
-        <span className="datepicker-icon">&#x25BC;</span>
-      </button>
-      {open && (
-        <>
-          <div className="datepicker-backdrop" onClick={() => setOpen(false)} />
-          <div className="datepicker-dropdown">
-            <div className="datepicker-header">
-              <button type="button" className="datepicker-nav" onClick={prevMonth}>&lsaquo;</button>
-              <span className="datepicker-month-label">
-                {monthNames[viewDate.month]} {viewDate.year}
-              </span>
-              <button type="button" className="datepicker-nav" onClick={nextMonth}>&rsaquo;</button>
-            </div>
-            <div className="datepicker-weekdays">
-              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
-                <span key={d} className="datepicker-weekday">{d}</span>
-              ))}
-            </div>
-            <div className="datepicker-grid">
-              {days.map((day, i) => {
-                if (day === null) return <span key={`empty-${i}`} className="datepicker-empty" />;
-                const dateStr = `${viewDate.year}-${String(viewDate.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-                const isSelected = dateStr === value;
-                const isToday = dateStr === todayStr;
-                return (
-                  <button
-                    key={day}
-                    type="button"
-                    className={`datepicker-day${isSelected ? " selected" : ""}${isToday ? " today" : ""}`}
-                    onClick={() => selectDay(day)}
-                  >
-                    {day}
-                  </button>
-                );
-              })}
-            </div>
-            {value && (
-              <div className="datepicker-footer">
-                <button
-                  type="button"
-                  className="datepicker-clear"
-                  onClick={() => { onChange(""); setOpen(false); }}
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-const TAG_COLORS = [
-  { bg: "rgba(6, 182, 212, 0.15)", text: "#06b6d4" },   // Cyan
-  { bg: "rgba(168, 85, 247, 0.15)", text: "#a855f7" },   // Purple
-  { bg: "rgba(34, 197, 94, 0.15)", text: "#22c55e" },    // Green
-  { bg: "rgba(249, 115, 22, 0.15)", text: "#f97316" },   // Orange
-  { bg: "rgba(236, 72, 153, 0.15)", text: "#ec4899" },   // Pink
-  { bg: "rgba(59, 130, 246, 0.15)", text: "#3b82f6" },   // Blue
-  { bg: "rgba(234, 179, 8, 0.15)", text: "#eab308" },    // Yellow
-  { bg: "rgba(239, 68, 68, 0.15)", text: "#ef4444" },    // Red
-];
-
-function getTagColor(tag: string) {
-  let hash = 0;
-  for (let i = 0; i < tag.length; i++) {
-    hash = ((hash << 5) - hash + tag.charCodeAt(i)) | 0;
-  }
-  return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
-}
-
-function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
-  const [input, setInput] = useState("");
-
-  const addTag = (val: string) => {
-    const trimmed = val.trim();
-    if (trimmed && !tags.includes(trimmed)) {
-      onChange([...tags, trimmed]);
-    }
-    setInput("");
-  };
-
-  const removeTag = (index: number) => {
-    onChange(tags.filter((_, i) => i !== index));
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" || e.key === ",") {
-      e.preventDefault();
-      addTag(input);
-    } else if (e.key === "Backspace" && !input && tags.length > 0) {
-      removeTag(tags.length - 1);
-    }
-  };
-
-  return (
-    <div className="tag-input-container">
-      {tags.map((tag, i) => {
-        const color = getTagColor(tag);
-        return (
-          <span key={tag} className="tag-chip" style={{ background: color.bg, color: color.text }}>
-            {tag}
-            <button type="button" className="tag-chip-remove" style={{ color: color.text }} onClick={() => removeTag(i)}>
-              &times;
-            </button>
-          </span>
-        );
-      })}
-      <input
-        type="text"
-        className="tag-input-field"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onBlur={() => { if (input.trim()) addTag(input); }}
-        placeholder={tags.length === 0 ? "Add tags..." : ""}
-      />
-    </div>
-  );
-}
-
 type Status = "stopped" | "running" | "recording" | "thinking";
 
 interface HistoryEntry {
@@ -249,6 +64,20 @@ interface AgentConfig {
   body: string;
 }
 
+interface AgentInfo {
+  pid: number;
+  cwd: string;
+  project_name: string;
+  branch: string | null;
+  status: "active" | "idle" | "stale";
+  started_at: string;
+  last_activity: string | null;
+  last_user_msg: string | null;
+  last_action: string | null;
+  session_id: string | null;
+  jsonl_path: string | null;
+}
+
 interface CommandConfig {
   filename: string;
   description: string;
@@ -281,7 +110,52 @@ interface WorktreeInfo {
 
 const WORKTREE_STATUSES = ["in-progress", "reviewing", "merged", "ready-to-close"] as const;
 
-type Section = "worktrees" | "notes" | "tasks" | "voice" | "memory" | "config";
+interface GitHubLabel {
+  name: string;
+  color: string;
+}
+
+interface GitHubAssignee {
+  login: string;
+}
+
+interface GitHubMilestone {
+  title: string;
+}
+
+interface GitHubIssue {
+  number: number;
+  title: string;
+  state: string;
+  labels: GitHubLabel[];
+  assignees: GitHubAssignee[];
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+  body: string;
+  milestone: GitHubMilestone | null;
+  comments: unknown[];
+  repository: string | null;
+}
+
+interface GitHubConfig {
+  repos: string[];
+  refresh_interval_seconds: number;
+}
+
+interface GitHubIssuesResponse {
+  issues: GitHubIssue[];
+  fetched_at: string;
+  error: string | null;
+}
+
+type Section = "worktrees" | "knowledge" | "agents" | "voice" | "memory" | "config" | "github";
+
+interface KnowledgeMeta {
+  pinned: string[];
+  recent: string[];
+  expanded_folders: string[];
+}
 
 interface NoteEntry {
   name: string;
@@ -289,16 +163,6 @@ interface NoteEntry {
   is_dir: boolean;
 }
 
-interface Task {
-  id: string;
-  title: string;
-  description?: string;
-  status: "todo" | "in_progress" | "done";
-  tags: string[];
-  due_date?: string;
-  created_at: string;
-  completed_at?: string;
-}
 type VoiceView = "main" | "history" | "words";
 type MemoryCategory = "bug" | "pattern" | "arch" | "gotcha" | "stack" | null;
 type ConfigTab = "synthia" | "agents" | "commands" | "hooks" | "plugins";
@@ -312,7 +176,7 @@ function App() {
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [currentSection, setCurrentSection] = useState<Section>("worktrees");
+  const [currentSection, setCurrentSection] = useState<Section>("agents");
   const [voiceView, setVoiceView] = useState<VoiceView>("main");
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
@@ -352,7 +216,6 @@ function App() {
   const [isNewCommand, setIsNewCommand] = useState(false);
 
   // Notes state
-  const [notesPath, setNotesPath] = useState<string[]>([]);
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState("");
@@ -363,30 +226,58 @@ function App() {
   const [newNoteName, setNewNoteName] = useState("");
   const [editingNoteName, setEditingNoteName] = useState(false);
   const [noteNameInput, setNoteNameInput] = useState("");
-  const [notePreview, setNotePreview] = useState(false);
+  const [notePreview, setNotePreview] = useState<boolean | null>(null);
 
-  // Tasks state
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [showAddTask, setShowAddTask] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [newTaskTitle, setNewTaskTitle] = useState("");
-  const [newTaskDesc, setNewTaskDesc] = useState("");
-  const [newTaskTags, setNewTaskTags] = useState<string[]>([]);
-  const [newTaskDue, setNewTaskDue] = useState("");
-  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  // Knowledge meta state
+  const [pinnedNotes, setPinnedNotes] = useState<string[]>([]);
+  const [recentNotes, setRecentNotes] = useState<string[]>([]);
+  const [knowledgeSearch, setKnowledgeSearch] = useState("");
+  // drag-and-drop state removed — replaced by tree view
+  const [expandedFolders, setExpandedFolders] = useState<string[]>([]);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    notePath: string;
+  } | null>(null);
+  const [copiedPath, setCopiedPath] = useState(false);
+  const [allNoteEntries, setAllNoteEntries] = useState<Record<string, NoteEntry[]>>({});
+  const [pinnedPreviews, setPinnedPreviews] = useState<Record<string, string>>({});
+  const [noteModified, setNoteModified] = useState<Record<string, number>>({});
+  const [notesBasePath, setNotesBasePath] = useState("");
+
+  // GitHub state
+  const [githubIssues, setGithubIssues] = useState<GitHubIssue[]>([]);
+  const [githubConfig, setGithubConfig] = useState<GitHubConfig>({ repos: [], refresh_interval_seconds: 300 });
+  const [githubFetchedAt, setGithubFetchedAt] = useState<string>("");
+  const [githubError, setGithubError] = useState<string | null>(null);
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null);
+  const [githubRepoFilter, setGithubRepoFilter] = useState<string>("all");
+  const [githubStateFilter, setGithubStateFilter] = useState<string>("open");
+  const [githubConfigOpen, setGithubConfigOpen] = useState(false);
+  const [newGithubRepo, setNewGithubRepo] = useState("");
+
+  // Active agents monitor state
+  const [activeAgents, setActiveAgents] = useState<AgentInfo[]>([]);
+  const [expandedAgentPid, setExpandedAgentPid] = useState<number | null>(null);
+  const [activeAgentsLoading, setActiveAgentsLoading] = useState(true);
 
   // Usage stats state
   const [usageStats, setUsageStats] = useState<{
-    session_tokens: number;
-    session_pct: number;
-    session_resets_at: string;
-    week_tokens: number;
-    week_pct: number;
-    week_resets_at: string;
-    sonnet_week_tokens: number;
-    sonnet_week_pct: number;
-    subscription_type: string;
+    five_hour_pct: number;
+    five_hour_resets_at: string;
+    five_hour_resets_in: string;
+    seven_day_pct: number;
+    seven_day_resets_at: string;
+    seven_day_resets_in: string;
+    seven_day_opus_pct: number | null;
+    seven_day_opus_resets_at: string | null;
+    seven_day_opus_resets_in: string | null;
+    seven_day_sonnet_pct: number | null;
+    seven_day_sonnet_resets_at: string | null;
+    seven_day_sonnet_resets_in: string | null;
+    subscription_type: string | null;
+    error: string | null;
   } | null>(null);
 
   useEffect(() => {
@@ -437,12 +328,17 @@ function App() {
       loadPlugins();
     }
 
-    if (currentSection === "notes") {
-      loadNotes(notesPath.join("/"));
+    if (currentSection === "knowledge") {
+      loadNotes("");
+      loadKnowledgeMeta();
+      loadTreeEntries("");
     }
 
-    if (currentSection === "tasks") {
-      loadTasks();
+    invoke<string>("get_notes_base_path_cmd").then(setNotesBasePath).catch(() => {});
+
+    if (currentSection === "github") {
+      loadGithubConfig();
+      loadGithubIssues();
     }
 
     const interval = setInterval(() => {
@@ -451,8 +347,40 @@ function App() {
       if (currentSection === "worktrees") loadWorktrees();
       if (currentSection === "voice" && voiceView === "history") loadHistory();
     }, 2000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+    };
   }, [currentSection, voiceView, memoryFilter]);
+
+  // Load note metadata (previews for pinned, timestamps for pinned + recent)
+  useEffect(() => {
+    if (currentSection === "knowledge" && (pinnedNotes.length > 0 || recentNotes.length > 0)) {
+      loadNoteMetadata(pinnedNotes, recentNotes);
+    }
+  }, [pinnedNotes, recentNotes, currentSection]);
+
+  // Restore expanded folder state when entering knowledge section
+  useEffect(() => {
+    if (currentSection === "knowledge" && expandedFolders.length > 0) {
+      expandedFolders.forEach((folder) => loadTreeEntries(folder));
+    }
+  }, [currentSection]);
+
+  // Refresh GitHub issues when config modal closes
+  useEffect(() => {
+    if (!githubConfigOpen && currentSection === "github") {
+      loadGithubIssues(true);
+    }
+  }, [githubConfigOpen]);
+
+  // Active agents polling
+  useEffect(() => {
+    if (currentSection !== "agents") return;
+    loadActiveAgents();
+    const id = setInterval(loadActiveAgents, 5000);
+    return () => clearInterval(id);
+  }, [currentSection]);
 
   async function loadWordReplacements() {
     try {
@@ -469,6 +397,50 @@ function App() {
       setWorktrees(result);
     } catch (e) {
       // Ignore errors
+    }
+  }
+
+  async function loadGithubConfig() {
+    try {
+      const result = await invoke<GitHubConfig>("get_github_config");
+      setGithubConfig(result);
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+
+  async function loadGithubIssues(forceRefresh = false) {
+    setGithubLoading(true);
+    try {
+      const result = await invoke<GitHubIssuesResponse>("get_github_issues", {
+        forceRefresh,
+      });
+      setGithubIssues(result.issues);
+      setGithubFetchedAt(result.fetched_at);
+      setGithubError(result.error);
+      // Refresh selectedIssue to avoid stale data in detail panel
+      setSelectedIssue(prev => {
+        if (!prev) return null;
+        return result.issues.find(
+          i => i.number === prev.number && i.repository === prev.repository
+        ) || null;
+      });
+    } catch (e) {
+      setGithubError(String(e));
+    } finally {
+      setGithubLoading(false);
+    }
+  }
+
+  async function saveGithubConfig(repos: string[], refreshInterval: number) {
+    try {
+      await invoke("save_github_config", {
+        repos,
+        refreshIntervalSeconds: refreshInterval,
+      });
+      setGithubConfig({ repos, refresh_interval_seconds: refreshInterval });
+    } catch (e) {
+      setGithubError(String(e));
     }
   }
 
@@ -577,6 +549,27 @@ function App() {
     }
   }
 
+  async function loadActiveAgents() {
+    try {
+      const result = await invoke<AgentInfo[]>("list_active_agents");
+      setActiveAgents(result);
+    } catch (e) {
+      console.error("Failed to load agents:", e);
+    } finally {
+      setActiveAgentsLoading(false);
+    }
+  }
+
+  async function handleKillAgent(pid: number) {
+    if (!confirm(`Send SIGTERM to agent ${pid}?`)) return;
+    try {
+      await invoke("kill_agent", { pid });
+      loadActiveAgents();
+    } catch (e) {
+      alert(`Failed to kill agent: ${e}`);
+    }
+  }
+
   async function loadCommands() {
     try {
       const result = await invoke<CommandConfig[]>("list_commands");
@@ -619,7 +612,8 @@ function App() {
       setSelectedNote(path);
       setNoteContent(content);
       setNoteEditing(true);
-      setNotePreview(false);
+      setNotePreview(null);
+      trackRecentNote(path);
     } catch (e) {
       setError(String(e));
     }
@@ -644,18 +638,24 @@ function App() {
     setNoteContent("");
     setNoteEditing(false);
     setEditingNoteName(false);
-    setNotePreview(false);
+    setNotePreview(null);
     // Refresh the notes list to show any new or updated notes
-    loadNotes(notesPath.join("/"));
+    loadNotes("");
   }
 
   async function handleDeleteNote(path: string) {
     try {
       await invoke("delete_note", { path });
+      // Clean up pinned/recent references
+      const newPinned = pinnedNotes.filter((p) => p !== path);
+      const newRecent = recentNotes.filter((p) => p !== path);
+      setPinnedNotes(newPinned);
+      setRecentNotes(newRecent);
+      saveKnowledgeMeta(newPinned, newRecent);
       if (selectedNote === path) {
         handleCloseNote();
       } else {
-        loadNotes(notesPath.join("/"));
+        loadNotes("");
       }
     } catch (e) {
       setError(String(e));
@@ -684,23 +684,17 @@ function App() {
 
     try {
       await invoke("rename_note", { oldPath: selectedNote, newPath });
+      // Update pinned/recent references to the new path
+      const newPinned = pinnedNotes.map((p) => p === selectedNote ? newPath : p);
+      const newRecent = recentNotes.map((p) => p === selectedNote ? newPath : p);
+      setPinnedNotes(newPinned);
+      setRecentNotes(newRecent);
+      saveKnowledgeMeta(newPinned, newRecent);
       setSelectedNote(newPath);
       setEditingNoteName(false);
     } catch (e) {
       setError(String(e));
     }
-  }
-
-  function navigateToFolder(path: string) {
-    const parts = path ? path.split("/").filter(Boolean) : [];
-    setNotesPath(parts);
-    loadNotes(path);
-  }
-
-  function navigateUp() {
-    const newPath = notesPath.slice(0, -1);
-    setNotesPath(newPath);
-    loadNotes(newPath.join("/"));
   }
 
   async function handleCreateNote() {
@@ -712,10 +706,7 @@ function App() {
       filename += ".md";
     }
 
-    // Build full path
-    const fullPath = notesPath.length > 0
-      ? `${notesPath.join("/")}/${filename}`
-      : filename;
+    const fullPath = filename;
 
     try {
       // Create empty note
@@ -735,77 +726,182 @@ function App() {
     }
   }
 
+  async function handleCreateFolder() {
+    if (!newNoteName.trim()) return;
+
+    const fullPath = newNoteName.trim();
+
+    try {
+      await invoke("create_folder", { path: fullPath });
+      setShowNewNote(false);
+      setNewNoteName("");
+      loadNotes("");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function loadKnowledgeMeta() {
+    try {
+      const meta = await invoke<KnowledgeMeta>("get_knowledge_meta");
+      setPinnedNotes(meta.pinned || []);
+      setRecentNotes(meta.recent || []);
+      setExpandedFolders(meta.expanded_folders || []);
+    } catch {
+      // Use empty defaults
+    }
+  }
+
+  async function saveKnowledgeMeta(
+    pinned?: string[],
+    recent?: string[],
+    expanded?: string[]
+  ) {
+    try {
+      const meta: KnowledgeMeta = {
+        pinned: pinned ?? pinnedNotes,
+        recent: recent ?? recentNotes,
+        expanded_folders: expanded ?? expandedFolders,
+      };
+      await invoke("save_knowledge_meta", { meta });
+    } catch {
+      // Ignore save errors
+    }
+  }
+
+  function togglePinNote(path: string) {
+    const isPinned = pinnedNotes.includes(path);
+    const newPinned = isPinned
+      ? pinnedNotes.filter((p) => p !== path)
+      : [...pinnedNotes, path];
+    setPinnedNotes(newPinned);
+    saveKnowledgeMeta(newPinned, recentNotes);
+  }
+
+  function trackRecentNote(path: string) {
+    const deduped = recentNotes.filter((p) => p !== path);
+    const newRecent = [path, ...deduped].slice(0, 6);
+    setRecentNotes(newRecent);
+    saveKnowledgeMeta(pinnedNotes, newRecent);
+  }
+
+  async function copyNotePath(relativePath: string): Promise<boolean> {
+    const fullPath = notesBasePath
+      ? `${notesBasePath}/${relativePath}`
+      : relativePath;
+    try {
+      await navigator.clipboard.writeText(fullPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function handleNoteContextMenu(e: React.MouseEvent, notePath: string) {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, notePath });
+  }
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const dismiss = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") dismiss();
+    };
+    // Use mousedown instead of click+contextmenu to avoid conflicting
+    // with React's onContextMenu handler (both fire on same event at
+    // different DOM levels, causing the menu to immediately dismiss)
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  async function handleCopyPath(relativePath: string) {
+    const success = await copyNotePath(relativePath);
+    if (success) {
+      setCopiedPath(true);
+      setTimeout(() => setCopiedPath(false), 1500);
+    }
+  }
+
+  async function loadNoteMetadata(pinned: string[], recent: string[]) {
+    const previews: Record<string, string> = {};
+    const modified: Record<string, number> = {};
+
+    // Load previews and timestamps for pinned notes
+    for (const path of pinned) {
+      try {
+        const preview: string = await invoke("get_note_preview", { path });
+        previews[path] = preview;
+        const mod: number = await invoke("get_note_modified", { path });
+        modified[path] = mod;
+      } catch {
+        previews[path] = "";
+        modified[path] = 0;
+      }
+    }
+
+    // Load timestamps for recent notes (skip if already loaded from pinned)
+    for (const path of recent) {
+      if (!modified[path] && modified[path] !== 0) {
+        try {
+          const mod: number = await invoke("get_note_modified", { path });
+          modified[path] = mod;
+        } catch {
+          modified[path] = 0;
+        }
+      }
+    }
+
+    setPinnedPreviews(previews);
+    setNoteModified(modified);
+  }
+
+  async function loadTreeEntries(subpath: string) {
+    try {
+      const entries: NoteEntry[] = await invoke("list_notes", {
+        subpath: subpath || null,
+      });
+      setAllNoteEntries((prev) => ({ ...prev, [subpath]: entries }));
+    } catch (e) {
+      console.error("Failed to load tree entries:", e);
+    }
+  }
+
+  async function toggleFolder(folderPath: string) {
+    const isExpanded = expandedFolders.includes(folderPath);
+    let newExpanded: string[];
+    if (isExpanded) {
+      newExpanded = expandedFolders.filter((f) => f !== folderPath);
+    } else {
+      newExpanded = [...expandedFolders, folderPath];
+      if (!allNoteEntries[folderPath]) {
+        await loadTreeEntries(folderPath);
+      }
+    }
+    setExpandedFolders(newExpanded);
+    saveKnowledgeMeta(undefined, undefined, newExpanded);
+  }
+
+  function getRelativeTime(timestamp: number): string {
+    if (!timestamp) return "";
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - timestamp;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+    return `${Math.floor(diff / 604800)}w ago`;
+  }
+
   async function loadUsageStats() {
     try {
       const result = await invoke<typeof usageStats>("get_usage_stats");
       setUsageStats(result);
     } catch (e) {
       // Ignore errors
-    }
-  }
-
-  async function loadTasks() {
-    try {
-      const result = await invoke<Task[]>("list_tasks");
-      setTasks(result);
-    } catch (e) {
-      // Ignore errors
-    }
-  }
-
-  async function handleAddTask() {
-    if (!newTaskTitle.trim()) return;
-    try {
-      await invoke("add_task", {
-        title: newTaskTitle,
-        description: newTaskDesc || null,
-        tags: newTaskTags,
-        dueDate: newTaskDue || null,
-      });
-      setNewTaskTitle("");
-      setNewTaskDesc("");
-      setNewTaskTags([]);
-      setNewTaskDue("");
-      setShowAddTask(false);
-      loadTasks();
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleUpdateTask() {
-    if (!editingTask) return;
-    try {
-      await invoke("update_task", {
-        id: editingTask.id,
-        title: editingTask.title,
-        description: editingTask.description || null,
-        tags: editingTask.tags,
-        dueDate: editingTask.due_date || null,
-        status: editingTask.status,
-      });
-      setEditingTask(null);
-      loadTasks();
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleMoveTask(id: string, status: string) {
-    try {
-      await invoke("move_task", { id, status });
-      loadTasks();
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleDeleteTask(id: string) {
-    try {
-      await invoke("delete_task", { id });
-      loadTasks();
-    } catch (e) {
-      setError(String(e));
     }
   }
 
@@ -1104,16 +1200,93 @@ function App() {
 
   // === RENDER FUNCTIONS ===
 
-  function formatTokens(n: number): string {
-    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-    return n.toString();
+  function renderAgentsSection() {
+    function elapsedSince(iso: string): string {
+      const then = new Date(iso).getTime();
+      const now = Date.now();
+      const secs = Math.max(0, Math.floor((now - then) / 1000));
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      const s = secs % 60;
+      if (h > 0) return `${h}h ${m}m`;
+      if (m > 0) return `${m}m ${s}s`;
+      return `${s}s`;
+    }
+
+    return (
+      <div className="agents-section">
+        <div className="agents-header">
+          <h2>Claude Code Agents</h2>
+          <span className="agents-count">
+            {activeAgents.length} {activeAgents.length === 1 ? "agent" : "agents"} running
+          </span>
+        </div>
+
+        {activeAgentsLoading && activeAgents.length === 0 ? (
+          <div className="agents-loading">Scanning…</div>
+        ) : activeAgents.length === 0 ? (
+          <div className="agents-empty">No Claude Code agents running</div>
+        ) : (
+          <ul className="agents-list">
+            {activeAgents.map((a) => {
+              const expanded = expandedAgentPid === a.pid;
+              return (
+                <li
+                  key={a.pid}
+                  className={`agent-row agent-${a.status} ${expanded ? "expanded" : ""}`}
+                >
+                  <button
+                    className="agent-summary"
+                    onClick={() => setExpandedAgentPid(expanded ? null : a.pid)}
+                  >
+                    <span className={`agent-status-dot status-${a.status}`} />
+                    <span className="agent-project">{a.project_name}</span>
+                    {a.branch && <span className="agent-branch">{a.branch}</span>}
+                    <span className="agent-elapsed">{elapsedSince(a.started_at)}</span>
+                    <span className="agent-last-action">
+                      {a.last_action ?? "—"}
+                    </span>
+                  </button>
+                  {expanded && (
+                    <div className="agent-detail">
+                      {a.last_user_msg && (
+                        <div className="agent-detail-block">
+                          <div className="agent-detail-label">Last message</div>
+                          <pre className="agent-detail-msg">{a.last_user_msg}</pre>
+                        </div>
+                      )}
+                      {a.last_action && (
+                        <div className="agent-detail-block">
+                          <div className="agent-detail-label">Last action</div>
+                          <code>{a.last_action}</code>
+                        </div>
+                      )}
+                      <div className="agent-detail-block agent-meta">
+                        <div>PID: {a.pid}</div>
+                        <div>cwd: {a.cwd}</div>
+                        {a.session_id && <div>session: {a.session_id}</div>}
+                      </div>
+                      <button
+                        className="agent-kill-btn"
+                        onClick={() => handleKillAgent(a.pid)}
+                      >
+                        Kill agent
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
   }
 
   function usageBarColor(pct: number): string {
     if (pct >= 80) return "#ef4444";
-    if (pct >= 50) return "#eab308";
-    return "#06b6d4";
+    if (pct >= 50) return "#f59e0b";
+    return "#22c55e";
   }
 
   function renderSidebar() {
@@ -1124,6 +1297,20 @@ function App() {
         </div>
         <nav className="sidebar-nav">
           <button
+            className={`nav-item ${currentSection === "agents" ? "active" : ""}`}
+            onClick={() => setCurrentSection("agents")}
+          >
+            <span className="nav-item-icon">&#9881;</span>
+            Agents
+          </button>
+          <button
+            className={`nav-item ${currentSection === "knowledge" ? "active" : ""}`}
+            onClick={() => { setCurrentSection("knowledge"); loadNotes(""); loadKnowledgeMeta(); }}
+          >
+            <span className="nav-item-icon">{"\ud83e\udde0"}</span>
+            Knowledge
+          </button>
+          <button
             className={`nav-item ${currentSection === "worktrees" ? "active" : ""}`}
             onClick={() => setCurrentSection("worktrees")}
           >
@@ -1131,18 +1318,12 @@ function App() {
             Worktrees
           </button>
           <button
-            className={`nav-item ${currentSection === "notes" ? "active" : ""}`}
-            onClick={() => { setCurrentSection("notes"); loadNotes(notesPath.join("/")); }}
+            className={`nav-item ${currentSection === "github" ? "active" : ""}`}
+            onClick={() => setCurrentSection("github")}
           >
-            <span className="nav-item-icon">&#128221;</span>
-            Notes
-          </button>
-          <button
-            className={`nav-item ${currentSection === "tasks" ? "active" : ""}`}
-            onClick={() => { setCurrentSection("tasks"); loadTasks(); }}
-          >
-            <span className="nav-item-icon">&#9745;</span>
-            Tasks
+            <span className="nav-item-icon">&#128025;</span>
+            GitHub
+            {(() => { const c = githubIssues.filter(i => i.state === "OPEN").length; return c > 0 ? <span className="nav-badge">{c}</span> : null; })()}
           </button>
           <button
             className={`nav-item ${currentSection === "voice" ? "active" : ""}`}
@@ -1175,60 +1356,111 @@ function App() {
                 <span className="usage-badge">{usageStats.subscription_type}</span>
               )}
             </div>
-            <div className="usage-section">
-              <div className="usage-label">Current session</div>
-              <div className="usage-bar-row">
-                <div className="usage-bar">
-                  <div
-                    className="usage-bar-fill"
-                    style={{ width: `${usageStats.session_pct}%`, background: usageBarColor(usageStats.session_pct) }}
-                  />
+
+            {usageStats.error ? (
+              <div className="usage-error">
+                Usage unavailable
+                <div className="usage-error-detail">{usageStats.error}</div>
+              </div>
+            ) : (
+              <>
+                <div className="usage-section">
+                  <div className="usage-label">5-hour</div>
+                  <div className="usage-bar-row">
+                    <div className="usage-bar">
+                      <div
+                        className="usage-bar-fill"
+                        style={{
+                          width: `${Math.min(100, usageStats.five_hour_pct)}%`,
+                          background: usageBarColor(usageStats.five_hour_pct),
+                        }}
+                      />
+                    </div>
+                    <span className="usage-pct">
+                      {Math.round(usageStats.five_hour_pct)}%
+                    </span>
+                  </div>
+                  {usageStats.five_hour_resets_in && (
+                    <div className="usage-meta">
+                      Resets in {usageStats.five_hour_resets_in}
+                    </div>
+                  )}
                 </div>
-                <span className="usage-pct">{Math.round(usageStats.session_pct)}%</span>
-              </div>
-              <div className="usage-details">
-                <span className="usage-tokens">{formatTokens(usageStats.session_tokens)} tokens</span>
-                {usageStats.session_resets_at && (
-                  <span className="usage-reset">Resets {usageStats.session_resets_at}</span>
-                )}
-              </div>
-            </div>
-            <div className="usage-section">
-              <div className="usage-label">Current week</div>
-              <div className="usage-bar-row">
-                <div className="usage-bar">
-                  <div
-                    className="usage-bar-fill"
-                    style={{ width: `${usageStats.week_pct}%`, background: usageBarColor(usageStats.week_pct) }}
-                  />
+
+                <div className="usage-section">
+                  <div className="usage-label">7-day</div>
+                  <div className="usage-bar-row">
+                    <div className="usage-bar">
+                      <div
+                        className="usage-bar-fill"
+                        style={{
+                          width: `${Math.min(100, usageStats.seven_day_pct)}%`,
+                          background: usageBarColor(usageStats.seven_day_pct),
+                        }}
+                      />
+                    </div>
+                    <span className="usage-pct">
+                      {Math.round(usageStats.seven_day_pct)}%
+                    </span>
+                  </div>
+                  {usageStats.seven_day_resets_in && (
+                    <div className="usage-meta">
+                      Resets in {usageStats.seven_day_resets_in}
+                    </div>
+                  )}
                 </div>
-                <span className="usage-pct">{Math.round(usageStats.week_pct)}%</span>
-              </div>
-              <div className="usage-details">
-                <span className="usage-tokens">{formatTokens(usageStats.week_tokens)} tokens</span>
-                {usageStats.week_resets_at && (
-                  <span className="usage-reset">Resets {usageStats.week_resets_at}</span>
+
+                {usageStats.seven_day_opus_pct !== null && (
+                  <div className="usage-section">
+                    <div className="usage-label">7-day Opus</div>
+                    <div className="usage-bar-row">
+                      <div className="usage-bar">
+                        <div
+                          className="usage-bar-fill"
+                          style={{
+                            width: `${Math.min(100, usageStats.seven_day_opus_pct ?? 0)}%`,
+                            background: usageBarColor(usageStats.seven_day_opus_pct ?? 0),
+                          }}
+                        />
+                      </div>
+                      <span className="usage-pct">
+                        {Math.round(usageStats.seven_day_opus_pct ?? 0)}%
+                      </span>
+                    </div>
+                    {usageStats.seven_day_opus_resets_in && (
+                      <div className="usage-meta">
+                        Resets in {usageStats.seven_day_opus_resets_in}
+                      </div>
+                    )}
+                  </div>
                 )}
-              </div>
-            </div>
-            <div className="usage-section">
-              <div className="usage-label">Sonnet (weekly)</div>
-              <div className="usage-bar-row">
-                <div className="usage-bar">
-                  <div
-                    className="usage-bar-fill"
-                    style={{ width: `${usageStats.sonnet_week_pct}%`, background: usageBarColor(usageStats.sonnet_week_pct) }}
-                  />
-                </div>
-                <span className="usage-pct">{Math.round(usageStats.sonnet_week_pct)}%</span>
-              </div>
-              <div className="usage-details">
-                <span className="usage-tokens">{formatTokens(usageStats.sonnet_week_tokens)} tokens</span>
-                {usageStats.week_resets_at && (
-                  <span className="usage-reset">Resets {usageStats.week_resets_at}</span>
+
+                {usageStats.seven_day_sonnet_pct !== null && (
+                  <div className="usage-section">
+                    <div className="usage-label">7-day Sonnet</div>
+                    <div className="usage-bar-row">
+                      <div className="usage-bar">
+                        <div
+                          className="usage-bar-fill"
+                          style={{
+                            width: `${Math.min(100, usageStats.seven_day_sonnet_pct ?? 0)}%`,
+                            background: usageBarColor(usageStats.seven_day_sonnet_pct ?? 0),
+                          }}
+                        />
+                      </div>
+                      <span className="usage-pct">
+                        {Math.round(usageStats.seven_day_sonnet_pct ?? 0)}%
+                      </span>
+                    </div>
+                    {usageStats.seven_day_sonnet_resets_in && (
+                      <div className="usage-meta">
+                        Resets in {usageStats.seven_day_sonnet_resets_in}
+                      </div>
+                    )}
+                  </div>
                 )}
-              </div>
-            </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1395,6 +1627,308 @@ function App() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderGithubSection() {
+    function timeAgo(dateStr: string): string {
+      const date = new Date(dateStr);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 60) return `${diffMins}m ago`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours}h ago`;
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays < 30) return `${diffDays}d ago`;
+      return date.toLocaleDateString();
+    }
+
+    function addGithubRepo() {
+      const trimmed = newGithubRepo.trim();
+      if (trimmed.includes("/") && !githubConfig.repos.includes(trimmed)) {
+        const updated = [...githubConfig.repos, trimmed];
+        saveGithubConfig(updated, githubConfig.refresh_interval_seconds);
+        setNewGithubRepo("");
+      }
+    }
+
+    function getRepoColorClass(repo: string): string {
+      let hash = 0;
+      for (let i = 0; i < repo.length; i++) {
+        hash = repo.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return `repo-${Math.abs(hash) % 8}`;
+    }
+
+    const filteredIssues = githubIssues.filter(issue => {
+      if (githubRepoFilter !== "all" && issue.repository !== githubRepoFilter) return false;
+      if (githubStateFilter === "open" && issue.state !== "OPEN") return false;
+      if (githubStateFilter === "closed" && issue.state !== "CLOSED") return false;
+      return true;
+    });
+
+    const repos = [...new Set(githubIssues.map(i => i.repository).filter(Boolean))] as string[];
+    const groupedByRepo = repos
+      .filter(r => githubRepoFilter === "all" || r === githubRepoFilter)
+      .map(repo => ({
+        repo,
+        issues: filteredIssues.filter(i => i.repository === repo),
+      }))
+      .filter(g => g.issues.length > 0);
+
+    return (
+      <div className="github-layout">
+        <div className="github-list">
+          {/* Header */}
+          <div className="github-header">
+            <div className="github-title-row">
+              <h2 style={{ margin: 0, fontSize: "1.1rem" }}>GitHub Issues</h2>
+              <div className="github-header-actions">
+                <span className="github-count">{filteredIssues.length} issues</span>
+                <button
+                  className="github-refresh-btn"
+                  onClick={() => loadGithubIssues(true)}
+                  disabled={githubLoading}
+                  title="Sync issues from GitHub"
+                >
+                  {githubLoading ? "⟳ Syncing…" : "↻ Sync"}
+                </button>
+                <button
+                  className="github-config-btn"
+                  onClick={() => setGithubConfigOpen(true)}
+                  title="Configure repos"
+                >
+                  ⚙
+                </button>
+              </div>
+            </div>
+            {githubFetchedAt && (
+              <div className="github-fetched">Updated {timeAgo(githubFetchedAt)}</div>
+            )}
+            {githubError && (
+              <div className="github-error">{githubError}</div>
+            )}
+
+            {/* Filters */}
+            <div className="github-filters">
+              <select
+                className="github-filter-select"
+                value={githubRepoFilter}
+                onChange={(e) => setGithubRepoFilter(e.target.value)}
+              >
+                <option value="all">All repos</option>
+                {repos.map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+              <div className="github-state-toggle">
+                <button
+                  className={`github-state-btn ${githubStateFilter === "open" ? "active" : ""}`}
+                  onClick={() => setGithubStateFilter("open")}
+                >
+                  Open
+                </button>
+                <button
+                  className={`github-state-btn ${githubStateFilter === "closed" ? "active" : ""}`}
+                  onClick={() => setGithubStateFilter("closed")}
+                >
+                  Closed
+                </button>
+                <button
+                  className={`github-state-btn ${githubStateFilter === "all" ? "active" : ""}`}
+                  onClick={() => setGithubStateFilter("all")}
+                >
+                  All
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Empty states */}
+          {githubConfig.repos.length === 0 ? (
+            <div className="empty-state">
+              <p>No repos configured</p>
+              <p style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+                Click ⚙ to add GitHub repos to track
+              </p>
+            </div>
+          ) : filteredIssues.length === 0 && !githubLoading ? (
+            <div className="empty-state">
+              <p>No issues assigned to you</p>
+            </div>
+          ) : (
+            /* Issue list grouped by repo */
+            groupedByRepo.map(({ repo, issues }) => (
+              <div key={repo} className="github-repo-group">
+                <div className="github-repo-header">
+                  <span className={`worktree-repo ${getRepoColorClass(repo)}`}>
+                    {repo}
+                  </span>
+                  <span className="github-repo-count">{issues.length}</span>
+                </div>
+                {issues.map(issue => (
+                  <div
+                    key={`${issue.repository}-${issue.number}`}
+                    className={`github-issue-item ${selectedIssue?.number === issue.number && selectedIssue?.repository === issue.repository ? "selected" : ""}`}
+                    onClick={() => setSelectedIssue(
+                      selectedIssue?.number === issue.number && selectedIssue?.repository === issue.repository ? null : issue
+                    )}
+                  >
+                    <div className="github-issue-header">
+                      <span className={`github-issue-number ${issue.state === "OPEN" ? "open" : "closed"}`}>
+                        #{issue.number}
+                      </span>
+                      <span className="github-issue-title">{issue.title}</span>
+                    </div>
+                    <div className="github-issue-meta">
+                      {issue.labels.map(label => (
+                        <span
+                          key={label.name}
+                          className="github-label"
+                          style={{
+                            backgroundColor: `#${label.color}33`,
+                            color: `#${label.color}`,
+                            border: `1px solid #${label.color}66`,
+                          }}
+                        >
+                          {label.name}
+                        </span>
+                      ))}
+                      {issue.milestone && (
+                        <span className="github-milestone">🎯 {issue.milestone.title}</span>
+                      )}
+                      <span className="github-time">{timeAgo(issue.updatedAt)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Detail panel */}
+        {selectedIssue && (
+          <div className="task-panel" style={{ minWidth: "350px" }}>
+            <div className="task-panel-header">
+              <span className="task-panel-title">#{selectedIssue.number}</span>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <button
+                  className="task-panel-btn primary"
+                  onClick={() => {
+                    if (selectedIssue.url) {
+                      openUrl(selectedIssue.url);
+                    }
+                  }}
+                >
+                  Open in GitHub
+                </button>
+                <button
+                  className="task-panel-btn"
+                  onClick={() => setSelectedIssue(null)}
+                  title="Close panel"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <h3 style={{ margin: "0 0 0.75rem", fontSize: "1rem", fontWeight: 500 }}>
+              {selectedIssue.title}
+            </h3>
+            <div className="github-detail-meta">
+              <span className={`github-state-badge ${selectedIssue.state === "OPEN" ? "open" : "closed"}`}>
+                {selectedIssue.state === "OPEN" ? "● Open" : "● Closed"}
+              </span>
+              {selectedIssue.assignees.map(a => (
+                <span key={a.login} className="github-assignee">@{a.login}</span>
+              ))}
+              <span className="github-comments">{selectedIssue.comments.length} comments</span>
+            </div>
+            {selectedIssue.labels.length > 0 && (
+              <div className="github-detail-labels">
+                {selectedIssue.labels.map(label => (
+                  <span
+                    key={label.name}
+                    className="github-label"
+                    style={{
+                      backgroundColor: `#${label.color}33`,
+                      color: `#${label.color}`,
+                      border: `1px solid #${label.color}66`,
+                    }}
+                  >
+                    {label.name}
+                  </span>
+                ))}
+              </div>
+            )}
+            {selectedIssue.body && (
+              <div className="github-issue-body">
+                <pre style={{
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  fontSize: "0.85rem",
+                  lineHeight: 1.5,
+                  color: "#e2e8f0",
+                  margin: 0,
+                  fontFamily: "inherit",
+                }}>
+                  {selectedIssue.body}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Config modal */}
+        {githubConfigOpen && (
+          <div className="modal-overlay" onClick={() => setGithubConfigOpen(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <h3 style={{ margin: "0 0 1rem" }}>GitHub Repos</h3>
+              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+                <input
+                  className="github-repo-input"
+                  type="text"
+                  placeholder="owner/repo"
+                  value={newGithubRepo}
+                  onChange={(e) => setNewGithubRepo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addGithubRepo();
+                  }}
+                />
+                <button
+                  className="task-panel-btn primary"
+                  onClick={addGithubRepo}
+                >
+                  Add
+                </button>
+              </div>
+              <div className="github-repo-list">
+                {githubConfig.repos.map((repo, i) => (
+                  <div key={repo} className="github-repo-list-item">
+                    <span>{repo}</span>
+                    <button
+                      className="github-repo-remove"
+                      onClick={() => {
+                        const updated = githubConfig.repos.filter((_, idx) => idx !== i);
+                        saveGithubConfig(updated, githubConfig.refresh_interval_seconds);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                className="task-panel-btn primary"
+                style={{ marginTop: "1rem" }}
+                onClick={() => setGithubConfigOpen(false)}
+              >
+                Done
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -2377,215 +2911,51 @@ function App() {
     );
   }
 
-  function renderTasksSection() {
-    const todoTasks = tasks.filter(t => t.status === "todo");
-    const inProgressTasks = tasks.filter(t => t.status === "in_progress");
-    const doneTasks = tasks.filter(t => t.status === "done");
+  function renderFolderTree(parentPath: string, depth: number = 0) {
+    const entries = allNoteEntries[parentPath] || [];
+    const folders = entries.filter((e) => e.is_dir).sort((a, b) => a.name.localeCompare(b.name));
+    const files = entries.filter((e) => !e.is_dir).sort((a, b) => a.name.localeCompare(b.name));
 
-    function formatDate(dateStr?: string) {
-      if (!dateStr) return null;
-      const date = new Date(dateStr);
-      return date.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-    }
-
-    function isOverdue(dueDate?: string) {
-      if (!dueDate) return false;
-      return new Date(dueDate) < new Date();
-    }
-
-    function renderTaskCard(task: Task) {
-      return (
-        <div
-          key={task.id}
-          className={`task-card ${draggedTaskId === task.id ? "dragging" : ""}`}
-          onClick={() => setEditingTask(task)}
-          draggable
-          onDragStart={(e) => {
-            setDraggedTaskId(task.id);
-            e.dataTransfer.effectAllowed = "move";
-            e.dataTransfer.setData("text/plain", task.id);
-          }}
-          onDragEnd={() => { setDraggedTaskId(null); setDragOverColumn(null); }}
-        >
-          <div className="task-card-title">{task.title}</div>
-          {task.description && (
-            <div className="task-card-desc">{task.description}</div>
-          )}
-          <div className="task-card-meta">
-            {task.due_date && (
-              <span className={`task-due ${isOverdue(task.due_date) && task.status !== "done" ? "overdue" : ""}`}>
-                {formatDate(task.due_date)}
-              </span>
-            )}
-            {task.tags.map(tag => {
-              const color = getTagColor(tag);
-              return (
-                <span key={tag} className="task-tag" style={{ background: color.bg, color: color.text }}>{tag}</span>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
-    // Add/Edit task modal
-    if (showAddTask || editingTask) {
-      const isEditing = !!editingTask;
-      const title = isEditing ? editingTask.title : newTaskTitle;
-      const desc = isEditing ? (editingTask.description || "") : newTaskDesc;
-      const tags = isEditing ? editingTask.tags : newTaskTags;
-      const due = isEditing ? (editingTask.due_date || "") : newTaskDue;
-
-      return (
-        <div className="tasks-section">
-          <div className="task-modal">
-            <div className="task-modal-header">
-              <span>{isEditing ? "Edit Task" : "New Task"}</span>
-              <button className="task-modal-close" onClick={() => { setShowAddTask(false); setEditingTask(null); }}>×</button>
-            </div>
-            <div className="task-modal-body">
-              <div className="task-field">
-                <label>Title</label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => isEditing ? setEditingTask({ ...editingTask, title: e.target.value }) : setNewTaskTitle(e.target.value)}
-                  placeholder="What needs to be done?"
-                  autoFocus
-                />
-              </div>
-              <div className="task-field">
-                <label>Description</label>
-                <textarea
-                  value={desc}
-                  onChange={(e) => isEditing ? setEditingTask({ ...editingTask, description: e.target.value }) : setNewTaskDesc(e.target.value)}
-                  placeholder="Optional details..."
-                  rows={3}
-                />
-              </div>
-              <div className="task-field-row">
-                <div className="task-field">
-                  <label>Due Date</label>
-                  <DatePicker
-                    value={due}
-                    onChange={(val) => isEditing ? setEditingTask({ ...editingTask, due_date: val }) : setNewTaskDue(val)}
-                  />
-                </div>
-                <div className="task-field">
-                  <label>Tags</label>
-                  <TagInput
-                    tags={tags}
-                    onChange={(t) => isEditing ? setEditingTask({ ...editingTask, tags: t }) : setNewTaskTags(t)}
-                  />
-                </div>
-              </div>
-              {isEditing && (
-                <div className="task-field">
-                  <label>Status</label>
-                  <select
-                    value={editingTask.status}
-                    onChange={(e) => setEditingTask({ ...editingTask, status: e.target.value as Task["status"] })}
-                  >
-                    <option value="todo">To Do</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="done">Done</option>
-                  </select>
-                </div>
-              )}
-            </div>
-            <div className="task-modal-footer">
-              <button className="task-btn primary" onClick={isEditing ? handleUpdateTask : handleAddTask}>
-                {isEditing ? "Save" : "Add Task"}
-              </button>
-              {isEditing && (
-                <button className="task-btn danger" onClick={() => { handleDeleteTask(editingTask.id); setEditingTask(null); }}>
-                  Delete
-                </button>
-              )}
-              <button className="task-btn" onClick={() => { setShowAddTask(false); setEditingTask(null); }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // Kanban board
     return (
-      <div className="tasks-section">
-        <div className="tasks-header">
-          <button className="add-task-btn" onClick={() => setShowAddTask(true)}>
-            + Add Task
+      <div className="knowledge-tree-level">
+        {folders.map((folder) => {
+          const isExpanded = expandedFolders.includes(folder.path);
+          return (
+            <div key={folder.path}>
+              <button
+                className="knowledge-tree-item knowledge-tree-folder"
+                style={{ paddingLeft: `${12 + depth * 16}px` }}
+                onClick={() => toggleFolder(folder.path)}
+              >
+                <span className="knowledge-tree-arrow">
+                  {isExpanded ? "\u25BE" : "\u25B8"}
+                </span>
+                <span className="knowledge-tree-name">{folder.name}</span>
+              </button>
+              {isExpanded && renderFolderTree(folder.path, depth + 1)}
+            </div>
+          );
+        })}
+        {files.map((file) => (
+          <button
+            key={file.path}
+            className="knowledge-tree-item knowledge-tree-file"
+            style={{ paddingLeft: `${28 + depth * 16}px` }}
+            onClick={() => handleOpenNote(file.path)}
+            onContextMenu={(e) => handleNoteContextMenu(e, file.path)}
+          >
+            <span className="knowledge-tree-name">{file.name}</span>
           </button>
-        </div>
-        <div className="kanban-board">
-          <div
-            className={`kanban-column ${dragOverColumn === "todo" ? "drag-over" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setDragOverColumn("todo"); }}
-            onDragLeave={() => setDragOverColumn(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              const taskId = e.dataTransfer.getData("text/plain");
-              if (taskId) handleMoveTask(taskId, "todo");
-              setDragOverColumn(null);
-            }}
-          >
-            <div className="kanban-column-header">
-              <span className="kanban-column-title">To Do</span>
-              <span className="kanban-column-count">{todoTasks.length}</span>
-            </div>
-            <div className="kanban-column-content">
-              {todoTasks.map(renderTaskCard)}
-            </div>
-          </div>
-          <div
-            className={`kanban-column ${dragOverColumn === "in_progress" ? "drag-over" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setDragOverColumn("in_progress"); }}
-            onDragLeave={() => setDragOverColumn(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              const taskId = e.dataTransfer.getData("text/plain");
-              if (taskId) handleMoveTask(taskId, "in_progress");
-              setDragOverColumn(null);
-            }}
-          >
-            <div className="kanban-column-header">
-              <span className="kanban-column-title">In Progress</span>
-              <span className="kanban-column-count">{inProgressTasks.length}</span>
-            </div>
-            <div className="kanban-column-content">
-              {inProgressTasks.map(renderTaskCard)}
-            </div>
-          </div>
-          <div
-            className={`kanban-column done ${dragOverColumn === "done" ? "drag-over" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setDragOverColumn("done"); }}
-            onDragLeave={() => setDragOverColumn(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              const taskId = e.dataTransfer.getData("text/plain");
-              if (taskId) handleMoveTask(taskId, "done");
-              setDragOverColumn(null);
-            }}
-          >
-            <div className="kanban-column-header">
-              <span className="kanban-column-title">Done</span>
-              <span className="kanban-column-count">{doneTasks.length}</span>
-            </div>
-            <div className="kanban-column-content">
-              {doneTasks.map(renderTaskCard)}
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
     );
   }
 
-  function renderNotesSection() {
+  function renderKnowledgeSection() {
     // Editor view
     if (noteEditing && selectedNote) {
       const fileName = selectedNote.split("/").pop() || selectedNote;
+      const isPinned = pinnedNotes.includes(selectedNote);
       return (
         <div className="notes-section">
           <div className="notes-editor-header">
@@ -2621,10 +2991,30 @@ function App() {
             )}
             <div className="notes-header-actions">
               <button
-                className={`notes-preview-btn ${notePreview ? "active" : ""}`}
-                onClick={() => setNotePreview(!notePreview)}
+                className={`notes-pin-btn ${isPinned ? "active" : ""}`}
+                onClick={() => togglePinNote(selectedNote)}
+                title={isPinned ? "Unpin" : "Pin"}
               >
-                {notePreview ? "Edit" : "Preview"}
+                {isPinned ? "Unpin" : "Pin"}
+              </button>
+              <button
+                className={`notes-preview-btn ${notePreview === false ? "active" : ""}`}
+                onClick={() => setNotePreview(notePreview === false ? null : false)}
+              >
+                Edit
+              </button>
+              <button
+                className={`notes-preview-btn ${notePreview === true ? "active" : ""}`}
+                onClick={() => setNotePreview(notePreview === true ? null : true)}
+              >
+                Preview
+              </button>
+              <button
+                className={`notes-copy-path-btn ${copiedPath ? "copied" : ""}`}
+                onClick={() => handleCopyPath(selectedNote)}
+                title="Copy file path"
+              >
+                {copiedPath ? "Copied!" : "Copy Path"}
               </button>
               <button
                 className={`notes-save-btn ${noteSaving ? "saving" : ""} ${noteSaved ? "saved" : ""}`}
@@ -2641,105 +3031,229 @@ function App() {
               </button>
             </div>
           </div>
-          {notePreview ? (
+          {notePreview === true ? (
             <div className="notes-preview">
               <Markdown>{noteContent}</Markdown>
             </div>
-          ) : (
+          ) : notePreview === false ? (
             <textarea
               className="notes-editor"
               value={noteContent}
               onChange={(e) => setNoteContent(e.target.value)}
               spellCheck={false}
             />
+          ) : (
+            <div className="notes-split-pane">
+              <textarea
+                className="notes-editor"
+                value={noteContent}
+                onChange={(e) => setNoteContent(e.target.value)}
+                spellCheck={false}
+              />
+              <div className="notes-preview">
+                <Markdown>{noteContent}</Markdown>
+              </div>
+            </div>
+          )}
+          {contextMenu && (
+            <div
+              className="note-context-menu"
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="note-context-menu-item"
+                onClick={() => {
+                  handleCopyPath(contextMenu.notePath);
+                  setContextMenu(null);
+                }}
+              >
+                Copy file path
+              </button>
+            </div>
           )}
         </div>
       );
     }
 
-    // File browser view
+    // Dashboard view
     return (
-      <div className="notes-section">
-        <div className="notes-header">
-          <div className="notes-breadcrumb">
-            <button
-              className="breadcrumb-item"
-              onClick={() => { setNotesPath([]); loadNotes(""); }}
-            >
-              docs
-            </button>
-            {notesPath.map((part, idx) => (
-              <span key={idx}>
-                <span className="breadcrumb-sep">/</span>
-                <button
-                  className="breadcrumb-item"
-                  onClick={() => {
-                    const newPath = notesPath.slice(0, idx + 1);
-                    setNotesPath(newPath);
-                    loadNotes(newPath.join("/"));
-                  }}
-                >
-                  {part}
-                </button>
-              </span>
-            ))}
+      <div className="knowledge-dashboard">
+        {/* Full-width search bar */}
+        <div className="knowledge-top-bar">
+          <div className="knowledge-search">
+            <span className="knowledge-search-icon">{"\ud83d\udd0d"}</span>
+            <input
+              type="text"
+              placeholder="Search notes..."
+              value={knowledgeSearch}
+              onChange={(e) => setKnowledgeSearch(e.target.value)}
+              className="knowledge-search-input"
+            />
+            {knowledgeSearch && (
+              <button
+                className="knowledge-search-clear"
+                onClick={() => setKnowledgeSearch("")}
+              >
+                {"\u2715"}
+              </button>
+            )}
           </div>
-          <button className="new-note-btn" onClick={() => setShowNewNote(true)}>
-            + New Note
+          <button
+            className="knowledge-new-btn"
+            onClick={() => setShowNewNote(true)}
+          >
+            + New
           </button>
         </div>
 
+        {/* New note modal */}
         {showNewNote && (
           <div className="new-note-modal">
             <input
               type="text"
-              className="new-note-input"
-              placeholder="Note name (e.g., my-note.md)"
+              placeholder="Note or folder name..."
               value={newNoteName}
               onChange={(e) => setNewNoteName(e.target.value)}
+              className="new-note-input"
+              autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleCreateNote();
-                if (e.key === "Escape") { setShowNewNote(false); setNewNoteName(""); }
+                if (e.key === "Escape") setShowNewNote(false);
               }}
-              autoFocus
             />
-            <div className="new-note-actions">
-              <button className="new-note-create" onClick={handleCreateNote}>Create</button>
-              <button className="new-note-cancel" onClick={() => { setShowNewNote(false); setNewNoteName(""); }}>Cancel</button>
-            </div>
+            <button className="new-note-create" onClick={handleCreateNote}>
+              Note
+            </button>
+            <button
+              className="new-note-create folder"
+              onClick={handleCreateFolder}
+            >
+              Folder
+            </button>
+            <button
+              className="new-note-create"
+              onClick={() => setShowNewNote(false)}
+              style={{ background: "rgba(100,100,100,0.3)" }}
+            >
+              Cancel
+            </button>
           </div>
         )}
 
-        <div className="notes-list">
-          {notesPath.length > 0 && (
-            <div className="notes-item folder" onClick={navigateUp}>
-              <span className="notes-icon">📁</span>
-              <span className="notes-name">..</span>
+        {/* Two-column layout */}
+        <div className="knowledge-columns">
+          {/* Left column - folder tree */}
+          <div className="knowledge-tree-panel">
+            <div className="knowledge-section-label">FOLDERS</div>
+            <div className="knowledge-tree-scroll">
+              {renderFolderTree("")}
             </div>
-          )}
-          {noteEntries.length === 0 && notesPath.length === 0 ? (
-            <div className="empty-state">
-              <p>No markdown files found</p>
-            </div>
-          ) : (
-            noteEntries.map((entry) => (
-              <div
-                key={entry.path}
-                className={`notes-item ${entry.is_dir ? "folder" : "file"}`}
-                onClick={() => {
-                  if (entry.is_dir) {
-                    navigateToFolder(entry.path);
-                  } else {
-                    handleOpenNote(entry.path);
-                  }
-                }}
-              >
-                <span className="notes-icon">{entry.is_dir ? "📁" : "📄"}</span>
-                <span className="notes-name">{entry.name}</span>
+          </div>
+
+          {/* Right column - pinned cards + recent */}
+          <div className="knowledge-content-panel">
+            {knowledgeSearch ? (
+              <div className="knowledge-search-results">
+                <div className="knowledge-section-label">RESULTS</div>
+                {noteEntries
+                  .filter((e) =>
+                    !e.is_dir &&
+                    e.name.toLowerCase().includes(knowledgeSearch.toLowerCase())
+                  )
+                  .map((entry) => (
+                    <button
+                      key={entry.path}
+                      className="knowledge-search-result-item"
+                      onClick={() => handleOpenNote(entry.path)}
+                      onContextMenu={(e) => handleNoteContextMenu(e, entry.path)}
+                    >
+                      <span className="knowledge-result-name">{entry.name}</span>
+                      <span className="knowledge-result-path">
+                        {entry.path.split("/").slice(0, -1).join(" / ")}
+                      </span>
+                    </button>
+                  ))}
               </div>
-            ))
-          )}
+            ) : (
+              <>
+                {pinnedNotes.length > 0 && (
+                  <div className="knowledge-pinned-section">
+                    <div className="knowledge-section-label">PINNED</div>
+                    <div className="knowledge-cards-grid">
+                      {pinnedNotes.map((path) => {
+                        const name = path.split("/").pop() || path;
+                        const preview = pinnedPreviews[path] || "";
+                        const modified = noteModified[path] || 0;
+                        return (
+                          <button
+                            key={path}
+                            className="knowledge-card"
+                            onClick={() => handleOpenNote(path)}
+                            onContextMenu={(e) => handleNoteContextMenu(e, path)}
+                          >
+                            <div className="knowledge-card-title">{name.replace(/\.md$/, "")}</div>
+                            <div className="knowledge-card-preview">
+                              {preview.replace(/^#+ .*/gm, "").trim().slice(0, 120)}
+                            </div>
+                            <div className="knowledge-card-meta">
+                              {getRelativeTime(modified)}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {recentNotes.length > 0 && (
+                  <div className="knowledge-recent-section">
+                    <div className="knowledge-section-label">RECENT</div>
+                    <div className="knowledge-recent-list">
+                      {recentNotes.map((path) => {
+                        const name = path.split("/").pop() || path;
+                        return (
+                          <button
+                            key={path}
+                            className="knowledge-recent-item"
+                            onClick={() => handleOpenNote(path)}
+                            onContextMenu={(e) => handleNoteContextMenu(e, path)}
+                          >
+                            <span className="knowledge-recent-name">
+                              {name.replace(/\.md$/, "")}
+                            </span>
+                            <span className="knowledge-recent-time">
+                              {getRelativeTime(noteModified[path] || 0)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
+        {contextMenu && (
+          <div
+            className="note-context-menu"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="note-context-menu-item"
+              onClick={() => {
+                handleCopyPath(contextMenu.notePath);
+                setContextMenu(null);
+              }}
+            >
+              Copy file path
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -2748,9 +3262,10 @@ function App() {
     <div className="app-layout">
       {renderSidebar()}
       <main className="main-content">
+        {currentSection === "agents" && renderAgentsSection()}
         {currentSection === "worktrees" && renderWorktreesSection()}
-        {currentSection === "notes" && renderNotesSection()}
-        {currentSection === "tasks" && renderTasksSection()}
+        {currentSection === "github" && renderGithubSection()}
+        {currentSection === "knowledge" && renderKnowledgeSection()}
         {currentSection === "voice" && renderVoiceSection()}
         {currentSection === "memory" && renderMemorySection()}
         {currentSection === "config" && renderConfigSection()}
