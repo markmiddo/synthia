@@ -2385,11 +2385,28 @@ fn get_knowledge_meta_path() -> PathBuf {
 #[tauri::command]
 fn get_knowledge_meta() -> KnowledgeMeta {
     let path = get_knowledge_meta_path();
-    if let Ok(content) = fs::read_to_string(&path) {
+    let mut meta: KnowledgeMeta = if let Ok(content) = fs::read_to_string(&path) {
         serde_json::from_str(&content).unwrap_or_default()
     } else {
-        KnowledgeMeta::default()
+        return KnowledgeMeta::default();
+    };
+
+    // Filter out pinned/recent entries whose files were deleted externally
+    let base = get_notes_base_path();
+    let orig_pinned_len = meta.pinned.len();
+    let orig_recent_len = meta.recent.len();
+
+    meta.pinned.retain(|p| base.join(p).exists());
+    meta.recent.retain(|p| base.join(p).exists());
+
+    // Persist cleaned meta if any entries were removed
+    if meta.pinned.len() != orig_pinned_len || meta.recent.len() != orig_recent_len {
+        if let Ok(content) = serde_json::to_string_pretty(&meta) {
+            let _ = fs::write(&path, content);
+        }
     }
+
+    meta
 }
 
 #[tauri::command]
