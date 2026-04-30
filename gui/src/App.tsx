@@ -256,6 +256,7 @@ function App() {
     gate_script: string;
   } | null>(null);
   const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>([]);
+  const [egressEnabled, setEgressEnabled] = useState(false);
   const [hooks, setHooks] = useState<HookConfig[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
@@ -481,6 +482,23 @@ function App() {
       setNeuralguardStatus(s);
     } catch (e) {
       // Ignore
+    }
+    try {
+      const enabled = await invoke<boolean>("get_egress_enabled");
+      setEgressEnabled(enabled);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  async function handleToggleEgress() {
+    const next = !egressEnabled;
+    setEgressEnabled(next);
+    try {
+      await invoke("set_egress_enabled", { enabled: next });
+    } catch (e) {
+      setEgressEnabled(!next);
+      setError(String(e));
     }
   }
 
@@ -1603,6 +1621,28 @@ function App() {
                 Install hooks
               </button>
             )}
+          </div>
+        </div>
+
+        <div className={`neuralguard-install ${egressEnabled ? "installed" : ""}`}>
+          <div className="neuralguard-install-text">
+            <div className="neuralguard-install-title">
+              {egressEnabled ? "Egress monitor on" : "Egress monitor off"}
+            </div>
+            <div className="neuralguard-install-sub">
+              Polls established TCP connections from claude/opencode/kimi/codex
+              processes every 30s and flags traffic to hosts not on the
+              allowlist (api.anthropic.com, github.com, registry.npmjs.org,
+              pypi.org, etc.).
+            </div>
+          </div>
+          <div className="neuralguard-install-actions">
+            <button
+              className={`claude-btn ${egressEnabled ? "danger" : "primary"}`}
+              onClick={handleToggleEgress}
+            >
+              {egressEnabled ? "Disable" : "Enable"}
+            </button>
           </div>
         </div>
 

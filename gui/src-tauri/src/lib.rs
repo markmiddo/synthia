@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 mod security;
+mod egress;
 
 /// Get the Synthia project root directory.
 /// Resolves from the executable path (gui/src-tauri/target/release/synthia-gui)
@@ -2229,7 +2230,7 @@ fn classify_ai_argv(argv: &str) -> Option<&'static str> {
 }
 
 /// Returns Vec of (pid, etime_seconds, full_argv, kind).
-fn list_ai_processes(self_pid: u32) -> Vec<(u32, u64, String, &'static str)> {
+pub(crate) fn list_ai_processes(self_pid: u32) -> Vec<(u32, u64, String, &'static str)> {
     use std::process::Command;
     let output = match Command::new("ps")
         .args(["-eo", "pid=,etime=,args="])
@@ -2526,6 +2527,29 @@ fn pending_prompts_dir() -> PathBuf {
 fn prompt_responses_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/synthia/security/prompt-responses")
+}
+
+#[tauri::command]
+fn get_egress_enabled() -> bool {
+    egress::is_enabled()
+}
+
+#[tauri::command]
+fn set_egress_enabled(enabled: bool) -> Result<(), String> {
+    let path = egress::runtime_state_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut state: serde_json::Value = fs::read_to_string(&path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = state.as_object_mut() {
+        obj.insert("egress_enabled".to_string(), serde_json::Value::Bool(enabled));
+    }
+    fs::write(&path, serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -3424,6 +3448,8 @@ pub fn run() {
         std::process::exit(0);
     }
 
+    egress::spawn_watcher();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -3608,6 +3634,8 @@ pub fn run() {
             neuralguard_status,
             install_neuralguard_hooks,
             uninstall_neuralguard_hooks,
+            get_egress_enabled,
+            set_egress_enabled,
             list_hooks,
             list_plugins,
             toggle_plugin,
