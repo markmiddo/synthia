@@ -10,7 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 /// Get the Synthia project root directory.
@@ -2246,232 +2246,186 @@ fn kill_agent(pid: u32) -> Result<(), String> {
 
 // === USAGE COMMANDS ===
 
-#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+#[derive(Serialize, Debug, Clone, Default)]
 struct UsageStats {
-    session_tokens: u64,
-    session_pct: f64,
-    session_resets_at: String,
-    week_tokens: u64,
-    week_pct: f64,
-    week_resets_at: String,
-    sonnet_week_tokens: u64,
-    sonnet_week_pct: f64,
-    subscription_type: String,
+    five_hour_pct: f64,
+    five_hour_resets_at: String,
+    five_hour_resets_in: String,
+    seven_day_pct: f64,
+    seven_day_resets_at: String,
+    seven_day_resets_in: String,
+    seven_day_opus_pct: Option<f64>,
+    seven_day_opus_resets_at: Option<String>,
+    seven_day_opus_resets_in: Option<String>,
+    subscription_type: Option<String>,
+    error: Option<String>,
 }
 
-// Base estimated limits for Claude Max subscription (output tokens)
-// These get multiplied by the tier multiplier (1x, 5x, 20x)
-const BASE_SESSION_LIMIT: u64 = 800_000;       // ~800K output tokens per 5h window
-const BASE_WEEKLY_LIMIT: u64 = 2_500_000;      // ~2.5M output tokens per week
-const BASE_SONNET_WEEKLY_LIMIT: u64 = 5_000_000; // ~5M Sonnet output tokens per week
-
 #[derive(Deserialize, Debug)]
-struct Credentials {
+struct CredsFile {
     #[serde(rename = "claudeAiOauth")]
-    claude_ai_oauth: Option<CredentialsOAuth>,
+    claude_ai_oauth: Option<CredsOAuth>,
 }
 
 #[derive(Deserialize, Debug)]
-struct CredentialsOAuth {
+struct CredsOAuth {
+    #[serde(rename = "accessToken")]
+    access_token: Option<String>,
     #[serde(rename = "subscriptionType")]
     subscription_type: Option<String>,
-    #[serde(rename = "rateLimitTier")]
-    rate_limit_tier: Option<String>,
 }
 
-/// Parse the tier multiplier from the rateLimitTier string.
-/// e.g. "default_claude_max_5x" → 5, "default_claude_max_20x" → 20
-fn parse_tier_multiplier(tier: &str) -> u64 {
-    // Look for patterns like "_5x", "_20x" at the end
-    if let Some(pos) = tier.rfind('_') {
-        let suffix = &tier[pos + 1..];
-        if suffix.ends_with('x') {
-            if let Ok(n) = suffix[..suffix.len() - 1].parse::<u64>() {
-                return n;
+#[derive(Deserialize, Debug)]
+struct UsageResponse {
+    five_hour: Option<UsageWindow>,
+    seven_day: Option<UsageWindow>,
+    seven_day_opus: Option<UsageWindow>,
+}
+
+#[derive(Deserialize, Debug)]
+struct UsageWindow {
+    utilization: Option<f64>,
+    resets_at: Option<String>,
+}
+
+static USAGE_TOKEN_CACHE: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+static USAGE_RESPONSE_CACHE: Mutex<Option<(UsageStats, Instant)>> = Mutex::new(None);
+
+const TOKEN_TTL: Duration = Duration::from_secs(900);
+const RESPONSE_TTL: Duration = Duration::from_secs(60);
+const STALE_OK: Duration = Duration::from_secs(600);
+
+fn read_oauth_token_cached() -> Option<(String, Option<String>)> {
+    {
+        let cache = USAGE_TOKEN_CACHE.lock().ok()?;
+        if let Some((tok, when)) = cache.as_ref() {
+            if when.elapsed() < TOKEN_TTL {
+                return Some((tok.clone(), None));
             }
         }
     }
-    1 // default/base tier
+    let creds_path = get_claude_dir().join(".credentials.json");
+    let content = fs::read_to_string(&creds_path).ok()?;
+    let creds: CredsFile = serde_json::from_str(&content).ok()?;
+    let oauth = creds.claude_ai_oauth?;
+    let token = oauth.access_token?;
+    if let Ok(mut cache) = USAGE_TOKEN_CACHE.lock() {
+        *cache = Some((token.clone(), Instant::now()));
+    }
+    Some((token, oauth.subscription_type))
+}
+
+fn humanize_duration_until(iso: &str) -> String {
+    let target = match chrono::DateTime::parse_from_rfc3339(iso) {
+        Ok(t) => t,
+        Err(_) => return String::new(),
+    };
+    let now = chrono::Utc::now();
+    let delta = target.with_timezone(&chrono::Utc) - now;
+    let secs = delta.num_seconds();
+    if secs <= 0 {
+        return "now".to_string();
+    }
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    if h > 0 {
+        format!("{}h {}m", h, m)
+    } else {
+        format!("{}m", m)
+    }
+}
+
+fn cached_or_error(err: String) -> UsageStats {
+    if let Ok(cache) = USAGE_RESPONSE_CACHE.lock() {
+        if let Some((stats, when)) = cache.as_ref() {
+            if when.elapsed() < STALE_OK {
+                let mut s = stats.clone();
+                s.error = Some(format!("{} (showing cached)", err));
+                return s;
+            }
+        }
+    }
+    UsageStats { error: Some(err), ..Default::default() }
 }
 
 #[tauri::command]
 fn get_usage_stats() -> UsageStats {
-    let claude_dir = get_claude_dir();
-    let creds_file = claude_dir.join(".credentials.json");
-    let projects_dir = claude_dir.join("projects");
-
-    let now = chrono::Local::now();
-    let session_cutoff = now - chrono::Duration::hours(5);
-    let week_cutoff = now - chrono::Duration::days(7);
-
-    let mut stats = UsageStats::default();
-    let mut tier_multiplier: u64 = 1;
-
-    // Get subscription type and rate limit tier
-    if let Ok(content) = fs::read_to_string(&creds_file) {
-        if let Ok(creds) = serde_json::from_str::<Credentials>(&content) {
-            if let Some(oauth) = creds.claude_ai_oauth {
-                stats.subscription_type = oauth.subscription_type.unwrap_or_default();
-                if let Some(tier) = oauth.rate_limit_tier {
-                    tier_multiplier = parse_tier_multiplier(&tier);
-                }
+    if let Ok(cache) = USAGE_RESPONSE_CACHE.lock() {
+        if let Some((stats, when)) = cache.as_ref() {
+            if when.elapsed() < RESPONSE_TTL {
+                return stats.clone();
             }
         }
     }
 
-    // Scale limits by tier
-    let session_limit = BASE_SESSION_LIMIT * tier_multiplier;
-    let weekly_limit = BASE_WEEKLY_LIMIT * tier_multiplier;
-    let sonnet_weekly_limit = BASE_SONNET_WEEKLY_LIMIT * tier_multiplier;
+    let (token, subscription_type) = match read_oauth_token_cached() {
+        Some(v) => v,
+        None => {
+            return UsageStats {
+                error: Some("No Claude credentials found".to_string()),
+                ..Default::default()
+            };
+        }
+    };
 
-    // Track oldest message timestamps for reset calculation
-    let mut oldest_session_ts: Option<chrono::DateTime<chrono::Local>> = None;
-    let mut oldest_week_ts: Option<chrono::DateTime<chrono::Local>> = None;
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return UsageStats {
+            error: Some(format!("HTTP client error: {}", e)),
+            ..Default::default()
+        },
+    };
 
-    // Scan JSONL files for token usage
-    if projects_dir.exists() {
-        let week_cutoff_systime = std::time::SystemTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_secs(
-                week_cutoff.timestamp() as u64
-            )
-        );
+    let resp = client
+        .get("https://api.anthropic.com/oauth/usage")
+        .header("authorization", format!("Bearer {}", token))
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("accept", "application/json")
+        .header("user-agent", "synthia-gui/0.1")
+        .send();
 
-        if let Ok(project_entries) = fs::read_dir(&projects_dir) {
-            for project_entry in project_entries.flatten() {
-                let project_path = project_entry.path();
-                if !project_path.is_dir() {
-                    continue;
-                }
+    let body: UsageResponse = match resp {
+        Ok(r) if r.status().is_success() => match r.json::<UsageResponse>() {
+            Ok(b) => b,
+            Err(e) => return cached_or_error(format!("parse error: {}", e)),
+        },
+        Ok(r) => return cached_or_error(format!("HTTP {}", r.status())),
+        Err(e) => return cached_or_error(format!("network: {}", e)),
+    };
 
-                if let Ok(session_entries) = fs::read_dir(&project_path) {
-                    for session_entry in session_entries.flatten() {
-                        let session_path = session_entry.path();
+    let mut stats = UsageStats {
+        subscription_type,
+        ..Default::default()
+    };
 
-                        if session_path.is_file() {
-                            if let Some(ext) = session_path.extension() {
-                                if ext == "jsonl" {
-                                    // Skip files not modified in the last 7 days
-                                    if let Ok(metadata) = session_path.metadata() {
-                                        if let Ok(modified) = metadata.modified() {
-                                            if modified < week_cutoff_systime {
-                                                continue;
-                                            }
-                                        }
-                                    }
-
-                                    if let Ok(content) = fs::read_to_string(&session_path) {
-                                        for line in content.lines() {
-                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(line) {
-                                                if data.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-                                                    continue;
-                                                }
-
-                                                // Parse timestamp
-                                                let ts_str = match data.get("timestamp").and_then(|t| t.as_str()) {
-                                                    Some(s) => s,
-                                                    None => continue,
-                                                };
-
-                                                let msg_time = match chrono::DateTime::parse_from_rfc3339(ts_str) {
-                                                    Ok(t) => t.with_timezone(&chrono::Local),
-                                                    Err(_) => continue,
-                                                };
-
-                                                // Skip messages older than 7 days
-                                                if msg_time < week_cutoff {
-                                                    continue;
-                                                }
-
-                                                // Extract output tokens
-                                                let output_tokens = data.get("message")
-                                                    .and_then(|m| m.get("usage"))
-                                                    .and_then(|u| u.get("output_tokens"))
-                                                    .and_then(|v| v.as_u64())
-                                                    .unwrap_or(0);
-
-                                                if output_tokens == 0 {
-                                                    continue;
-                                                }
-
-                                                // Check if Sonnet model
-                                                let model = data.get("message")
-                                                    .and_then(|m| m.get("model"))
-                                                    .and_then(|m| m.as_str())
-                                                    .unwrap_or("");
-                                                let is_sonnet = model.contains("sonnet");
-
-                                                // Weekly totals (all models)
-                                                stats.week_tokens += output_tokens;
-
-                                                // Track oldest weekly message
-                                                match oldest_week_ts {
-                                                    Some(existing) if msg_time < existing => {
-                                                        oldest_week_ts = Some(msg_time);
-                                                    }
-                                                    None => {
-                                                        oldest_week_ts = Some(msg_time);
-                                                    }
-                                                    _ => {}
-                                                }
-
-                                                // Sonnet weekly
-                                                if is_sonnet {
-                                                    stats.sonnet_week_tokens += output_tokens;
-                                                }
-
-                                                // Session window (last 5 hours)
-                                                if msg_time >= session_cutoff {
-                                                    stats.session_tokens += output_tokens;
-                                                    match oldest_session_ts {
-                                                        Some(existing) if msg_time < existing => {
-                                                            oldest_session_ts = Some(msg_time);
-                                                        }
-                                                        None => {
-                                                            oldest_session_ts = Some(msg_time);
-                                                        }
-                                                        _ => {}
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    if let Some(w) = body.five_hour {
+        stats.five_hour_pct = w.utilization.unwrap_or(0.0);
+        if let Some(r) = w.resets_at {
+            stats.five_hour_resets_in = humanize_duration_until(&r);
+            stats.five_hour_resets_at = r;
+        }
+    }
+    if let Some(w) = body.seven_day {
+        stats.seven_day_pct = w.utilization.unwrap_or(0.0);
+        if let Some(r) = w.resets_at {
+            stats.seven_day_resets_in = humanize_duration_until(&r);
+            stats.seven_day_resets_at = r;
+        }
+    }
+    if let Some(w) = body.seven_day_opus {
+        stats.seven_day_opus_pct = w.utilization;
+        if let Some(r) = w.resets_at {
+            stats.seven_day_opus_resets_in = Some(humanize_duration_until(&r));
+            stats.seven_day_opus_resets_at = Some(r);
         }
     }
 
-    // Calculate percentages using tier-scaled limits
-    stats.session_pct = ((stats.session_tokens as f64 / session_limit as f64) * 100.0).min(100.0);
-    stats.week_pct = ((stats.week_tokens as f64 / weekly_limit as f64) * 100.0).min(100.0);
-    stats.sonnet_week_pct = ((stats.sonnet_week_tokens as f64 / sonnet_weekly_limit as f64) * 100.0).min(100.0);
-
-    // Calculate reset times
-    // Session resets 5h from oldest message in the window
-    let session_reset = match oldest_session_ts {
-        Some(oldest) => oldest + chrono::Duration::hours(5),
-        None => now,
-    };
-    stats.session_resets_at = if stats.session_tokens == 0 {
-        String::new()
-    } else {
-        session_reset.format("%-I:%M %p").to_string()
-    };
-
-    // Weekly: oldest message ages out 7 days after it was sent
-    let week_reset = match oldest_week_ts {
-        Some(oldest) => oldest + chrono::Duration::days(7),
-        None => now,
-    };
-    stats.week_resets_at = if stats.week_tokens == 0 {
-        String::new()
-    } else {
-        week_reset.format("%a %b %-d, %-I:%M %p").to_string()
-    };
-
+    if let Ok(mut cache) = USAGE_RESPONSE_CACHE.lock() {
+        *cache = Some((stats.clone(), Instant::now()));
+    }
     stats
 }
 
