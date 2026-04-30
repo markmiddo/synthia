@@ -77,6 +77,23 @@ interface AgentInfo {
   last_action: string | null;
   session_id: string | null;
   jsonl_path: string | null;
+  risk: "info" | "low" | "medium" | "high" | "critical" | null;
+}
+
+interface SecurityEvent {
+  id: string;
+  ts: string;
+  agent_pid: number | null;
+  agent_kind: string | null;
+  agent_cwd: string | null;
+  session_id: string | null;
+  tool: string;
+  rule: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  matched: string;
+  raw: unknown;
+  decision: string;
+  actor: string;
 }
 
 interface CommandConfig {
@@ -158,7 +175,7 @@ interface GitHubIssuesResponse {
   error: string | null;
 }
 
-type Section = "worktrees" | "knowledge" | "agents" | "voice" | "memory" | "config" | "github";
+type Section = "worktrees" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github";
 
 interface KnowledgeMeta {
   pinned: string[];
@@ -219,6 +236,8 @@ function App() {
   const [commands, setCommands] = useState<CommandConfig[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [voiceMuted, setVoiceMuted] = useState(false);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
+  const [securityFilter, setSecurityFilter] = useState<"all" | "high+">("all");
   const [hooks, setHooks] = useState<HookConfig[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
@@ -403,6 +422,42 @@ function App() {
     const id = setInterval(loadVoiceMuted, 5000);
     return () => clearInterval(id);
   }, []);
+
+  // Security events polling
+  useEffect(() => {
+    if (currentSection !== "security") return;
+    loadSecurityEvents();
+    const id = setInterval(loadSecurityEvents, 4000);
+    return () => clearInterval(id);
+  }, [currentSection]);
+
+  async function loadSecurityEvents() {
+    try {
+      const list = await invoke<SecurityEvent[]>("list_security_events", { limit: 200 });
+      setSecurityEvents(list);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  async function handleClearSecurityEvents() {
+    if (!confirm("Clear all security events?")) return;
+    try {
+      await invoke("clear_security_events");
+      loadSecurityEvents();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRescanSessions() {
+    try {
+      await invoke("scan_all_sessions");
+      loadSecurityEvents();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   async function loadVoiceMuted() {
     try {
@@ -1338,6 +1393,14 @@ function App() {
                   >
                     <span className={`agent-status-dot status-${a.status}`} />
                     <span className={`agent-kind kind-${a.kind}`}>{a.kind}</span>
+                    {a.risk && (
+                      <span
+                        className={`agent-risk risk-${a.risk}`}
+                        title={`Security risk: ${a.risk}`}
+                      >
+                        {"⛨"}
+                      </span>
+                    )}
                     <span className="agent-project">{a.project_name}</span>
                     <span className="agent-cwd" title={a.cwd}>
                       {shortenCwd(a.cwd)}
@@ -1384,6 +1447,110 @@ function App() {
     );
   }
 
+  function renderSecuritySection() {
+    const sevRank: Record<string, number> = {
+      info: 0, low: 1, medium: 2, high: 3, critical: 4,
+    };
+    const filtered = securityEvents.filter((e) =>
+      securityFilter === "all" ? true : sevRank[e.severity] >= 3,
+    );
+    const sortedDesc = [...filtered].reverse();
+    const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    for (const e of securityEvents) counts[e.severity] = (counts[e.severity] || 0) + 1;
+
+    function formatTs(iso: string) {
+      try {
+        const d = new Date(iso);
+        return d.toLocaleString();
+      } catch {
+        return iso;
+      }
+    }
+
+    return (
+      <div className="security-section">
+        <div className="security-header">
+          <div>
+            <h2>NeuralGuard Security</h2>
+            <div className="security-subhead">
+              Local AI agent runtime monitor — rules-based event feed
+            </div>
+          </div>
+          <div className="security-actions">
+            <button className="claude-btn" onClick={handleRescanSessions}>
+              Rescan sessions
+            </button>
+            <button className="claude-btn danger" onClick={handleClearSecurityEvents}>
+              Clear events
+            </button>
+          </div>
+        </div>
+
+        <div className="security-stats">
+          <div className="security-stat critical">
+            <div className="security-stat-value">{counts.critical}</div>
+            <div className="security-stat-label">Critical</div>
+          </div>
+          <div className="security-stat high">
+            <div className="security-stat-value">{counts.high}</div>
+            <div className="security-stat-label">High</div>
+          </div>
+          <div className="security-stat medium">
+            <div className="security-stat-value">{counts.medium}</div>
+            <div className="security-stat-label">Medium</div>
+          </div>
+          <div className="security-stat low">
+            <div className="security-stat-value">{counts.low}</div>
+            <div className="security-stat-label">Low</div>
+          </div>
+        </div>
+
+        <div className="security-toolbar">
+          <button
+            className={`claude-btn ${securityFilter === "all" ? "primary" : ""}`}
+            onClick={() => setSecurityFilter("all")}
+          >
+            All ({securityEvents.length})
+          </button>
+          <button
+            className={`claude-btn ${securityFilter === "high+" ? "primary" : ""}`}
+            onClick={() => setSecurityFilter("high+")}
+          >
+            High &amp; above ({counts.high + counts.critical})
+          </button>
+        </div>
+
+        <div className="security-feed">
+          {sortedDesc.length === 0 ? (
+            <div className="security-empty">
+              No security events. Run an agent and any flagged tool calls will appear here.
+            </div>
+          ) : (
+            sortedDesc.map((e) => (
+              <div key={e.id} className={`security-row severity-${e.severity}`}>
+                <div className="security-row-head">
+                  <span className={`severity-pill sev-${e.severity}`}>
+                    {e.severity.toUpperCase()}
+                  </span>
+                  <span className="security-rule">{e.rule}</span>
+                  <span className="security-tool">{e.tool}</span>
+                  <span className="security-ts">{formatTs(e.ts)}</span>
+                </div>
+                <div className="security-matched">{e.matched}</div>
+                <div className="security-meta">
+                  {e.agent_kind && <span>{e.agent_kind}</span>}
+                  {e.agent_pid && <span>pid {e.agent_pid}</span>}
+                  {e.agent_cwd && <span title={e.agent_cwd}>{e.agent_cwd.split("/").slice(-2).join("/")}</span>}
+                  <span>· {e.actor} → {e.decision}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
   function usageBarColor(pct: number): string {
     if (pct >= 80) return "#ef4444";
     if (pct >= 50) return "#f59e0b";
@@ -1418,6 +1585,13 @@ function App() {
           >
             <span className="nav-item-icon">&#9881;</span>
             Agents
+          </button>
+          <button
+            className={`nav-item ${currentSection === "security" ? "active" : ""}`}
+            onClick={() => setCurrentSection("security")}
+          >
+            <span className="nav-item-icon">&#128737;</span>
+            Security
           </button>
           <button
             className={`nav-item ${currentSection === "knowledge" ? "active" : ""}`}
@@ -3514,6 +3688,7 @@ function App() {
       {renderSidebar()}
       <main className="main-content">
         {currentSection === "agents" && renderAgentsSection()}
+        {currentSection === "security" && renderSecuritySection()}
         {currentSection === "worktrees" && renderWorktreesSection()}
         {currentSection === "github" && renderGithubSection()}
         {currentSection === "knowledge" && renderKnowledgeSection()}

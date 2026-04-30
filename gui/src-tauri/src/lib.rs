@@ -13,6 +13,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
+mod security;
+
 /// Get the Synthia project root directory.
 /// Resolves from the executable path (gui/src-tauri/target/release/synthia-gui)
 /// or falls back to finding run.sh relative to the binary.
@@ -2142,6 +2144,7 @@ struct AgentInfo {
     last_action: Option<String>,
     session_id: Option<String>,
     jsonl_path: Option<String>,
+    risk: Option<String>, // "info" | "low" | "medium" | "high" | "critical"
 }
 
 /// Encode an absolute filesystem path the same way Claude Code does:
@@ -2435,6 +2438,29 @@ fn list_active_agents() -> Vec<AgentInfo> {
             (None, SessionSnapshot::default(), None)
         };
 
+        let risk = if kind == "claude" {
+            jsonl_path.as_ref().and_then(|p| {
+                security::scan_session_incremental(
+                    std::path::Path::new(p),
+                    Some(pid),
+                    Some(kind),
+                    Some(&cwd),
+                )
+            })
+        } else {
+            None
+        };
+        // Combine fresh hits with persisted recent hits for this session so the
+        // badge persists past the cursor advance.
+        let session_risk = snap.session_id.as_ref().and_then(|sid| {
+            security::recent_max_severity_for_session(sid, 200)
+        });
+        let final_risk = match (risk, session_risk) {
+            (Some(a), Some(b)) => Some(if a > b { a } else { b }),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            _ => None,
+        };
+
         let status = if kind == "claude" {
             classify_status(mtime).to_string()
         } else {
@@ -2454,6 +2480,7 @@ fn list_active_agents() -> Vec<AgentInfo> {
             last_action: snap.last_action,
             session_id: snap.session_id,
             jsonl_path,
+            risk: final_risk.map(|s| s.as_str().to_string()),
         });
     }
 
@@ -2463,6 +2490,32 @@ fn list_active_agents() -> Vec<AgentInfo> {
             .then(b.started_at.cmp(&a.started_at))
     });
     agents
+}
+
+#[tauri::command]
+fn list_security_events(limit: Option<usize>) -> Vec<security::SecurityEvent> {
+    security::read_events(limit.unwrap_or(200))
+}
+
+#[tauri::command]
+fn clear_security_events() -> Result<(), String> {
+    security::clear_events().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn scan_all_sessions() -> Result<usize, String> {
+    let self_pid = std::process::id();
+    let mut total = 0usize;
+    for (pid, _etime, _argv, kind) in list_ai_processes(self_pid) {
+        if kind != "claude" { continue; }
+        let cwd = match read_proc_cwd(pid) { Some(c) => c, None => continue };
+        if let Some((path, _)) = newest_session_jsonl(&cwd) {
+            if security::scan_session_incremental(&path, Some(pid), Some(kind), Some(&cwd)).is_some() {
+                total += 1;
+            }
+        }
+    }
+    Ok(total)
 }
 
 #[tauri::command]
@@ -3367,6 +3420,9 @@ pub fn run() {
             delete_skill,
             get_voice_muted,
             set_voice_muted,
+            list_security_events,
+            clear_security_events,
+            scan_all_sessions,
             list_hooks,
             list_plugins,
             toggle_plugin,

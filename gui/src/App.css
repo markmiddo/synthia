@@ -4408,6 +4408,122 @@
 .kind-opencode { color: #7dd3fc; border-color: #7dd3fc40; }
 .kind-kimi     { color: #c4b5fd; border-color: #c4b5fd40; }
 .kind-codex    { color: #86efac; border-color: #86efac40; }
+
+.agent-risk {
+  font-size: 0.95em;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.25rem;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+.risk-info     { color: #94a3b8; border-color: #94a3b840; }
+.risk-low      { color: #86efac; border-color: #86efac40; background: rgba(134, 239, 172, 0.08); }
+.risk-medium   { color: #fbbf24; border-color: #fbbf2440; background: rgba(251, 191, 36, 0.10); }
+.risk-high     { color: #fb923c; border-color: #fb923c50; background: rgba(251, 146, 60, 0.12); }
+.risk-critical { color: #ef4444; border-color: #ef444460; background: rgba(239, 68, 68, 0.15); font-weight: 700; }
+
+.security-section { padding: 1rem 1.25rem; }
+.security-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  gap: 1rem;
+}
+.security-header h2 { margin: 0; font-size: 1.25rem; }
+.security-subhead { color: var(--text-muted, #888); font-size: 0.85rem; margin-top: 0.25rem; }
+.security-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+
+.security-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.security-stat {
+  padding: 0.85rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--surface-2, #161616);
+  border: 1px solid var(--border, #2a2a2a);
+}
+.security-stat.critical { border-color: rgba(239, 68, 68, 0.35); }
+.security-stat.high     { border-color: rgba(251, 146, 60, 0.35); }
+.security-stat.medium   { border-color: rgba(251, 191, 36, 0.35); }
+.security-stat.low      { border-color: rgba(134, 239, 172, 0.30); }
+.security-stat-value { font-size: 1.65rem; font-weight: 700; color: #e2e8f0; }
+.security-stat.critical .security-stat-value { color: #ef4444; }
+.security-stat.high     .security-stat-value { color: #fb923c; }
+.security-stat.medium   .security-stat-value { color: #fbbf24; }
+.security-stat.low      .security-stat-value { color: #86efac; }
+.security-stat-label { font-size: 0.75rem; color: var(--text-muted, #888); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.security-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.security-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.security-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: var(--text-muted, #888);
+  border: 1px dashed var(--border, #2a2a2a);
+  border-radius: 0.5rem;
+}
+.security-row {
+  padding: 0.75rem 1rem;
+  border-radius: 0.4rem;
+  background: var(--surface-2, #141414);
+  border-left: 3px solid var(--border, #2a2a2a);
+}
+.security-row.severity-critical { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.06); }
+.security-row.severity-high     { border-left-color: #fb923c; }
+.security-row.severity-medium   { border-left-color: #fbbf24; }
+.security-row.severity-low      { border-left-color: #86efac; }
+
+.security-row-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+.severity-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  letter-spacing: 0.05em;
+}
+.sev-critical { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+.sev-high     { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
+.sev-medium   { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+.sev-low      { background: rgba(134, 239, 172, 0.2); color: #86efac; }
+.sev-info     { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+.security-rule { font-weight: 600; color: #e2e8f0; }
+.security-tool { font-family: monospace; font-size: 0.85em; color: var(--text-muted, #aaa); }
+.security-ts   { margin-left: auto; color: var(--text-muted, #888); font-size: 0.8rem; }
+.security-matched {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.25rem;
+  word-break: break-all;
+  margin-bottom: 0.4rem;
+}
+.security-meta {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+}
 .agent-elapsed { color: var(--text-muted, #888); font-size: 0.85em; min-width: 5em; }
 .agent-last-action {
   color: var(--text-muted, #aaa);
