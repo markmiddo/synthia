@@ -4286,3 +4286,67 @@
   color: #a6e3a1;
   border-color: rgba(166, 227, 161, 0.3);
 }
+
+/* Agents section */
+.agents-section { padding: 1.5rem; }
+.agents-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; }
+.agents-header h2 { margin: 0; font-size: 1.25rem; }
+.agents-count { color: var(--text-muted, #888); font-size: 0.875rem; }
+.agents-loading, .agents-empty {
+  padding: 2rem; text-align: center; color: var(--text-muted, #888);
+}
+.agents-list { list-style: none; padding: 0; margin: 0; }
+.agent-row { border-bottom: 1px solid var(--border, #2a2a2a); }
+.agent-row.expanded { background: var(--surface-2, #1a1a1a); }
+.agent-summary {
+  display: grid;
+  grid-template-columns: 16px 1fr auto auto 2fr;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.75rem 0.5rem;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.agent-summary:hover { background: var(--surface-2, #1a1a1a); }
+.agent-status-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  display: inline-block;
+}
+.status-active { background: #4ade80; box-shadow: 0 0 6px #4ade80aa; }
+.status-idle   { background: #fbbf24; }
+.status-stale  { background: #555; }
+.agent-project { font-weight: 600; }
+.agent-branch  { color: var(--text-muted, #888); font-family: monospace; font-size: 0.85em; }
+.agent-elapsed { color: var(--text-muted, #888); font-size: 0.85em; min-width: 5em; }
+.agent-last-action {
+  color: var(--text-muted, #aaa);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agent-detail {
+  padding: 0.5rem 1rem 1rem 1.75rem;
+  display: flex; flex-direction: column; gap: 0.75rem;
+}
+.agent-detail-label {
+  font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted, #888); margin-bottom: 0.25rem;
+}
+.agent-detail-msg {
+  background: var(--surface-3, #0d0d0d);
+  padding: 0.5rem; border-radius: 4px;
+  font-size: 0.85rem; white-space: pre-wrap; word-break: break-word;
+  max-height: 12em; overflow: auto;
+}
+.agent-meta { font-size: 0.8rem; color: var(--text-muted, #888); }
+.agent-meta > div { font-family: monospace; }
+.agent-kill-btn {
+  align-self: flex-start;
+  background: #7f1d1d; color: #fff; border: none;
+  padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer;
+  font-size: 0.85rem;
+}
+.agent-kill-btn:hover { background: #991b1b; }

@@ -64,6 +64,20 @@ interface AgentConfig {
   body: string;
 }
 
+interface AgentInfo {
+  pid: number;
+  cwd: string;
+  project_name: string;
+  branch: string | null;
+  status: "active" | "idle" | "stale";
+  started_at: string;
+  last_activity: string | null;
+  last_user_msg: string | null;
+  last_action: string | null;
+  session_id: string | null;
+  jsonl_path: string | null;
+}
+
 interface CommandConfig {
   filename: string;
   description: string;
@@ -243,6 +257,10 @@ function App() {
   const [githubConfigOpen, setGithubConfigOpen] = useState(false);
   const [newGithubRepo, setNewGithubRepo] = useState("");
 
+  // Active agents monitor state
+  const [activeAgents, setActiveAgents] = useState<AgentInfo[]>([]);
+  const [expandedAgentPid, setExpandedAgentPid] = useState<number | null>(null);
+  const [activeAgentsLoading, setActiveAgentsLoading] = useState(true);
 
   // Usage stats state
   const [usageStats, setUsageStats] = useState<{
@@ -350,6 +368,14 @@ function App() {
       loadGithubIssues(true);
     }
   }, [githubConfigOpen]);
+
+  // Active agents polling
+  useEffect(() => {
+    if (currentSection !== "agents") return;
+    loadActiveAgents();
+    const id = setInterval(loadActiveAgents, 5000);
+    return () => clearInterval(id);
+  }, [currentSection]);
 
   async function loadWordReplacements() {
     try {
@@ -515,6 +541,27 @@ function App() {
       setAgents(result);
     } catch (e) {
       // Ignore errors
+    }
+  }
+
+  async function loadActiveAgents() {
+    try {
+      const result = await invoke<AgentInfo[]>("list_active_agents");
+      setActiveAgents(result);
+    } catch (e) {
+      console.error("Failed to load agents:", e);
+    } finally {
+      setActiveAgentsLoading(false);
+    }
+  }
+
+  async function handleKillAgent(pid: number) {
+    if (!confirm(`Send SIGTERM to agent ${pid}?`)) return;
+    try {
+      await invoke("kill_agent", { pid });
+      loadActiveAgents();
+    } catch (e) {
+      alert(`Failed to kill agent: ${e}`);
     }
   }
 
@@ -1148,6 +1195,89 @@ function App() {
 
   // === RENDER FUNCTIONS ===
 
+  function renderAgentsSection() {
+    function elapsedSince(iso: string): string {
+      const then = new Date(iso).getTime();
+      const now = Date.now();
+      const secs = Math.max(0, Math.floor((now - then) / 1000));
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      const s = secs % 60;
+      if (h > 0) return `${h}h ${m}m`;
+      if (m > 0) return `${m}m ${s}s`;
+      return `${s}s`;
+    }
+
+    return (
+      <div className="agents-section">
+        <div className="agents-header">
+          <h2>Claude Code Agents</h2>
+          <span className="agents-count">
+            {activeAgents.length} {activeAgents.length === 1 ? "agent" : "agents"} running
+          </span>
+        </div>
+
+        {activeAgentsLoading && activeAgents.length === 0 ? (
+          <div className="agents-loading">Scanning…</div>
+        ) : activeAgents.length === 0 ? (
+          <div className="agents-empty">No Claude Code agents running</div>
+        ) : (
+          <ul className="agents-list">
+            {activeAgents.map((a) => {
+              const expanded = expandedAgentPid === a.pid;
+              return (
+                <li
+                  key={a.pid}
+                  className={`agent-row agent-${a.status} ${expanded ? "expanded" : ""}`}
+                >
+                  <button
+                    className="agent-summary"
+                    onClick={() => setExpandedAgentPid(expanded ? null : a.pid)}
+                  >
+                    <span className={`agent-status-dot status-${a.status}`} />
+                    <span className="agent-project">{a.project_name}</span>
+                    {a.branch && <span className="agent-branch">{a.branch}</span>}
+                    <span className="agent-elapsed">{elapsedSince(a.started_at)}</span>
+                    <span className="agent-last-action">
+                      {a.last_action ?? "—"}
+                    </span>
+                  </button>
+                  {expanded && (
+                    <div className="agent-detail">
+                      {a.last_user_msg && (
+                        <div className="agent-detail-block">
+                          <div className="agent-detail-label">Last message</div>
+                          <pre className="agent-detail-msg">{a.last_user_msg}</pre>
+                        </div>
+                      )}
+                      {a.last_action && (
+                        <div className="agent-detail-block">
+                          <div className="agent-detail-label">Last action</div>
+                          <code>{a.last_action}</code>
+                        </div>
+                      )}
+                      <div className="agent-detail-block agent-meta">
+                        <div>PID: {a.pid}</div>
+                        <div>cwd: {a.cwd}</div>
+                        {a.session_id && <div>session: {a.session_id}</div>}
+                      </div>
+                      <button
+                        className="agent-kill-btn"
+                        onClick={() => handleKillAgent(a.pid)}
+                      >
+                        Kill agent
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
   function formatTokens(n: number): string {
     if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
     if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
@@ -1167,6 +1297,13 @@ function App() {
           <div className="sidebar-logo">SYNTHIA</div>
         </div>
         <nav className="sidebar-nav">
+          <button
+            className={`nav-item ${currentSection === "agents" ? "active" : ""}`}
+            onClick={() => setCurrentSection("agents")}
+          >
+            <span className="nav-item-icon">&#9881;</span>
+            Agents
+          </button>
           <button
             className={`nav-item ${currentSection === "knowledge" ? "active" : ""}`}
             onClick={() => { setCurrentSection("knowledge"); loadNotes(""); loadKnowledgeMeta(); }}
@@ -3075,6 +3212,7 @@ function App() {
     <div className="app-layout">
       {renderSidebar()}
       <main className="main-content">
+        {currentSection === "agents" && renderAgentsSection()}
         {currentSection === "worktrees" && renderWorktreesSection()}
         {currentSection === "github" && renderGithubSection()}
         {currentSection === "knowledge" && renderKnowledgeSection()}
