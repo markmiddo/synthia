@@ -2147,6 +2147,9 @@ struct AgentInfo {
     jsonl_path: Option<String>,
     risk: Option<String>, // "info" | "low" | "medium" | "high" | "critical"
     risk_events: Vec<security::SecurityEvent>,
+    role: String,        // "Developer" | "Technical Writer" | "Architect" | ...
+    role_icon: String,   // emoji for the role
+    topic: Option<String>,  // short headline derived from first user message
 }
 
 /// Encode an absolute filesystem path the same way Claude Code does:
@@ -2274,9 +2277,14 @@ pub(crate) fn list_ai_processes(self_pid: u32) -> Vec<(u32, u64, String, &'stati
 #[derive(Default)]
 struct SessionSnapshot {
     last_user_msg: Option<String>,
+    first_user_msg: Option<String>,
     last_action: Option<String>,
     session_id: Option<String>,
     last_activity: Option<String>,
+    /// Tally of file extensions touched by Edit/Write/Read tool calls.
+    ext_counts: std::collections::HashMap<String, u32>,
+    /// Tally of tool names invoked.
+    tool_counts: std::collections::HashMap<String, u32>,
 }
 
 fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
@@ -2285,10 +2293,18 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
         Err(_) => return SessionSnapshot::default(),
     };
     let lines: Vec<&str> = content.lines().collect();
-    let start = lines.len().saturating_sub(400);
-    let tail = &lines[start..];
+    // Read the head of the session for first_user_msg, plus the tail for
+    // current activity. Cap each side so very long sessions stay cheap.
+    let head_end = lines.len().min(40);
+    let tail_start = lines.len().saturating_sub(400);
+    let scan_ranges: Vec<&[&str]> = if tail_start > head_end {
+        vec![&lines[..head_end], &lines[tail_start..]]
+    } else {
+        vec![&lines[..]]
+    };
 
     let mut snap = SessionSnapshot::default();
+    for tail in scan_ranges.into_iter() {
     for line in tail {
         let v: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
@@ -2323,7 +2339,10 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
                 let trimmed = t.trim();
                 if !trimmed.is_empty() && !trimmed.starts_with('<') {
                     let truncated: String = trimmed.chars().take(200).collect();
-                    snap.last_user_msg = Some(truncated);
+                    snap.last_user_msg = Some(truncated.clone());
+                    if snap.first_user_msg.is_none() {
+                        snap.first_user_msg = Some(truncated);
+                    }
                 }
             }
         } else if msg_type == "assistant" {
@@ -2332,6 +2351,17 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
                     if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
                         let name = item.get("name").and_then(|s| s.as_str()).unwrap_or("tool");
                         let input = item.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                        *snap.tool_counts.entry(name.to_string()).or_insert(0) += 1;
+                        if matches!(name, "Edit" | "Write" | "Read" | "NotebookEdit") {
+                            if let Some(p) = input.get("file_path").and_then(|s| s.as_str()) {
+                                if let Some(ext) = std::path::Path::new(p)
+                                    .extension()
+                                    .and_then(|e| e.to_str())
+                                {
+                                    *snap.ext_counts.entry(ext.to_lowercase()).or_insert(0) += 1;
+                                }
+                            }
+                        }
                         let target = match name {
                             "Bash" => input.get("description").and_then(|s| s.as_str())
                                 .or_else(|| input.get("command").and_then(|s| s.as_str())),
@@ -2362,7 +2392,82 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
             }
         }
     }
+    }
     snap
+}
+
+/// Pick a persona for the agent based on what tools and file types it
+/// has been touching this session. Returns (role_label, emoji_avatar).
+fn classify_role(snap: &SessionSnapshot) -> (&'static str, &'static str) {
+    let docs_exts: [&str; 6] = ["md", "mdx", "rst", "txt", "adoc", "org"];
+    let code_exts: [&str; 16] = [
+        "ts", "tsx", "js", "jsx", "py", "rs", "go", "java", "rb",
+        "php", "c", "cpp", "h", "swift", "kt", "scala",
+    ];
+    let infra_exts: [&str; 8] = [
+        "yaml", "yml", "toml", "tf", "sh", "dockerfile", "ini", "conf",
+    ];
+
+    let mut docs = 0u32;
+    let mut code = 0u32;
+    let mut infra = 0u32;
+    let mut total = 0u32;
+    for (ext, n) in &snap.ext_counts {
+        total += *n;
+        if docs_exts.contains(&ext.as_str()) { docs += *n; }
+        if code_exts.contains(&ext.as_str()) { code += *n; }
+        if infra_exts.contains(&ext.as_str()) { infra += *n; }
+    }
+    let bash_n = *snap.tool_counts.get("Bash").unwrap_or(&0);
+    let web_n = *snap.tool_counts.get("WebFetch").unwrap_or(&0)
+        + *snap.tool_counts.get("WebSearch").unwrap_or(&0);
+    let agent_n = *snap.tool_counts.get("Agent").unwrap_or(&0)
+        + *snap.tool_counts.get("Task").unwrap_or(&0);
+    let plan_n = *snap.tool_counts.get("ExitPlanMode").unwrap_or(&0)
+        + *snap.tool_counts.get("EnterPlanMode").unwrap_or(&0);
+
+    if total == 0 && bash_n == 0 && web_n == 0 {
+        return ("Researcher", "\u{1F50D}");
+    }
+    if plan_n > 0 || (web_n >= 3 && code == 0) {
+        return ("Architect", "\u{1F3D7}\u{FE0F}");
+    }
+    if agent_n >= 2 && code <= docs {
+        return ("Orchestrator", "\u{1F39B}\u{FE0F}");
+    }
+    if total > 0 && docs as f32 >= (total as f32) * 0.5 {
+        return ("Technical Writer", "\u{270D}\u{FE0F}");
+    }
+    if infra >= code && infra > 0 && bash_n >= total / 2 {
+        return ("DevOps", "\u{2699}\u{FE0F}");
+    }
+    if code > 0 || total > 0 {
+        return ("Developer", "\u{1F468}\u{200D}\u{1F4BB}");
+    }
+    if bash_n > 0 || web_n > 0 {
+        return ("Researcher", "\u{1F50D}");
+    }
+    ("Agent", "\u{1F916}")
+}
+
+/// Trim a first-user-message into a short shareable headline.
+fn topic_from_first_msg(msg: &str) -> String {
+    let cleaned: String = msg
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with('<') && !t.starts_with('#')
+        })
+        .collect::<Vec<&str>>()
+        .join(" ")
+        .chars()
+        .take(140)
+        .collect();
+    if cleaned.is_empty() {
+        msg.chars().take(140).collect()
+    } else {
+        cleaned
+    }
 }
 
 /// Read the timestamp of the first message in a jsonl session log.
@@ -2576,6 +2681,9 @@ fn list_active_agents() -> Vec<AgentInfo> {
             "active".to_string()
         };
 
+        let (role_label, role_icon) = classify_role(&snap);
+        let topic = snap.first_user_msg.as_deref().map(topic_from_first_msg);
+
         agents.push(AgentInfo {
             pid,
             kind: kind.to_string(),
@@ -2591,6 +2699,9 @@ fn list_active_agents() -> Vec<AgentInfo> {
             jsonl_path,
             risk: final_risk.map(|s| s.as_str().to_string()),
             risk_events,
+            role: role_label.to_string(),
+            role_icon: role_icon.to_string(),
+            topic,
         });
     }
 

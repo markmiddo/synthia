@@ -79,6 +79,9 @@ interface AgentInfo {
   jsonl_path: string | null;
   risk: "info" | "low" | "medium" | "high" | "critical" | null;
   risk_events: SecurityEvent[];
+  role: string;
+  role_icon: string;
+  topic: string | null;
 }
 
 interface SecurityEvent {
@@ -1669,24 +1672,35 @@ function App() {
                     onClick={() => setExpandedAgentPid(expanded ? null : a.pid)}
                   >
                     <span className={`agent-status-dot status-${a.status}`} />
-                    <span className={`agent-kind kind-${a.kind}`}>{a.kind}</span>
-                    {a.risk && (
-                      <span
-                        className={`agent-risk risk-${a.risk}`}
-                        title={`Security risk: ${a.risk} — ${
-                          a.risk_events.length
-                            ? a.risk_events.slice(-3).map((e) => e.rule).join(", ")
-                            : "expand for details"
-                        }`}
-                      >
-                        {"⛨"}
+                    <span className="agent-avatar" title={a.role}>{a.role_icon}</span>
+                    <span className="agent-identity">
+                      <span className="agent-identity-line">
+                        <span className="agent-project">{a.project_name}</span>
+                        <span className="agent-role">{a.role}</span>
+                        <span className={`agent-kind kind-${a.kind}`}>{a.kind}</span>
+                        {a.risk && (
+                          <span
+                            className={`agent-risk risk-${a.risk}`}
+                            title={`Security risk: ${a.risk} — ${
+                              a.risk_events.length
+                                ? a.risk_events.slice(-3).map((e) => e.rule).join(", ")
+                                : "expand for details"
+                            }`}
+                          >
+                            {"⛨"}
+                          </span>
+                        )}
+                        {a.branch && <span className="agent-branch">{a.branch}</span>}
                       </span>
-                    )}
-                    <span className="agent-project">{a.project_name}</span>
+                      {a.topic && (
+                        <span className="agent-topic" title={a.topic}>
+                          {a.topic}
+                        </span>
+                      )}
+                    </span>
                     <span className="agent-cwd" title={a.cwd}>
                       {shortenCwd(a.cwd)}
                     </span>
-                    {a.branch && <span className="agent-branch">{a.branch}</span>}
                     <span className="agent-elapsed">{elapsedSince(a.started_at)}</span>
                     <span className="agent-last-action">
                       {agentHeadline(a)}

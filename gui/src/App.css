@@ -4393,6 +4393,52 @@
 .agent-project { font-weight: 600; }
 .agent-cwd     { color: var(--text-muted, #888); font-family: monospace; font-size: 0.8em; }
 .agent-branch  { color: var(--text-muted, #888); font-family: monospace; font-size: 0.85em; }
+.agent-avatar {
+  font-size: 1.5rem;
+  line-height: 1;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(125, 211, 252, 0.08);
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  flex-shrink: 0;
+}
+.agent-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.agent-identity-line {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: nowrap;
+}
+.agent-role {
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: #7dd3fc;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  background: rgba(125, 211, 252, 0.1);
+  border: 1px solid rgba(125, 211, 252, 0.25);
+}
+.agent-topic {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+  max-width: 100%;
+}
 .agent-kind {
   font-size: 0.7em;
   text-transform: uppercase;
