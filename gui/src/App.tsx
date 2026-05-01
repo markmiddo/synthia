@@ -82,6 +82,7 @@ interface AgentInfo {
   role: string;
   role_icon: string;
   topic: string | null;
+  name: string;
 }
 
 interface SecurityEvent {
@@ -1675,6 +1676,7 @@ function App() {
                     <span className="agent-avatar" title={a.role}>{a.role_icon}</span>
                     <span className="agent-identity">
                       <span className="agent-identity-line">
+                        <span className="agent-name">{a.name}</span>
                         <span className="agent-project">{a.project_name}</span>
                         <span className="agent-role">{a.role}</span>
                         <span className={`agent-kind kind-${a.kind}`}>{a.kind}</span>

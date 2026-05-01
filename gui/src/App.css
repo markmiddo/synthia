@@ -4379,8 +4379,8 @@
   min-width: 0;
   margin-left: auto;
 }
-.agent-summary .agent-project {
-  min-width: 7rem;
+.agent-summary .agent-name {
+  min-width: 5rem;
 }
 .agent-summary:hover { background: var(--surface-2, #1a1a1a); }
 .agent-status-dot {
@@ -4390,7 +4390,16 @@
 .status-active { background: #4ade80; box-shadow: 0 0 6px #4ade80aa; }
 .status-idle   { background: #fbbf24; }
 .status-stale  { background: #555; }
-.agent-project { font-weight: 600; }
+.agent-name {
+  font-weight: 700;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+}
+.agent-project {
+  font-weight: 500;
+  color: var(--text-muted, #aaa);
+  font-size: 0.85em;
+}
 .agent-cwd     { color: var(--text-muted, #888); font-family: monospace; font-size: 0.8em; }
 .agent-branch  { color: var(--text-muted, #888); font-family: monospace; font-size: 0.85em; }
 .agent-avatar {

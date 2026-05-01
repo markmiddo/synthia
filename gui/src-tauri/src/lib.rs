@@ -2150,6 +2150,7 @@ struct AgentInfo {
     role: String,        // "Developer" | "Technical Writer" | "Architect" | ...
     role_icon: String,   // emoji for the role
     topic: Option<String>,  // short headline derived from first user message
+    name: String,        // deterministic friendly name per session
 }
 
 /// Encode an absolute filesystem path the same way Claude Code does:
@@ -2427,27 +2428,45 @@ fn classify_role(snap: &SessionSnapshot) -> (&'static str, &'static str) {
         + *snap.tool_counts.get("EnterPlanMode").unwrap_or(&0);
 
     if total == 0 && bash_n == 0 && web_n == 0 {
-        return ("Researcher", "\u{1F50D}");
+        return ("Researcher", "\u{1F9D1}\u{200D}\u{1F52C}");
     }
     if plan_n > 0 || (web_n >= 3 && code == 0) {
-        return ("Architect", "\u{1F3D7}\u{FE0F}");
+        return ("Architect", "\u{1F9D1}\u{200D}\u{1F4BC}");
     }
     if agent_n >= 2 && code <= docs {
-        return ("Orchestrator", "\u{1F39B}\u{FE0F}");
+        return ("Orchestrator", "\u{1F9D1}\u{200D}\u{1F3A8}");
     }
     if total > 0 && docs as f32 >= (total as f32) * 0.5 {
-        return ("Technical Writer", "\u{270D}\u{FE0F}");
+        return ("Technical Writer", "\u{1F9D1}\u{200D}\u{1F3EB}");
     }
     if infra >= code && infra > 0 && bash_n >= total / 2 {
-        return ("DevOps", "\u{2699}\u{FE0F}");
+        return ("DevOps", "\u{1F9D1}\u{200D}\u{1F527}");
     }
     if code > 0 || total > 0 {
-        return ("Developer", "\u{1F468}\u{200D}\u{1F4BB}");
+        return ("Developer", "\u{1F9D1}\u{200D}\u{1F4BB}");
     }
     if bash_n > 0 || web_n > 0 {
-        return ("Researcher", "\u{1F50D}");
+        return ("Researcher", "\u{1F9D1}\u{200D}\u{1F52C}");
     }
     ("Agent", "\u{1F916}")
+}
+
+const AGENT_NAMES: &[&str] = &[
+    "Atlas", "Beckett", "Caleb", "Declan", "Elliot",
+    "Felix", "Hugo", "Jasper", "Marcus", "Wren",
+    "Aria", "Briony", "Camille", "Delphine", "Esme",
+    "Fiona", "Hazel", "Iris", "Maeve", "Sienna",
+];
+
+fn agent_name_for(seed: &str) -> &'static str {
+    // Cheap deterministic hash so the same session always gets the same name.
+    let mut h: u32 = 0x811C9DC5;
+    for b in seed.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    let idx = (h as usize) % AGENT_NAMES.len();
+    AGENT_NAMES[idx]
 }
 
 /// Trim a first-user-message into a short shareable headline.
@@ -2683,6 +2702,8 @@ fn list_active_agents() -> Vec<AgentInfo> {
 
         let (role_label, role_icon) = classify_role(&snap);
         let topic = snap.first_user_msg.as_deref().map(topic_from_first_msg);
+        let name_seed = snap.session_id.clone().unwrap_or_else(|| format!("pid:{}", pid));
+        let name = agent_name_for(&name_seed).to_string();
 
         agents.push(AgentInfo {
             pid,
@@ -2702,6 +2723,7 @@ fn list_active_agents() -> Vec<AgentInfo> {
             role: role_label.to_string(),
             role_icon: role_icon.to_string(),
             topic,
+            name,
         });
     }
 
