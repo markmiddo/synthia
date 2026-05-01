@@ -4564,6 +4564,18 @@
 .security-explain strong { color: #e2e8f0; }
 .security-explain > div + div { margin-top: 0.25rem; }
 
+.outcome-pill {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.25rem;
+  letter-spacing: 0.02em;
+}
+.outcome-blocked   { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.35); }
+.outcome-ran-warn  { background: rgba(251, 146, 60, 0.15); color: #fb923c; border: 1px solid rgba(251, 146, 60, 0.35); }
+.outcome-ran-info  { background: rgba(125, 211, 252, 0.12); color: #7dd3fc; border: 1px solid rgba(125, 211, 252, 0.30); }
+.outcome-pending   { background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); }
+
 .neuralguard-install {
   display: flex;
   align-items: center;

@@ -2365,37 +2365,49 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
     snap
 }
 
-/// Resolve the jsonl session log this PID is actively writing to by
-/// inspecting /proc/<pid>/fd. Falls back to None when the proc has no
-/// open jsonl handle (e.g. permissions, agent crashed). Critical for
-/// distinguishing multiple Claude agents that share the same cwd —
-/// otherwise they all read the newest jsonl and look identical.
-fn session_jsonl_for_pid(pid: u32) -> Option<(PathBuf, std::time::SystemTime)> {
-    let fd_dir = format!("/proc/{}/fd", pid);
-    let entries = fs::read_dir(&fd_dir).ok()?;
-    let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
-    for entry in entries.flatten() {
-        let target = match fs::read_link(entry.path()) {
-            Ok(t) => t,
+/// Read the timestamp of the first message in a jsonl session log.
+/// Used to match running PIDs to their session by start time.
+fn jsonl_first_timestamp(path: &std::path::Path) -> Option<chrono::DateTime<chrono::Utc>> {
+    let content = fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
             Err(_) => continue,
         };
-        let s = target.to_string_lossy();
-        if !s.contains("/.claude/projects/") {
-            continue;
-        }
-        if target.extension().and_then(|x| x.to_str()) != Some("jsonl") {
-            continue;
-        }
-        if let Ok(meta) = fs::metadata(&target) {
-            if let Ok(m) = meta.modified() {
-                match &best {
-                    Some((_, prev)) if *prev >= m => {}
-                    _ => best = Some((target.clone(), m)),
-                }
+        if let Some(ts) = v.get("timestamp").and_then(|s| s.as_str()) {
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+                return Some(dt.with_timezone(&chrono::Utc));
             }
         }
     }
-    best
+    None
+}
+
+/// All jsonls in the project dir for a cwd, with each one's first-message
+/// timestamp and modification mtime. Used to match running PIDs to their
+/// own session log by comparing process start_time to jsonl first-message
+/// time — needed because multiple Claude agents in the same cwd otherwise
+/// collapse onto whichever jsonl was last written to.
+fn project_jsonls(cwd: &str) -> Vec<(PathBuf, chrono::DateTime<chrono::Utc>, std::time::SystemTime)> {
+    let claude_dir = get_claude_dir();
+    let project_dir = claude_dir.join("projects").join(encode_project_dir(cwd));
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(&project_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") { continue; }
+            let mtime = match e.metadata().and_then(|m| m.modified()) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            let first_ts = match jsonl_first_timestamp(&p) {
+                Some(t) => t,
+                None => continue,
+            };
+            out.push((p, first_ts, mtime));
+        }
+    }
+    out
 }
 
 fn newest_session_jsonl(cwd: &str) -> Option<(PathBuf, std::time::SystemTime)> {
@@ -2441,17 +2453,22 @@ fn list_active_agents() -> Vec<AgentInfo> {
     let self_pid = std::process::id();
     let mut agents = Vec::new();
 
+    // Pass 1: collect proc rows and resolve cwd, branch.
+    struct Row {
+        pid: u32,
+        etime_secs: u64,
+        kind: &'static str,
+        cwd: String,
+        branch: Option<String>,
+        started_utc: chrono::DateTime<chrono::Utc>,
+    }
+    let mut rows: Vec<Row> = Vec::new();
+    let now_utc = chrono::Utc::now();
     for (pid, etime_secs, _argv, kind) in list_ai_processes(self_pid) {
         let cwd = match read_proc_cwd(pid) {
             Some(c) => c,
             None => continue,
         };
-        let project_name = std::path::Path::new(&cwd)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("?")
-            .to_string();
-
         let branch = std::process::Command::new("git")
             .args(["-C", &cwd, "branch", "--show-current"])
             .output()
@@ -2460,11 +2477,62 @@ fn list_active_agents() -> Vec<AgentInfo> {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 if s.is_empty() { None } else { Some(s) }
             } else { None });
+        let started_utc = now_utc - chrono::Duration::seconds(etime_secs as i64);
+        rows.push(Row { pid, etime_secs, kind, cwd, branch, started_utc });
+    }
+
+    // Pass 2: per-cwd, match each Claude PID to its own jsonl by closest
+    // first-message timestamp to the PID's start time. Greedy assignment
+    // so two agents in the same dir each get their own log.
+    use std::collections::HashMap;
+    let mut jsonl_for_pid: HashMap<u32, (PathBuf, std::time::SystemTime)> = HashMap::new();
+    let mut by_cwd: HashMap<String, Vec<&Row>> = HashMap::new();
+    for r in &rows {
+        if r.kind == "claude" {
+            by_cwd.entry(r.cwd.clone()).or_default().push(r);
+        }
+    }
+    for (cwd, group) in by_cwd {
+        let jsonls = project_jsonls(&cwd);
+        if jsonls.is_empty() {
+            continue;
+        }
+        // Build (pid, jsonl_idx, distance) candidates and pick greedily.
+        let mut candidates: Vec<(u32, usize, i64, PathBuf, std::time::SystemTime)> = Vec::new();
+        for r in &group {
+            for (idx, (path, first_ts, mtime)) in jsonls.iter().enumerate() {
+                let dist_ms = (r.started_utc - *first_ts).num_milliseconds().abs();
+                candidates.push((r.pid, idx, dist_ms, path.clone(), *mtime));
+            }
+        }
+        candidates.sort_by_key(|c| c.2);
+        let mut used_jsonl: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut used_pid: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for (pid, idx, _dist, path, mtime) in candidates {
+            if used_pid.contains(&pid) || used_jsonl.contains(&idx) {
+                continue;
+            }
+            jsonl_for_pid.insert(pid, (path, mtime));
+            used_pid.insert(pid);
+            used_jsonl.insert(idx);
+            if used_pid.len() == group.len() || used_jsonl.len() == jsonls.len() {
+                break;
+            }
+        }
+    }
+
+    for r in rows {
+        let Row { pid, etime_secs, kind, cwd, branch, .. } = r;
+        let project_name = std::path::Path::new(&cwd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
 
         let (jsonl_path, snap, mtime) = if kind == "claude" {
-            // Prefer the jsonl this PID is actually writing to so two agents
-            // sharing a cwd don't collapse onto the same session log.
-            let resolved = session_jsonl_for_pid(pid).or_else(|| newest_session_jsonl(&cwd));
+            let resolved = jsonl_for_pid
+                .remove(&pid)
+                .or_else(|| newest_session_jsonl(&cwd));
             match resolved {
                 Some((p, m)) => {
                     let snap = snapshot_session(&p);
