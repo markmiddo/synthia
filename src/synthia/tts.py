@@ -2,12 +2,69 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
+import json
 import logging
 import os
 import subprocess
 import tempfile
+import time
 
 logger = logging.getLogger(__name__)
+
+# Cross-process lock so two agents finishing simultaneously do not talk over
+# each other. The second speak() call blocks until the first releases.
+SPEECH_LOCK_PATH = "/tmp/synthia-tts.lock"
+SPEECH_LOCK_TIMEOUT_S = 60.0
+
+
+def _runtime_state_path() -> str:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "synthia", "runtime.json")
+
+
+def is_voice_muted() -> bool:
+    try:
+        with open(_runtime_state_path(), encoding="utf-8") as f:
+            return bool(json.load(f).get("tts_muted", False))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return False
+
+
+@contextlib.contextmanager
+def speech_lock(timeout: float = SPEECH_LOCK_TIMEOUT_S):
+    """Serialize TTS playback across processes using flock.
+
+    Yields True if the lock was acquired, False if timed out (caller should
+    skip speaking to avoid pile-ups).
+    """
+    fd = os.open(SPEECH_LOCK_PATH, os.O_RDWR | os.O_CREAT, 0o644)
+    deadline = time.monotonic() + timeout
+    acquired = False
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    logger.warning("TTS lock timed out after %.0fs; skipping", timeout)
+                    break
+                time.sleep(0.1)
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
 
 # Maximum characters per TTS chunk for streaming effect
 MAX_CHUNK_CHARS = 200
@@ -83,29 +140,45 @@ class TextToSpeech:
         return chunks if chunks else [text]
 
     def speak(self, text: str) -> bool:
-        """Convert text to speech and play it."""
+        """Convert text to speech and play it.
+
+        Serialized across processes via speech_lock so concurrent agents
+        never overlap.
+        """
         if not text:
             return False
 
-        try:
-            logger.debug("Speaking: %s%s", text[:50], "..." if len(text) > 50 else "")
-
-            if self.use_local:
-                return self._speak_piper(text)
-
-            # For Google TTS, use chunking for longer text
-            if len(text) < 150:
-                return self._speak_google_chunk(text)
-
-            chunks = self._split_into_chunks(text)
-            for chunk in chunks:
-                if chunk.strip() and not self._speak_google_chunk(chunk):
-                    return False
-            return True
-
-        except Exception as e:
-            logger.error("TTS error: %s", e)
+        if is_voice_muted():
+            logger.debug("TTS muted via runtime state; skipping speak")
             return False
+
+        with speech_lock() as acquired:
+            if not acquired:
+                return False
+            # Re-check mute after waiting in queue: user may have muted while
+            # this call was blocked behind another speaker.
+            if is_voice_muted():
+                logger.debug("TTS muted while waiting for lock; skipping")
+                return False
+            try:
+                logger.debug("Speaking: %s%s", text[:50], "..." if len(text) > 50 else "")
+
+                if self.use_local:
+                    return self._speak_piper(text)
+
+                # For Google TTS, use chunking for longer text
+                if len(text) < 150:
+                    return self._speak_google_chunk(text)
+
+                chunks = self._split_into_chunks(text)
+                for chunk in chunks:
+                    if chunk.strip() and not self._speak_google_chunk(chunk):
+                        return False
+                return True
+
+            except Exception as e:
+                logger.error("TTS error: %s", e)
+                return False
 
     def _speak_piper(self, text: str) -> bool:
         """Speak using local Piper TTS.
