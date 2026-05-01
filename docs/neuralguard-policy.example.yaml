@@ -1,0 +1,30 @@
+# NeuralGuard policy file — drop into ~/.config/synthia/security/policy.yaml
+#
+# Phase 1 keys honoured by src/synthia/hooks/security_gate.py:
+#
+#   default      : "allow" | "deny"   (currently informational)
+#   mode         : "permissive"  -> only block_on severities deny
+#                  "strict"      -> medium and above deny
+#                  "prompt"      -> ask via the GUI modal for any hit
+#   block_on     : list of severities that always deny (default: [critical])
+#   llm_classifier:
+#     enabled    : false (off by default)
+#     model      : "claude-haiku-4-5-20251001"
+#     threshold  : minimum static-rule severity that triggers a second-pass
+#                  LLM intent check (default: medium)
+#
+# When the LLM classifier is on, its verdict OVERRIDES the static
+# severity in the recorded event. This catches both novel jailbreaks
+# (rules clean -> still escalate via classifier upgrade) AND noisy
+# false positives (rule says critical, classifier sees benign intent
+# and downgrades to info, letting the call through).
+
+default: allow
+mode: permissive
+block_on:
+  - critical
+
+llm_classifier:
+  enabled: false
+  model: claude-haiku-4-5-20251001
+  threshold: medium

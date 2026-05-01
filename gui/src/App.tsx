@@ -77,6 +77,227 @@ interface AgentInfo {
   last_action: string | null;
   session_id: string | null;
   jsonl_path: string | null;
+  risk: "info" | "low" | "medium" | "high" | "critical" | null;
+  risk_events: SecurityEvent[];
+  role: string;
+  role_icon: string;
+  topic: string | null;
+  current_task: string | null;
+  activity: string | null;
+  name: string;
+}
+
+interface SecurityEvent {
+  id: string;
+  ts: string;
+  agent_pid: number | null;
+  agent_kind: string | null;
+  agent_cwd: string | null;
+  session_id: string | null;
+  tool: string;
+  rule: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  matched: string;
+  raw: unknown;
+  decision: string;
+  actor: string;
+}
+
+interface RuleInfo {
+  title: string;
+  what: string;
+  why: string;
+  recommend: string;
+}
+
+const RULE_INFO: Record<string, RuleInfo> = {
+  "destructive-rm": {
+    title: "Recursive delete of a critical path",
+    what: "rm -rf was pointed at /, ~ (home), $HOME, or used --no-preserve-root.",
+    why: "These wipe everything inside the target. A single hijacked or buggy command here destroys your work and may take the whole user account or system with it.",
+    recommend: "If it ran: stop the agent now and restore from backup or `git restore`. If blocked: leave it blocked, then add a CLAUDE.md note for this repo telling the agent never to use rm -rf on home/system paths.",
+  },
+  "dd-block-device": {
+    title: "Raw write to a disk device",
+    what: "dd was given a block device (sd*, nvme*, hd*) as its output.",
+    why: "Writing to /dev/sda et al overwrites the partition table and filesystem. Used to wipe drives or install rootkits.",
+    recommend: "If it ran: power off and boot from rescue media before continuing — the live disk may be corrupt. If blocked: keep it blocked; legitimate disk imaging belongs in a manual terminal, not an agent.",
+  },
+  "pipe-to-shell": {
+    title: "Run remote script unsupervised",
+    what: "A download (curl/wget/fetch) was piped straight into sh/bash.",
+    why: "Whatever the URL serves runs immediately as you. If the server is hostile or compromised, the agent has just executed arbitrary code without anyone reading it first.",
+    recommend: "Treat as compromise until proven otherwise: audit recent file changes (`find ~ -mmin -60 -type f`), check ~/.cache and /tmp for downloaded payloads, review crontab + systemd --user units, rotate any credential the host could have read.",
+  },
+  "base64-exec": {
+    title: "Decode-and-execute payload",
+    what: "base64 -d was piped into a shell or interpreter.",
+    why: "Encoded payloads piped to sh/python/node are the standard pattern for hiding malicious code from review tools and scanners.",
+    recommend: "Capture the original command from the event detail, decode it manually (`echo '<payload>' | base64 -d | less`) before doing anything else; treat the host as compromised if you cannot identify the source.",
+  },
+  "sudo": {
+    title: "Privilege escalation",
+    what: "Command was prefixed with sudo to run as root.",
+    why: "Once an agent runs as root there is no permission boundary left. A mistake or a prompt-injection from a fetched page now has full system rights.",
+    recommend: "Review what changed: `sudo apt history` (or `journalctl _UID=0 --since=today`). Consider switching policy.yaml `mode` to `prompt` for sudo so each call surfaces a confirm dialog.",
+  },
+  "setuid-bit": {
+    title: "Setuid bit set",
+    what: "chmod +s was applied to a file.",
+    why: "A setuid binary runs as its owner regardless of who launches it — the standard local-privilege-escalation backdoor.",
+    recommend: "Find new setuid binaries with `find / -perm -4000 -newer /etc/hostname 2>/dev/null` and remove anything you don't recognise.",
+  },
+  "setcap": {
+    title: "Linux capability granted",
+    what: "setcap was used to grant a binary kernel capabilities.",
+    why: "Capabilities like cap_net_admin or cap_dac_read_search hand a regular binary near-root powers without flipping the setuid bit.",
+    recommend: "Audit caps with `getcap -r / 2>/dev/null` and revoke unexpected entries via `sudo setcap -r <path>`.",
+  },
+  "ssh-key-access": {
+    title: "Reading or moving SSH keys",
+    what: "An SSH key file (~/.ssh/id_*, authorized_keys, known_hosts) was about to be read or copied.",
+    why: "SSH private keys unlock every server you access. Reading them is the first step toward exfiltrating them.",
+    recommend: "Rotate keys: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519` and update authorized_keys on every remote. Consider passphrase + ssh-agent so on-disk keys are encrypted.",
+  },
+  "ssh-key-write": {
+    title: "Writing to your SSH key folder",
+    what: "A write was directed at ~/.ssh/id_* or authorized_keys.",
+    why: "Adding a key to authorized_keys is how attackers persist remote access. Overwriting your private key locks you out and can replace it with one they control.",
+    recommend: "Open ~/.ssh/authorized_keys, remove any line you don't recognise, then rotate the local key. If a private key was overwritten, restore from backup before doing anything else over SSH.",
+  },
+  "gpg-access": {
+    title: "Touching your GPG keyring",
+    what: "An action targeted ~/.gnupg/.",
+    why: "GPG keys sign your commits and decrypt secrets. Exfiltrating them lets others impersonate you or read encrypted data.",
+    recommend: "Run `gpg --list-secret-keys` and verify the listed key IDs match yours. If unsure, revoke and re-issue (`gpg --gen-revoke`) and re-encrypt anything sensitive.",
+  },
+  "aws-credentials": {
+    title: "Reading AWS credentials",
+    what: "An AWS credentials file was about to be opened.",
+    why: "Cloud keys grant full account access — usually with a billing limit measured in tens of thousands of dollars.",
+    recommend: "Treat the access key as leaked: rotate immediately in IAM, review CloudTrail for unfamiliar API calls in the last 24h, and switch to short-lived SSO/STS tokens going forward.",
+  },
+  "credentials-read": {
+    title: "Reading a credentials file",
+    what: "A read was aimed at .aws/credentials or ~/.gnupg/.",
+    why: "Same risk as above — these files contain long-lived secrets that unlock other systems.",
+    recommend: "Rotate the credential and audit recent provider activity (CloudTrail / GCP audit logs / etc).",
+  },
+  "secret-exfil": {
+    title: "Network call referencing secrets",
+    what: "curl/wget/scp/rsync was used and the command mentioned ssh, aws, gnupg, credentials, secret, token, or api_key.",
+    why: "A network tool combined with a secret-shaped string is the canonical exfiltration pattern — one HTTP request and the secret is gone.",
+    recommend: "Treat any secret named in the command as compromised: rotate it (API key, token, AWS access key), review provider audit logs since the event timestamp, and flip the egress monitor on so future calls surface the destination host.",
+  },
+  "shell-rc-tamper": {
+    title: "Modifying your shell startup file",
+    what: "A redirection wrote to .bashrc / .zshrc / .profile and friends.",
+    why: "Shell rc files run on every new terminal. Anything appended here persists invisibly across reboots and is the most common AI-agent persistence trick.",
+    recommend: "Diff the file against your dotfiles repo or a backup (`git diff -- ~/.bashrc`). Remove anything you didn't add; open a fresh terminal to verify.",
+  },
+  "shell-rc-write": {
+    title: "Writing your shell startup file",
+    what: "Write tool targeted .bashrc / .zshrc / .profile.",
+    why: "Same as above — anything here runs every time you open a terminal.",
+    recommend: "Same: diff against backup/dotfiles, strip surprises, open a new shell.",
+  },
+  "env-file-write": {
+    title: "Writing a .env file",
+    what: "A .env file was about to be written.",
+    why: "These usually hold API keys and DB passwords. Overwriting them is silent and easy to miss; injecting a new value lets a future read steal credentials.",
+    recommend: "Diff the file against version control or a backup; if a known-good version is hard to recover, rotate every secret it held before re-running the app.",
+  },
+  "system-config-write": {
+    title: "Writing into /etc/",
+    what: "A write targeted /etc/.",
+    why: "/etc holds system configuration. Most edits there require sudo and persist for every user — high-impact, high-permanence, often invisible.",
+    recommend: "Inspect the file (`sudo less <path>`), revert to package default if available (`sudo dpkg --force-confmiss --force-confnew --reinstall <pkg>` for Debian/Ubuntu), or restore from backup.",
+  },
+  "mass-kill": {
+    title: "Aggressive process kill",
+    what: "pkill or killall was used with -9 (SIGKILL).",
+    why: "SIGKILL skips clean shutdown. Mass-killing system services or dev tools causes data loss and is occasionally used to disable security agents.",
+    recommend: "Check what was killed (`journalctl -p warning --since '5 min ago'`) and restart anything important — DB servers, your editor, security agents.",
+  },
+  "git-remote-rewrite": {
+    title: "Repointing a git remote",
+    what: "git remote set-url or add was used to change the upstream URL.",
+    why: "Silently moves your pushes to a different repo. Used to capture credentials or exfiltrate code on the next push.",
+    recommend: "Run `git remote -v` in the affected repo and reset any remote that doesn't match what you expect (`git remote set-url <name> <correct-url>`). Rotate any push token used since.",
+  },
+  "history-tamper": {
+    title: "Clearing shell history",
+    what: "history -c was invoked.",
+    why: "Wipes the audit trail of what just happened in the shell. Almost never has a legitimate developer reason.",
+    recommend: "Cross-reference against the agent's jsonl log (every tool call is recorded there) and review recent file changes via `git status` / `find ~ -mmin -120`.",
+  },
+  "history-redir-tamper": {
+    title: "Truncating shell history file",
+    what: "Redirection truncated .bash_history or .zsh_history.",
+    why: "Same audit-trail concern as history -c — covers tracks of prior commands.",
+    recommend: "Same — fall back to the agent's jsonl session log; that record cannot be edited by a tool call.",
+  },
+  "fetch-ip-literal": {
+    title: "Fetching a raw IP",
+    what: "WebFetch URL used a numeric IP instead of a hostname.",
+    why: "Bare-IP URLs bypass DNS and TLS hostname checks; common in shellcode/loader hosting.",
+    recommend: "Look up the IP (`whois <ip>` or any reputation site) before treating any data fetched as trustworthy. Reject the call if the host doesn't have a clear legitimate name.",
+  },
+  "fetch-onion": {
+    title: "Fetching from a .onion address",
+    what: "URL points at a Tor hidden service.",
+    why: "Almost always indicates malware C2 or tooling distribution that wants to be hard to attribute.",
+    recommend: "Block the call. There is no benign reason an AI coding agent should fetch from .onion in normal development.",
+  },
+  "egress-unknown-host": {
+    title: "Outbound connection to unrecognised host",
+    what: "Agent process opened a TCP connection to an IP not on the dev/AI allowlist.",
+    why: "Unexpected egress is how data leaves your machine. Worth a glance even if benign — it tells you who your agent is talking to.",
+    recommend: "Reverse-lookup the IP (`dig -x <ip>` or whois). If legitimate (e.g. CDN edge for an AI provider), add the hostname to the egress allowlist; if not, suspect a leak and rotate touched credentials.",
+  },
+  "injection-ignore-previous": {
+    title: "Likely prompt injection",
+    what: "Tool result contained 'ignore previous instructions' or a close variant.",
+    why: "Classic jailbreak phrasing planted in fetched content. Successful injection makes the agent do the attacker's bidding using your permissions.",
+    recommend: "Stop the agent before it acts on the fetched content. Re-fetch from a trusted source or paste the relevant info manually after sanitising it.",
+  },
+  "injection-roleplay": {
+    title: "Likely prompt injection (roleplay)",
+    what: "Tool result tried to push the model into a 'jailbreak' / 'developer mode' / 'DAN' persona.",
+    why: "Same risk as above — these phrasings are designed to switch the model out of its safety posture.",
+    recommend: "Same: stop, sanitise, retry without the contaminated content.",
+  },
+  "injection-system-marker": {
+    title: "Possible fake system message",
+    what: "Tool result contained [SYSTEM], <system>, or ### system ### markers.",
+    why: "External text impersonating a system role is how injectors smuggle privileged-looking instructions into the conversation.",
+    recommend: "Strip the markers before letting the agent continue; or re-fetch from a source that doesn't include them.",
+  },
+  "injection-hidden-unicode": {
+    title: "Hidden Unicode in tool result",
+    what: "Tool result contained zero-width or Unicode tag characters.",
+    why: "Invisible characters can encode instructions the model reads but you don't. Often used to slip injection past human review.",
+    recommend: "Pipe the source through `iconv -f utf-8 -t ascii//TRANSLIT` or a unicode-strip tool before re-feeding to the agent.",
+  },
+};
+
+function eventOutcome(decision: string, actor: string): { label: string; tone: "blocked" | "ran-warn" | "ran-info" | "pending" } {
+  if (decision === "denied") return { label: "Blocked before running", tone: "blocked" };
+  if (decision === "allowed") return { label: actor === "user" ? "Allowed by you — ran" : "Allowed — ran", tone: "ran-warn" };
+  if (decision === "prompted") return { label: "Awaiting your decision", tone: "pending" };
+  if (actor === "egress-monitor") return { label: "Connection observed", tone: "ran-info" };
+  if (actor === "rule-engine") return { label: "Already ran (caught after the fact)", tone: "ran-warn" };
+  return { label: "Observed", tone: "ran-info" };
+}
+
+interface PendingPrompt {
+  id: string;
+  ts: string;
+  tool: string;
+  raw: unknown;
+  events: Array<{ rule: string; severity: string; matched: string }>;
+  agent_pid: number | null;
+  timeout_s: number | null;
 }
 
 interface CommandConfig {
@@ -158,7 +379,7 @@ interface GitHubIssuesResponse {
   error: string | null;
 }
 
-type Section = "worktrees" | "knowledge" | "agents" | "voice" | "memory" | "config" | "github";
+type Section = "worktrees" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github";
 
 interface KnowledgeMeta {
   pinned: string[];
@@ -219,6 +440,16 @@ function App() {
   const [commands, setCommands] = useState<CommandConfig[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [voiceMuted, setVoiceMuted] = useState(false);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
+  const [securityFilter, setSecurityFilter] = useState<"all" | "high+">("all");
+  const [neuralguardStatus, setNeuralguardStatus] = useState<{
+    installed: boolean;
+    events_path: string;
+    policy_path: string;
+    gate_script: string;
+  } | null>(null);
+  const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>([]);
+  const [egressEnabled, setEgressEnabled] = useState(false);
   const [hooks, setHooks] = useState<HookConfig[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
@@ -403,6 +634,113 @@ function App() {
     const id = setInterval(loadVoiceMuted, 5000);
     return () => clearInterval(id);
   }, []);
+
+  // Security events polling
+  useEffect(() => {
+    if (currentSection !== "security") return;
+    loadSecurityEvents();
+    loadNeuralguardStatus();
+    const id = setInterval(loadSecurityEvents, 4000);
+    return () => clearInterval(id);
+  }, [currentSection]);
+
+  // Pending security prompts poll (runs always so modal can interrupt anywhere)
+  useEffect(() => {
+    loadPendingPrompts();
+    const id = setInterval(loadPendingPrompts, 1500);
+    return () => clearInterval(id);
+  }, []);
+
+  async function loadPendingPrompts() {
+    try {
+      const list = await invoke<PendingPrompt[]>("list_pending_prompts");
+      setPendingPrompts(list);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  async function handlePromptDecision(id: string, decision: "allow" | "deny") {
+    try {
+      await invoke("respond_to_prompt", { id, decision });
+      setPendingPrompts((prev) => prev.filter((p) => p.id !== id));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function loadNeuralguardStatus() {
+    try {
+      const s = await invoke<typeof neuralguardStatus>("neuralguard_status");
+      setNeuralguardStatus(s);
+    } catch (e) {
+      // Ignore
+    }
+    try {
+      const enabled = await invoke<boolean>("get_egress_enabled");
+      setEgressEnabled(enabled);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  async function handleToggleEgress() {
+    const next = !egressEnabled;
+    setEgressEnabled(next);
+    try {
+      await invoke("set_egress_enabled", { enabled: next });
+    } catch (e) {
+      setEgressEnabled(!next);
+      setError(String(e));
+    }
+  }
+
+  async function handleInstallHooks() {
+    try {
+      await invoke<string>("install_neuralguard_hooks");
+      loadNeuralguardStatus();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleUninstallHooks() {
+    if (!confirm("Remove AI Security hooks from Claude Code?")) return;
+    try {
+      await invoke<string>("uninstall_neuralguard_hooks");
+      loadNeuralguardStatus();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function loadSecurityEvents() {
+    try {
+      const list = await invoke<SecurityEvent[]>("list_security_events", { limit: 200 });
+      setSecurityEvents(list);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  async function handleClearSecurityEvents() {
+    if (!confirm("Clear all security events?")) return;
+    try {
+      await invoke("clear_security_events");
+      loadSecurityEvents();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRescanSessions() {
+    try {
+      await invoke("scan_all_sessions");
+      loadSecurityEvents();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   async function loadVoiceMuted() {
     try {
@@ -1297,19 +1635,6 @@ function App() {
       return parts.slice(-3).join("/");
     }
 
-    function agentHeadline(a: AgentInfo): string {
-      const action = (a.last_action ?? "").trim();
-      const msg = (a.last_user_msg ?? "").trim();
-      const noisy = /^Bash:\s*[\{\(]|^Bash:\s*\w+\s*\(\)\s*\{|;|\b(kill|sleep|cd|ls|cat|grep|sudo|tail|head)\b/;
-      const looksNoisy =
-        action.startsWith("Bash: ") &&
-        (noisy.test(action) || /[{}();$]/.test(action));
-      if (looksNoisy && msg) {
-        return msg.length > 80 ? msg.slice(0, 80) + "…" : msg;
-      }
-      return action || msg || "—";
-    }
-
     return (
       <div className="agents-section">
         <div className="agents-header">
@@ -1337,15 +1662,46 @@ function App() {
                     onClick={() => setExpandedAgentPid(expanded ? null : a.pid)}
                   >
                     <span className={`agent-status-dot status-${a.status}`} />
-                    <span className={`agent-kind kind-${a.kind}`}>{a.kind}</span>
-                    <span className="agent-project">{a.project_name}</span>
-                    <span className="agent-cwd" title={a.cwd}>
-                      {shortenCwd(a.cwd)}
+                    <span className="agent-avatar" title={a.role}>{a.role_icon}</span>
+                    <span className="agent-identity">
+                      <span className="agent-identity-line">
+                        <span className="agent-name">{a.name}</span>
+                        <span className="agent-project">{a.project_name}</span>
+                        <span className="agent-role">{a.role}</span>
+                        <span className={`agent-kind kind-${a.kind}`}>{a.kind}</span>
+                        {a.risk && (
+                          <span
+                            className={`agent-risk risk-${a.risk}`}
+                            title={`Security risk: ${a.risk} — ${
+                              a.risk_events.length
+                                ? a.risk_events.slice(-3).map((e) => e.rule).join(", ")
+                                : "expand for details"
+                            }`}
+                          >
+                            {"⛨"}
+                          </span>
+                        )}
+                        {a.branch && <span className="agent-branch">{a.branch}</span>}
+                      </span>
+                      {(a.current_task || a.topic) && (
+                        <span
+                          className="agent-topic"
+                          title={a.topic || a.current_task || undefined}
+                        >
+                          {a.current_task || a.topic}
+                        </span>
+                      )}
                     </span>
-                    {a.branch && <span className="agent-branch">{a.branch}</span>}
-                    <span className="agent-elapsed">{elapsedSince(a.started_at)}</span>
-                    <span className="agent-last-action">
-                      {agentHeadline(a)}
+                    <span className="agent-tail">
+                      {a.activity && (
+                        <span className="agent-activity" title={a.activity}>
+                          {a.activity}
+                        </span>
+                      )}
+                      <span className="agent-cwd" title={a.cwd}>
+                        {shortenCwd(a.cwd)}
+                      </span>
+                      <span className="agent-elapsed">{elapsedSince(a.started_at)}</span>
                     </span>
                   </button>
                   {expanded && (
@@ -1360,6 +1716,32 @@ function App() {
                         <div className="agent-detail-block">
                           <div className="agent-detail-label">Last action</div>
                           <code>{a.last_action}</code>
+                        </div>
+                      )}
+                      {a.risk_events && a.risk_events.length > 0 && (
+                        <div className="agent-detail-block">
+                          <div className="agent-detail-label">
+                            Security events ({a.risk_events.length})
+                          </div>
+                          <div className="agent-risk-events">
+                            {a.risk_events.slice(-10).reverse().map((e) => {
+                              const info = RULE_INFO[e.rule];
+                              return (
+                                <div key={e.id} className={`agent-risk-event sev-${e.severity}`}>
+                                  <span className={`severity-pill sev-${e.severity}`}>
+                                    {e.severity.toUpperCase()}
+                                  </span>
+                                  <span
+                                    className="agent-risk-event-rule"
+                                    title={info ? info.why : e.rule}
+                                  >
+                                    {info ? info.title : e.rule}
+                                  </span>
+                                  <span className="agent-risk-event-match">{e.matched}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                       <div className="agent-detail-block agent-meta">
@@ -1380,6 +1762,175 @@ function App() {
             })}
           </ul>
         )}
+      </div>
+    );
+  }
+
+  function renderSecuritySection() {
+    const sevRank: Record<string, number> = {
+      info: 0, low: 1, medium: 2, high: 3, critical: 4,
+    };
+    const filtered = securityEvents.filter((e) =>
+      securityFilter === "all" ? true : sevRank[e.severity] >= 3,
+    );
+    const sortedDesc = [...filtered].reverse();
+    const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    for (const e of securityEvents) counts[e.severity] = (counts[e.severity] || 0) + 1;
+
+    function formatTs(iso: string) {
+      try {
+        const d = new Date(iso);
+        return d.toLocaleString();
+      } catch {
+        return iso;
+      }
+    }
+
+    const installed = neuralguardStatus?.installed ?? false;
+
+    return (
+      <div className="security-section">
+        <div className="security-header">
+          <div>
+            <h2>AI Security</h2>
+            <div className="security-subhead">
+              Local AI agent runtime monitor — flags risky actions before they happen
+            </div>
+          </div>
+          <div className="security-actions">
+            <button className="claude-btn" onClick={handleRescanSessions}>
+              Rescan sessions
+            </button>
+            <button className="claude-btn danger" onClick={handleClearSecurityEvents}>
+              Clear events
+            </button>
+          </div>
+        </div>
+
+        <div className={`neuralguard-install ${installed ? "installed" : ""}`}>
+          <div className="neuralguard-install-text">
+            <div className="neuralguard-install-title">
+              {installed ? "AI Security hooks active" : "AI Security hooks not installed"}
+            </div>
+            <div className="neuralguard-install-sub">
+              {installed
+                ? "Claude Code calls go through the gate. Critical rules deny by default; edit policy.yaml to add prompt/strict modes."
+                : "Install hooks so Claude Code asks AI Security before each tool call. Until then this view is observe-only over jsonl logs."}
+            </div>
+          </div>
+          <div className="neuralguard-install-actions">
+            {installed ? (
+              <button className="claude-btn danger" onClick={handleUninstallHooks}>
+                Uninstall
+              </button>
+            ) : (
+              <button className="claude-btn primary" onClick={handleInstallHooks}>
+                Install hooks
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className={`neuralguard-install ${egressEnabled ? "installed" : ""}`}>
+          <div className="neuralguard-install-text">
+            <div className="neuralguard-install-title">
+              {egressEnabled ? "Egress monitor on" : "Egress monitor off"}
+            </div>
+            <div className="neuralguard-install-sub">
+              Polls established TCP connections from claude/opencode/kimi/codex
+              processes every 30s and flags traffic to hosts not on the
+              allowlist (api.anthropic.com, github.com, registry.npmjs.org,
+              pypi.org, etc.).
+            </div>
+          </div>
+          <div className="neuralguard-install-actions">
+            <button
+              className={`claude-btn ${egressEnabled ? "danger" : "primary"}`}
+              onClick={handleToggleEgress}
+            >
+              {egressEnabled ? "Disable" : "Enable"}
+            </button>
+          </div>
+        </div>
+
+        <div className="security-stats">
+          <div className="security-stat critical">
+            <div className="security-stat-value">{counts.critical}</div>
+            <div className="security-stat-label">Critical</div>
+          </div>
+          <div className="security-stat high">
+            <div className="security-stat-value">{counts.high}</div>
+            <div className="security-stat-label">High</div>
+          </div>
+          <div className="security-stat medium">
+            <div className="security-stat-value">{counts.medium}</div>
+            <div className="security-stat-label">Medium</div>
+          </div>
+          <div className="security-stat low">
+            <div className="security-stat-value">{counts.low}</div>
+            <div className="security-stat-label">Low</div>
+          </div>
+        </div>
+
+        <div className="security-toolbar">
+          <button
+            className={`claude-btn ${securityFilter === "all" ? "primary" : ""}`}
+            onClick={() => setSecurityFilter("all")}
+          >
+            All ({securityEvents.length})
+          </button>
+          <button
+            className={`claude-btn ${securityFilter === "high+" ? "primary" : ""}`}
+            onClick={() => setSecurityFilter("high+")}
+          >
+            High &amp; above ({counts.high + counts.critical})
+          </button>
+        </div>
+
+        <div className="security-feed">
+          {sortedDesc.length === 0 ? (
+            <div className="security-empty">
+              No security events. Run an agent and any flagged tool calls will appear here.
+            </div>
+          ) : (
+            sortedDesc.map((e) => {
+              const info = RULE_INFO[e.rule];
+              const outcome = eventOutcome(e.decision, e.actor);
+              return (
+                <div key={e.id} className={`security-row severity-${e.severity}`}>
+                  <div className="security-row-head">
+                    <span className={`severity-pill sev-${e.severity}`}>
+                      {e.severity.toUpperCase()}
+                    </span>
+                    <span className="security-rule">
+                      {info ? info.title : e.rule}
+                    </span>
+                    <span className={`outcome-pill outcome-${outcome.tone}`}>
+                      {outcome.label}
+                    </span>
+                    <span className="security-tool">{e.tool}</span>
+                    <span className="security-ts">{formatTs(e.ts)}</span>
+                  </div>
+                  <div className="security-matched">{e.matched}</div>
+                  {info && (
+                    <div className="security-explain">
+                      <div><strong>What:</strong> {info.what}</div>
+                      <div><strong>Why risky:</strong> {info.why}</div>
+                      <div><strong>What to do:</strong> {info.recommend}</div>
+                    </div>
+                  )}
+                  <div className="security-meta">
+                    <span className="security-rule-id">rule: {e.rule}</span>
+                    {e.agent_kind && <span>{e.agent_kind}</span>}
+                    {e.agent_pid && <span>pid {e.agent_pid}</span>}
+                    {e.agent_cwd && <span title={e.agent_cwd}>{e.agent_cwd.split("/").slice(-2).join("/")}</span>}
+                    <span>· {e.actor} → {e.decision}</span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
     );
   }
@@ -1418,6 +1969,13 @@ function App() {
           >
             <span className="nav-item-icon">&#9881;</span>
             Agents
+          </button>
+          <button
+            className={`nav-item ${currentSection === "security" ? "active" : ""}`}
+            onClick={() => setCurrentSection("security")}
+          >
+            <span className="nav-item-icon">&#128737;</span>
+            Security
           </button>
           <button
             className={`nav-item ${currentSection === "knowledge" ? "active" : ""}`}
@@ -3509,11 +4067,58 @@ function App() {
     );
   }
 
+  function renderPromptModal() {
+    if (pendingPrompts.length === 0) return null;
+    const p = pendingPrompts[0];
+    const raw = (p.raw ?? {}) as Record<string, unknown>;
+    const command =
+      (raw.command as string | undefined) ??
+      (raw.file_path as string | undefined) ??
+      (raw.url as string | undefined) ??
+      JSON.stringify(p.raw, null, 2);
+    return (
+      <div className="prompt-modal-backdrop">
+        <div className="prompt-modal">
+          <div className="prompt-modal-header">
+            <span className="prompt-modal-title">⛨ AI Security — confirm tool call</span>
+            <span className="prompt-modal-pid">pid {p.agent_pid ?? "?"}</span>
+          </div>
+          <div className="prompt-modal-body">
+            <div className="prompt-modal-tool">{p.tool}</div>
+            <pre className="prompt-modal-cmd">{command}</pre>
+            <div className="prompt-modal-rules">
+              {p.events.map((ev, i) => {
+                const info = RULE_INFO[ev.rule];
+                return (
+                  <div key={i} className={`prompt-rule sev-${ev.severity}`}>
+                    <span className={`severity-pill sev-${ev.severity}`}>{ev.severity.toUpperCase()}</span>
+                    <span title={info ? info.why : ev.rule}>{info ? info.title : ev.rule}</span>
+                    <span className="prompt-rule-match">{ev.matched}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="prompt-modal-footer">
+            <button className="claude-btn danger" onClick={() => handlePromptDecision(p.id, "deny")}>
+              Deny
+            </button>
+            <button className="claude-btn primary" onClick={() => handlePromptDecision(p.id, "allow")}>
+              Allow once
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-layout">
       {renderSidebar()}
+      {renderPromptModal()}
       <main className="main-content">
         {currentSection === "agents" && renderAgentsSection()}
+        {currentSection === "security" && renderSecuritySection()}
         {currentSection === "worktrees" && renderWorktreesSection()}
         {currentSection === "github" && renderGithubSection()}
         {currentSection === "knowledge" && renderKnowledgeSection()}

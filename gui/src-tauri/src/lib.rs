@@ -13,6 +13,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
+mod security;
+mod egress;
+
 /// Get the Synthia project root directory.
 /// Resolves from the executable path (gui/src-tauri/target/release/synthia-gui)
 /// or falls back to finding run.sh relative to the binary.
@@ -2142,6 +2145,14 @@ struct AgentInfo {
     last_action: Option<String>,
     session_id: Option<String>,
     jsonl_path: Option<String>,
+    risk: Option<String>, // "info" | "low" | "medium" | "high" | "critical"
+    risk_events: Vec<security::SecurityEvent>,
+    role: String,        // "Developer" | "Technical Writer" | "Architect" | ...
+    role_icon: String,   // emoji for the role
+    topic: Option<String>,  // short headline derived from first user message
+    current_task: Option<String>, // active in-progress todo, "Doing X"
+    activity: Option<String>,     // friendly verb form of latest tool call
+    name: String,        // deterministic friendly name per session
 }
 
 /// Encode an absolute filesystem path the same way Claude Code does:
@@ -2225,7 +2236,7 @@ fn classify_ai_argv(argv: &str) -> Option<&'static str> {
 }
 
 /// Returns Vec of (pid, etime_seconds, full_argv, kind).
-fn list_ai_processes(self_pid: u32) -> Vec<(u32, u64, String, &'static str)> {
+pub(crate) fn list_ai_processes(self_pid: u32) -> Vec<(u32, u64, String, &'static str)> {
     use std::process::Command;
     let output = match Command::new("ps")
         .args(["-eo", "pid=,etime=,args="])
@@ -2269,9 +2280,24 @@ fn list_ai_processes(self_pid: u32) -> Vec<(u32, u64, String, &'static str)> {
 #[derive(Default)]
 struct SessionSnapshot {
     last_user_msg: Option<String>,
+    first_user_msg: Option<String>,
     last_action: Option<String>,
     session_id: Option<String>,
     last_activity: Option<String>,
+    /// Tally of file extensions touched by Edit/Write/Read tool calls.
+    ext_counts: std::collections::HashMap<String, u32>,
+    /// Tally of tool names invoked.
+    tool_counts: std::collections::HashMap<String, u32>,
+    /// "Doing X" string — pulled from the latest TaskCreate/TaskUpdate
+    /// in_progress todo so the agent reads as a teammate currently
+    /// working on something specific instead of the verbatim first user
+    /// message.
+    current_task: Option<String>,
+    /// Compact verb phrase derived from the most recent tool call,
+    /// e.g. "Editing types.ts", "Reading config.yaml", "Running:
+    /// commit + push". Falls back to last_action if a friendly form is
+    /// not available.
+    activity: Option<String>,
 }
 
 fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
@@ -2280,10 +2306,18 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
         Err(_) => return SessionSnapshot::default(),
     };
     let lines: Vec<&str> = content.lines().collect();
-    let start = lines.len().saturating_sub(400);
-    let tail = &lines[start..];
+    // Read the head of the session for first_user_msg, plus the tail for
+    // current activity. Cap each side so very long sessions stay cheap.
+    let head_end = lines.len().min(40);
+    let tail_start = lines.len().saturating_sub(400);
+    let scan_ranges: Vec<&[&str]> = if tail_start > head_end {
+        vec![&lines[..head_end], &lines[tail_start..]]
+    } else {
+        vec![&lines[..]]
+    };
 
     let mut snap = SessionSnapshot::default();
+    for tail in scan_ranges.into_iter() {
     for line in tail {
         let v: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
@@ -2318,7 +2352,10 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
                 let trimmed = t.trim();
                 if !trimmed.is_empty() && !trimmed.starts_with('<') {
                     let truncated: String = trimmed.chars().take(200).collect();
-                    snap.last_user_msg = Some(truncated);
+                    snap.last_user_msg = Some(truncated.clone());
+                    if snap.first_user_msg.is_none() {
+                        snap.first_user_msg = Some(truncated);
+                    }
                 }
             }
         } else if msg_type == "assistant" {
@@ -2327,6 +2364,88 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
                     if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
                         let name = item.get("name").and_then(|s| s.as_str()).unwrap_or("tool");
                         let input = item.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                        *snap.tool_counts.entry(name.to_string()).or_insert(0) += 1;
+                        if matches!(name, "Edit" | "Write" | "Read" | "NotebookEdit") {
+                            if let Some(p) = input.get("file_path").and_then(|s| s.as_str()) {
+                                if let Some(ext) = std::path::Path::new(p)
+                                    .extension()
+                                    .and_then(|e| e.to_str())
+                                {
+                                    *snap.ext_counts.entry(ext.to_lowercase()).or_insert(0) += 1;
+                                }
+                            }
+                        }
+                        // Pull the latest in-progress todo as the current
+                        // task headline. activeForm is a "doing X" sentence
+                        // already written by Claude, so it reads naturally.
+                        if matches!(name, "TaskCreate" | "TaskUpdate") {
+                            if let Some(todos) = input.get("todos").and_then(|t| t.as_array()) {
+                                let mut picked: Option<String> = None;
+                                for t in todos {
+                                    let status = t.get("status").and_then(|s| s.as_str()).unwrap_or("");
+                                    if status == "in_progress" {
+                                        let label = t.get("activeForm").and_then(|s| s.as_str())
+                                            .or_else(|| t.get("content").and_then(|s| s.as_str()))
+                                            .unwrap_or("");
+                                        if !label.is_empty() {
+                                            picked = Some(label.to_string());
+                                            break;
+                                        }
+                                    }
+                                }
+                                if picked.is_none() {
+                                    for t in todos.iter().rev() {
+                                        if t.get("status").and_then(|s| s.as_str()) == Some("pending") {
+                                            let label = t.get("content").and_then(|s| s.as_str()).unwrap_or("");
+                                            if !label.is_empty() {
+                                                picked = Some(label.to_string());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                if picked.is_some() {
+                                    snap.current_task = picked;
+                                }
+                            }
+                        }
+                        // Friendly verb form so the right column reads
+                        // "Editing types.ts" instead of "Bash: Read:
+                        // /long/path/types.ts".
+                        let activity = match name {
+                            "Bash" => input.get("description").and_then(|s| s.as_str())
+                                .map(|d| d.to_string())
+                                .or_else(|| input.get("command").and_then(|s| s.as_str())
+                                    .map(|c| {
+                                        let first_token = c.split_whitespace().next().unwrap_or("cmd");
+                                        format!("Running {}", first_token)
+                                    })),
+                            "Read" => input.get("file_path").and_then(|s| s.as_str())
+                                .map(|p| format!("Reading {}", basename(p))),
+                            "Edit" | "MultiEdit" => input.get("file_path").and_then(|s| s.as_str())
+                                .map(|p| format!("Editing {}", basename(p))),
+                            "Write" | "NotebookEdit" => input.get("file_path").and_then(|s| s.as_str())
+                                .map(|p| format!("Writing {}", basename(p))),
+                            "Grep" => input.get("pattern").and_then(|s| s.as_str())
+                                .map(|p| format!("Searching for {}", p)),
+                            "Glob" => input.get("pattern").and_then(|s| s.as_str())
+                                .map(|p| format!("Listing {}", p)),
+                            "WebFetch" => input.get("url").and_then(|s| s.as_str())
+                                .map(|u| format!("Fetching {}", short_host(u))),
+                            "WebSearch" => input.get("query").and_then(|s| s.as_str())
+                                .map(|q| format!("Searching web: {}", q)),
+                            "Agent" | "Task" | "TaskCreate" | "TaskUpdate" => input.get("description")
+                                .and_then(|s| s.as_str())
+                                .map(|d| format!("Planning: {}", d))
+                                .or_else(|| Some("Updating tasks".to_string())),
+                            other => Some(other.to_string()),
+                        };
+                        if let Some(a) = activity {
+                            let trimmed: String = a.split('\n').next().unwrap_or("").trim().chars().take(80).collect();
+                            if !trimmed.is_empty() {
+                                snap.activity = Some(trimmed);
+                            }
+                        }
                         let target = match name {
                             "Bash" => input.get("description").and_then(|s| s.as_str())
                                 .or_else(|| input.get("command").and_then(|s| s.as_str())),
@@ -2357,7 +2476,158 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
             }
         }
     }
+    }
     snap
+}
+
+/// Pick a persona for the agent based on what tools and file types it
+/// has been touching this session. Returns (role_label, emoji_avatar).
+fn classify_role(snap: &SessionSnapshot) -> (&'static str, &'static str) {
+    let docs_exts: [&str; 6] = ["md", "mdx", "rst", "txt", "adoc", "org"];
+    let code_exts: [&str; 16] = [
+        "ts", "tsx", "js", "jsx", "py", "rs", "go", "java", "rb",
+        "php", "c", "cpp", "h", "swift", "kt", "scala",
+    ];
+    let infra_exts: [&str; 8] = [
+        "yaml", "yml", "toml", "tf", "sh", "dockerfile", "ini", "conf",
+    ];
+
+    let mut docs = 0u32;
+    let mut code = 0u32;
+    let mut infra = 0u32;
+    let mut total = 0u32;
+    for (ext, n) in &snap.ext_counts {
+        total += *n;
+        if docs_exts.contains(&ext.as_str()) { docs += *n; }
+        if code_exts.contains(&ext.as_str()) { code += *n; }
+        if infra_exts.contains(&ext.as_str()) { infra += *n; }
+    }
+    let bash_n = *snap.tool_counts.get("Bash").unwrap_or(&0);
+    let web_n = *snap.tool_counts.get("WebFetch").unwrap_or(&0)
+        + *snap.tool_counts.get("WebSearch").unwrap_or(&0);
+    let agent_n = *snap.tool_counts.get("Agent").unwrap_or(&0)
+        + *snap.tool_counts.get("Task").unwrap_or(&0);
+    let plan_n = *snap.tool_counts.get("ExitPlanMode").unwrap_or(&0)
+        + *snap.tool_counts.get("EnterPlanMode").unwrap_or(&0);
+
+    if total == 0 && bash_n == 0 && web_n == 0 {
+        return ("Researcher", "\u{1F9D1}\u{200D}\u{1F52C}");
+    }
+    if plan_n > 0 || (web_n >= 3 && code == 0) {
+        return ("Architect", "\u{1F9D1}\u{200D}\u{1F4BC}");
+    }
+    if agent_n >= 2 && code <= docs {
+        return ("Orchestrator", "\u{1F9D1}\u{200D}\u{1F3A8}");
+    }
+    if total > 0 && docs as f32 >= (total as f32) * 0.5 {
+        return ("Technical Writer", "\u{1F9D1}\u{200D}\u{1F3EB}");
+    }
+    if infra >= code && infra > 0 && bash_n >= total / 2 {
+        return ("DevOps", "\u{1F9D1}\u{200D}\u{1F527}");
+    }
+    if code > 0 || total > 0 {
+        return ("Developer", "\u{1F9D1}\u{200D}\u{1F4BB}");
+    }
+    if bash_n > 0 || web_n > 0 {
+        return ("Researcher", "\u{1F9D1}\u{200D}\u{1F52C}");
+    }
+    ("Agent", "\u{1F916}")
+}
+
+const AGENT_NAMES: &[&str] = &[
+    "Atlas", "Beckett", "Caleb", "Declan", "Elliot",
+    "Felix", "Hugo", "Jasper", "Marcus", "Wren",
+    "Aria", "Briony", "Camille", "Delphine", "Esme",
+    "Fiona", "Hazel", "Iris", "Maeve", "Sienna",
+];
+
+fn agent_name_for(seed: &str) -> &'static str {
+    // Cheap deterministic hash so the same session always gets the same name.
+    let mut h: u32 = 0x811C9DC5;
+    for b in seed.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    let idx = (h as usize) % AGENT_NAMES.len();
+    AGENT_NAMES[idx]
+}
+
+/// Trim a first-user-message into a short shareable headline.
+fn topic_from_first_msg(msg: &str) -> String {
+    let cleaned: String = msg
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with('<') && !t.starts_with('#')
+        })
+        .collect::<Vec<&str>>()
+        .join(" ")
+        .chars()
+        .take(140)
+        .collect();
+    if cleaned.is_empty() {
+        msg.chars().take(140).collect()
+    } else {
+        cleaned
+    }
+}
+
+/// Read the timestamp of the first message in a jsonl session log.
+/// Used to match running PIDs to their session by start time.
+fn basename(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn short_host(url: &str) -> String {
+    let after_scheme = url.split("://").nth(1).unwrap_or(url);
+    after_scheme.split('/').next().unwrap_or(after_scheme).to_string()
+}
+
+fn jsonl_first_timestamp(path: &std::path::Path) -> Option<chrono::DateTime<chrono::Utc>> {
+    let content = fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(ts) = v.get("timestamp").and_then(|s| s.as_str()) {
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+                return Some(dt.with_timezone(&chrono::Utc));
+            }
+        }
+    }
+    None
+}
+
+/// All jsonls in the project dir for a cwd, with each one's first-message
+/// timestamp and modification mtime. Used to match running PIDs to their
+/// own session log by comparing process start_time to jsonl first-message
+/// time — needed because multiple Claude agents in the same cwd otherwise
+/// collapse onto whichever jsonl was last written to.
+fn project_jsonls(cwd: &str) -> Vec<(PathBuf, chrono::DateTime<chrono::Utc>, std::time::SystemTime)> {
+    let claude_dir = get_claude_dir();
+    let project_dir = claude_dir.join("projects").join(encode_project_dir(cwd));
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(&project_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") { continue; }
+            let mtime = match e.metadata().and_then(|m| m.modified()) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            let first_ts = match jsonl_first_timestamp(&p) {
+                Some(t) => t,
+                None => continue,
+            };
+            out.push((p, first_ts, mtime));
+        }
+    }
+    out
 }
 
 fn newest_session_jsonl(cwd: &str) -> Option<(PathBuf, std::time::SystemTime)> {
@@ -2403,17 +2673,22 @@ fn list_active_agents() -> Vec<AgentInfo> {
     let self_pid = std::process::id();
     let mut agents = Vec::new();
 
+    // Pass 1: collect proc rows and resolve cwd, branch.
+    struct Row {
+        pid: u32,
+        etime_secs: u64,
+        kind: &'static str,
+        cwd: String,
+        branch: Option<String>,
+        started_utc: chrono::DateTime<chrono::Utc>,
+    }
+    let mut rows: Vec<Row> = Vec::new();
+    let now_utc = chrono::Utc::now();
     for (pid, etime_secs, _argv, kind) in list_ai_processes(self_pid) {
         let cwd = match read_proc_cwd(pid) {
             Some(c) => c,
             None => continue,
         };
-        let project_name = std::path::Path::new(&cwd)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("?")
-            .to_string();
-
         let branch = std::process::Command::new("git")
             .args(["-C", &cwd, "branch", "--show-current"])
             .output()
@@ -2422,9 +2697,63 @@ fn list_active_agents() -> Vec<AgentInfo> {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 if s.is_empty() { None } else { Some(s) }
             } else { None });
+        let started_utc = now_utc - chrono::Duration::seconds(etime_secs as i64);
+        rows.push(Row { pid, etime_secs, kind, cwd, branch, started_utc });
+    }
+
+    // Pass 2: per-cwd, match each Claude PID to its own jsonl by closest
+    // first-message timestamp to the PID's start time. Greedy assignment
+    // so two agents in the same dir each get their own log.
+    use std::collections::HashMap;
+    let mut jsonl_for_pid: HashMap<u32, (PathBuf, std::time::SystemTime)> = HashMap::new();
+    let mut by_cwd: HashMap<String, Vec<&Row>> = HashMap::new();
+    for r in &rows {
+        if r.kind == "claude" {
+            by_cwd.entry(r.cwd.clone()).or_default().push(r);
+        }
+    }
+    for (cwd, group) in by_cwd {
+        let jsonls = project_jsonls(&cwd);
+        if jsonls.is_empty() {
+            continue;
+        }
+        // Build (pid, jsonl_idx, distance) candidates and pick greedily.
+        let mut candidates: Vec<(u32, usize, i64, PathBuf, std::time::SystemTime)> = Vec::new();
+        for r in &group {
+            for (idx, (path, first_ts, mtime)) in jsonls.iter().enumerate() {
+                let dist_ms = (r.started_utc - *first_ts).num_milliseconds().abs();
+                candidates.push((r.pid, idx, dist_ms, path.clone(), *mtime));
+            }
+        }
+        candidates.sort_by_key(|c| c.2);
+        let mut used_jsonl: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut used_pid: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for (pid, idx, _dist, path, mtime) in candidates {
+            if used_pid.contains(&pid) || used_jsonl.contains(&idx) {
+                continue;
+            }
+            jsonl_for_pid.insert(pid, (path, mtime));
+            used_pid.insert(pid);
+            used_jsonl.insert(idx);
+            if used_pid.len() == group.len() || used_jsonl.len() == jsonls.len() {
+                break;
+            }
+        }
+    }
+
+    for r in rows {
+        let Row { pid, etime_secs, kind, cwd, branch, .. } = r;
+        let project_name = std::path::Path::new(&cwd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
 
         let (jsonl_path, snap, mtime) = if kind == "claude" {
-            match newest_session_jsonl(&cwd) {
+            let resolved = jsonl_for_pid
+                .remove(&pid)
+                .or_else(|| newest_session_jsonl(&cwd));
+            match resolved {
                 Some((p, m)) => {
                     let snap = snapshot_session(&p);
                     (Some(p.to_string_lossy().to_string()), snap, Some(m))
@@ -2435,11 +2764,42 @@ fn list_active_agents() -> Vec<AgentInfo> {
             (None, SessionSnapshot::default(), None)
         };
 
+        let risk = if kind == "claude" {
+            jsonl_path.as_ref().and_then(|p| {
+                security::scan_session_incremental(
+                    std::path::Path::new(p),
+                    Some(pid),
+                    Some(kind),
+                    Some(&cwd),
+                )
+            })
+        } else {
+            None
+        };
+        // Combine fresh hits with persisted recent hits for this session so the
+        // badge persists past the cursor advance.
+        let session_risk = snap.session_id.as_ref().and_then(|sid| {
+            security::recent_max_severity_for_session(sid, 400)
+        });
+        let final_risk = match (risk, session_risk) {
+            (Some(a), Some(b)) => Some(if a > b { a } else { b }),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            _ => None,
+        };
+        let risk_events = snap.session_id.as_deref()
+            .map(|sid| security::recent_events_for_session(sid, 800, 20))
+            .unwrap_or_default();
+
         let status = if kind == "claude" {
             classify_status(mtime).to_string()
         } else {
             "active".to_string()
         };
+
+        let (role_label, role_icon) = classify_role(&snap);
+        let topic = snap.first_user_msg.as_deref().map(topic_from_first_msg);
+        let name_seed = snap.session_id.clone().unwrap_or_else(|| format!("pid:{}", pid));
+        let name = agent_name_for(&name_seed).to_string();
 
         agents.push(AgentInfo {
             pid,
@@ -2454,6 +2814,14 @@ fn list_active_agents() -> Vec<AgentInfo> {
             last_action: snap.last_action,
             session_id: snap.session_id,
             jsonl_path,
+            risk: final_risk.map(|s| s.as_str().to_string()),
+            risk_events,
+            role: role_label.to_string(),
+            role_icon: role_icon.to_string(),
+            topic,
+            current_task: snap.current_task,
+            activity: snap.activity,
+            name,
         });
     }
 
@@ -2463,6 +2831,230 @@ fn list_active_agents() -> Vec<AgentInfo> {
             .then(b.started_at.cmp(&a.started_at))
     });
     agents
+}
+
+#[tauri::command]
+fn list_security_events(limit: Option<usize>) -> Vec<security::SecurityEvent> {
+    security::read_events(limit.unwrap_or(200))
+}
+
+#[tauri::command]
+fn clear_security_events() -> Result<(), String> {
+    security::clear_events().map_err(|e| e.to_string())
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct PendingPrompt {
+    id: String,
+    ts: String,
+    tool: String,
+    raw: serde_json::Value,
+    events: Vec<serde_json::Value>,
+    agent_pid: Option<u32>,
+    timeout_s: Option<u64>,
+}
+
+fn pending_prompts_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".config/synthia/security/pending-prompts")
+}
+
+fn prompt_responses_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".config/synthia/security/prompt-responses")
+}
+
+#[tauri::command]
+fn get_egress_enabled() -> bool {
+    egress::is_enabled()
+}
+
+#[tauri::command]
+fn set_egress_enabled(enabled: bool) -> Result<(), String> {
+    let path = egress::runtime_state_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut state: serde_json::Value = fs::read_to_string(&path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = state.as_object_mut() {
+        obj.insert("egress_enabled".to_string(), serde_json::Value::Bool(enabled));
+    }
+    fs::write(&path, serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_pending_prompts() -> Vec<PendingPrompt> {
+    let dir = pending_prompts_dir();
+    if !dir.is_dir() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if entry.path().extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(text) = fs::read_to_string(entry.path()) {
+                if let Ok(p) = serde_json::from_str::<PendingPrompt>(&text) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.ts.cmp(&b.ts));
+    out
+}
+
+#[tauri::command]
+fn respond_to_prompt(id: String, decision: String) -> Result<(), String> {
+    let allow = decision == "allow";
+    let dir = prompt_responses_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let payload = serde_json::json!({
+        "id": id,
+        "decision": if allow { "allow" } else { "deny" },
+        "ts": chrono::Utc::now().to_rfc3339(),
+    });
+    let file = dir.join(format!("{}.json", id));
+    fs::write(&file, payload.to_string()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn synthia_python_path() -> PathBuf {
+    let root = get_synthia_root();
+    root.join("venv/bin/python")
+}
+
+fn security_gate_path() -> PathBuf {
+    let root = get_synthia_root();
+    root.join("src/synthia/hooks/security_gate.py")
+}
+
+#[tauri::command]
+fn neuralguard_status() -> serde_json::Value {
+    let settings = get_settings_file();
+    let installed = match fs::read_to_string(&settings) {
+        Ok(c) => c.contains("security_gate.py"),
+        Err(_) => false,
+    };
+    serde_json::json!({
+        "installed": installed,
+        "events_path": security::events_path_for_display(),
+        "policy_path": security::policy_path_for_display(),
+        "gate_script": security_gate_path().to_string_lossy(),
+    })
+}
+
+#[tauri::command]
+fn install_neuralguard_hooks() -> Result<String, String> {
+    let settings = get_settings_file();
+    fs::create_dir_all(settings.parent().ok_or("no parent")?).map_err(|e| e.to_string())?;
+    let mut root: serde_json::Value = if settings.exists() {
+        let txt = fs::read_to_string(&settings).map_err(|e| e.to_string())?;
+        serde_json::from_str(&txt).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    let py = synthia_python_path();
+    let gate = security_gate_path();
+    let cmd = format!("{} {}", py.to_string_lossy(), gate.to_string_lossy());
+
+    let entry = serde_json::json!({
+        "matcher": "",
+        "hooks": [
+            { "type": "command", "command": cmd, "timeout": 35 }
+        ]
+    });
+
+    for event in ["PreToolUse", "PostToolUse"] {
+        let hooks = root
+            .as_object_mut()
+            .unwrap()
+            .entry("hooks")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .ok_or("hooks not object")?;
+        let arr = hooks
+            .entry(event.to_string())
+            .or_insert_with(|| serde_json::json!([]))
+            .as_array_mut()
+            .ok_or("event not array")?;
+        // dedupe: drop existing security_gate entries first
+        arr.retain(|item| {
+            !item
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.contains("security_gate.py"))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        });
+        arr.push(entry.clone());
+    }
+
+    let serialized = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    fs::write(&settings, serialized).map_err(|e| e.to_string())?;
+    security::ensure_dir().map_err(|e| e.to_string())?;
+    Ok("NeuralGuard hooks installed".to_string())
+}
+
+#[tauri::command]
+fn uninstall_neuralguard_hooks() -> Result<String, String> {
+    let settings = get_settings_file();
+    if !settings.exists() {
+        return Ok("Nothing to remove".to_string());
+    }
+    let txt = fs::read_to_string(&settings).map_err(|e| e.to_string())?;
+    let mut root: serde_json::Value = serde_json::from_str(&txt).map_err(|e| e.to_string())?;
+    if let Some(hooks) = root.get_mut("hooks").and_then(|v| v.as_object_mut()) {
+        for event in ["PreToolUse", "PostToolUse"] {
+            if let Some(arr) = hooks.get_mut(event).and_then(|v| v.as_array_mut()) {
+                arr.retain(|item| {
+                    !item
+                        .get("hooks")
+                        .and_then(|h| h.as_array())
+                        .map(|hs| {
+                            hs.iter().any(|h| {
+                                h.get("command")
+                                    .and_then(|c| c.as_str())
+                                    .map(|s| s.contains("security_gate.py"))
+                                    .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false)
+                });
+            }
+        }
+    }
+    let serialized = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    fs::write(&settings, serialized).map_err(|e| e.to_string())?;
+    Ok("NeuralGuard hooks removed".to_string())
+}
+
+#[tauri::command]
+fn scan_all_sessions() -> Result<usize, String> {
+    let self_pid = std::process::id();
+    let mut total = 0usize;
+    for (pid, _etime, _argv, kind) in list_ai_processes(self_pid) {
+        if kind != "claude" { continue; }
+        let cwd = match read_proc_cwd(pid) { Some(c) => c, None => continue };
+        if let Some((path, _)) = newest_session_jsonl(&cwd) {
+            if security::scan_session_incremental(&path, Some(pid), Some(kind), Some(&cwd)).is_some() {
+                total += 1;
+            }
+        }
+    }
+    Ok(total)
 }
 
 #[tauri::command]
@@ -3191,6 +3783,8 @@ pub fn run() {
         std::process::exit(0);
     }
 
+    egress::spawn_watcher();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -3367,6 +3961,16 @@ pub fn run() {
             delete_skill,
             get_voice_muted,
             set_voice_muted,
+            list_security_events,
+            clear_security_events,
+            scan_all_sessions,
+            list_pending_prompts,
+            respond_to_prompt,
+            neuralguard_status,
+            install_neuralguard_hooks,
+            uninstall_neuralguard_hooks,
+            get_egress_enabled,
+            set_egress_enabled,
             list_hooks,
             list_plugins,
             toggle_plugin,
