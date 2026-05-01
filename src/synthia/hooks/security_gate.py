@@ -16,6 +16,7 @@ matching response file; on timeout the action defaults to deny.
 
 Drop-in: register in ~/.claude/settings.json under PreToolUse and PostToolUse.
 """
+
 from __future__ import annotations
 
 import json
@@ -337,9 +338,10 @@ LLM_TIMEOUT_S = 6
 
 def _llm_cache_load() -> dict:
     try:
-        return json.loads(LLM_CACHE_PATH.read_text(encoding="utf-8"))
+        data = json.loads(LLM_CACHE_PATH.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _llm_cache_save(data: dict) -> None:
@@ -426,7 +428,9 @@ def llm_classify(
     except Exception:
         return None
 
-    text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip()
+    text = "".join(
+        getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text"
+    ).strip()
     sev = MEDIUM
     reason = ""
     try:
