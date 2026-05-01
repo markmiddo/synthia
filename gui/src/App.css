@@ -4448,6 +4448,27 @@
   font-style: italic;
   max-width: 100%;
 }
+
+.agent-tail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  margin-left: auto;
+  min-width: 0;
+  max-width: 35%;
+  flex-shrink: 1;
+}
+.agent-activity {
+  font-size: 0.85rem;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.agent-tail .agent-cwd { font-size: 0.72em; }
+.agent-tail .agent-elapsed { font-size: 0.72em; min-width: 0; }
 .agent-kind {
   font-size: 0.7em;
   text-transform: uppercase;

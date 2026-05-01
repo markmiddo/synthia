@@ -82,6 +82,8 @@ interface AgentInfo {
   role: string;
   role_icon: string;
   topic: string | null;
+  current_task: string | null;
+  activity: string | null;
   name: string;
 }
 
@@ -1633,19 +1635,6 @@ function App() {
       return parts.slice(-3).join("/");
     }
 
-    function agentHeadline(a: AgentInfo): string {
-      const action = (a.last_action ?? "").trim();
-      const msg = (a.last_user_msg ?? "").trim();
-      const noisy = /^Bash:\s*[\{\(]|^Bash:\s*\w+\s*\(\)\s*\{|;|\b(kill|sleep|cd|ls|cat|grep|sudo|tail|head)\b/;
-      const looksNoisy =
-        action.startsWith("Bash: ") &&
-        (noisy.test(action) || /[{}();$]/.test(action));
-      if (looksNoisy && msg) {
-        return msg.length > 80 ? msg.slice(0, 80) + "…" : msg;
-      }
-      return action || msg || "—";
-    }
-
     return (
       <div className="agents-section">
         <div className="agents-header">
@@ -1694,18 +1683,25 @@ function App() {
                         )}
                         {a.branch && <span className="agent-branch">{a.branch}</span>}
                       </span>
-                      {a.topic && (
-                        <span className="agent-topic" title={a.topic}>
-                          {a.topic}
+                      {(a.current_task || a.topic) && (
+                        <span
+                          className="agent-topic"
+                          title={a.topic || a.current_task || undefined}
+                        >
+                          {a.current_task || a.topic}
                         </span>
                       )}
                     </span>
-                    <span className="agent-cwd" title={a.cwd}>
-                      {shortenCwd(a.cwd)}
-                    </span>
-                    <span className="agent-elapsed">{elapsedSince(a.started_at)}</span>
-                    <span className="agent-last-action">
-                      {agentHeadline(a)}
+                    <span className="agent-tail">
+                      {a.activity && (
+                        <span className="agent-activity" title={a.activity}>
+                          {a.activity}
+                        </span>
+                      )}
+                      <span className="agent-cwd" title={a.cwd}>
+                        {shortenCwd(a.cwd)}
+                      </span>
+                      <span className="agent-elapsed">{elapsedSince(a.started_at)}</span>
                     </span>
                   </button>
                   {expanded && (

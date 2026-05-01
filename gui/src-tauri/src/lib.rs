@@ -2150,6 +2150,8 @@ struct AgentInfo {
     role: String,        // "Developer" | "Technical Writer" | "Architect" | ...
     role_icon: String,   // emoji for the role
     topic: Option<String>,  // short headline derived from first user message
+    current_task: Option<String>, // active in-progress todo, "Doing X"
+    activity: Option<String>,     // friendly verb form of latest tool call
     name: String,        // deterministic friendly name per session
 }
 
@@ -2286,6 +2288,16 @@ struct SessionSnapshot {
     ext_counts: std::collections::HashMap<String, u32>,
     /// Tally of tool names invoked.
     tool_counts: std::collections::HashMap<String, u32>,
+    /// "Doing X" string — pulled from the latest TaskCreate/TaskUpdate
+    /// in_progress todo so the agent reads as a teammate currently
+    /// working on something specific instead of the verbatim first user
+    /// message.
+    current_task: Option<String>,
+    /// Compact verb phrase derived from the most recent tool call,
+    /// e.g. "Editing types.ts", "Reading config.yaml", "Running:
+    /// commit + push". Falls back to last_action if a friendly form is
+    /// not available.
+    activity: Option<String>,
 }
 
 fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
@@ -2361,6 +2373,77 @@ fn snapshot_session(jsonl_path: &std::path::Path) -> SessionSnapshot {
                                 {
                                     *snap.ext_counts.entry(ext.to_lowercase()).or_insert(0) += 1;
                                 }
+                            }
+                        }
+                        // Pull the latest in-progress todo as the current
+                        // task headline. activeForm is a "doing X" sentence
+                        // already written by Claude, so it reads naturally.
+                        if matches!(name, "TaskCreate" | "TaskUpdate") {
+                            if let Some(todos) = input.get("todos").and_then(|t| t.as_array()) {
+                                let mut picked: Option<String> = None;
+                                for t in todos {
+                                    let status = t.get("status").and_then(|s| s.as_str()).unwrap_or("");
+                                    if status == "in_progress" {
+                                        let label = t.get("activeForm").and_then(|s| s.as_str())
+                                            .or_else(|| t.get("content").and_then(|s| s.as_str()))
+                                            .unwrap_or("");
+                                        if !label.is_empty() {
+                                            picked = Some(label.to_string());
+                                            break;
+                                        }
+                                    }
+                                }
+                                if picked.is_none() {
+                                    for t in todos.iter().rev() {
+                                        if t.get("status").and_then(|s| s.as_str()) == Some("pending") {
+                                            let label = t.get("content").and_then(|s| s.as_str()).unwrap_or("");
+                                            if !label.is_empty() {
+                                                picked = Some(label.to_string());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                if picked.is_some() {
+                                    snap.current_task = picked;
+                                }
+                            }
+                        }
+                        // Friendly verb form so the right column reads
+                        // "Editing types.ts" instead of "Bash: Read:
+                        // /long/path/types.ts".
+                        let activity = match name {
+                            "Bash" => input.get("description").and_then(|s| s.as_str())
+                                .map(|d| d.to_string())
+                                .or_else(|| input.get("command").and_then(|s| s.as_str())
+                                    .map(|c| {
+                                        let first_token = c.split_whitespace().next().unwrap_or("cmd");
+                                        format!("Running {}", first_token)
+                                    })),
+                            "Read" => input.get("file_path").and_then(|s| s.as_str())
+                                .map(|p| format!("Reading {}", basename(p))),
+                            "Edit" | "MultiEdit" => input.get("file_path").and_then(|s| s.as_str())
+                                .map(|p| format!("Editing {}", basename(p))),
+                            "Write" | "NotebookEdit" => input.get("file_path").and_then(|s| s.as_str())
+                                .map(|p| format!("Writing {}", basename(p))),
+                            "Grep" => input.get("pattern").and_then(|s| s.as_str())
+                                .map(|p| format!("Searching for {}", p)),
+                            "Glob" => input.get("pattern").and_then(|s| s.as_str())
+                                .map(|p| format!("Listing {}", p)),
+                            "WebFetch" => input.get("url").and_then(|s| s.as_str())
+                                .map(|u| format!("Fetching {}", short_host(u))),
+                            "WebSearch" => input.get("query").and_then(|s| s.as_str())
+                                .map(|q| format!("Searching web: {}", q)),
+                            "Agent" | "Task" | "TaskCreate" | "TaskUpdate" => input.get("description")
+                                .and_then(|s| s.as_str())
+                                .map(|d| format!("Planning: {}", d))
+                                .or_else(|| Some("Updating tasks".to_string())),
+                            other => Some(other.to_string()),
+                        };
+                        if let Some(a) = activity {
+                            let trimmed: String = a.split('\n').next().unwrap_or("").trim().chars().take(80).collect();
+                            if !trimmed.is_empty() {
+                                snap.activity = Some(trimmed);
                             }
                         }
                         let target = match name {
@@ -2491,6 +2574,19 @@ fn topic_from_first_msg(msg: &str) -> String {
 
 /// Read the timestamp of the first message in a jsonl session log.
 /// Used to match running PIDs to their session by start time.
+fn basename(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn short_host(url: &str) -> String {
+    let after_scheme = url.split("://").nth(1).unwrap_or(url);
+    after_scheme.split('/').next().unwrap_or(after_scheme).to_string()
+}
+
 fn jsonl_first_timestamp(path: &std::path::Path) -> Option<chrono::DateTime<chrono::Utc>> {
     let content = fs::read_to_string(path).ok()?;
     for line in content.lines() {
@@ -2723,6 +2819,8 @@ fn list_active_agents() -> Vec<AgentInfo> {
             role: role_label.to_string(),
             role_icon: role_icon.to_string(),
             topic,
+            current_task: snap.current_task,
+            activity: snap.activity,
             name,
         });
     }
