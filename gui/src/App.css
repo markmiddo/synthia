@@ -936,7 +936,8 @@
 /* Sidebar Navigation */
 .app-layout {
   display: flex;
-  height: 100vh;
+  flex: 1 1 0;
+  min-height: 0;
   background: linear-gradient(135deg, #0a0b14 0%, #0f1419 100%);
 }
 
