@@ -4216,7 +4216,7 @@ function App() {
     return (
       <div className="statusbar">
         <div className="statusbar-section">
-          <span className="statusbar-section-icon" title="Claude usage">✨</span>
+          <span className="statusbar-section-icon" title="Claude usage">📊</span>
           {usageStats && !usageStats.error ? (
             <>
               {chip("5h", usageStats.five_hour_pct)}
