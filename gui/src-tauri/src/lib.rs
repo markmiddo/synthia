@@ -454,6 +454,7 @@ pub fn run() {
             commands::notes::create_folder,
             commands::notes::delete_note,
             commands::usage::get_usage_stats,
+            commands::weather::get_weather,
             commands::notes::get_pinned_note,
             commands::notes::save_pinned_note,
             commands::github::get_github_config,

@@ -64,6 +64,14 @@ interface AgentConfig {
   body: string;
 }
 
+interface WeatherSnapshot {
+  temp_c: number | null;
+  conditions: string | null;
+  location: string | null;
+  icon: string | null;
+  error: string | null;
+}
+
 interface AgentInfo {
   pid: number;
   kind: string;
@@ -444,6 +452,7 @@ function App() {
   const [securityFilter, setSecurityFilter] = useState<"all" | "high+">("all");
   const [securityTabAutoChosen, setSecurityTabAutoChosen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [neuralguardStatus, setNeuralguardStatus] = useState<{
     installed: boolean;
     events_path: string;
@@ -660,6 +669,40 @@ function App() {
   useEffect(() => {
     loadPendingPrompts();
     const id = setInterval(loadPendingPrompts, 1500);
+    return () => clearInterval(id);
+  }, []);
+
+  // Weather snapshot for status bar — refresh every 30 minutes.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const w = await invoke<WeatherSnapshot>("get_weather");
+        if (!cancelled) setWeather(w);
+      } catch (err) {
+        if (!cancelled)
+          setWeather({
+            temp_c: null,
+            conditions: null,
+            location: null,
+            icon: null,
+            error: String(err),
+          });
+      }
+    }
+    load();
+    const id = setInterval(load, 30 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Active agents status-bar polling — runs even when not on the agents tab so
+  // the bottom counts stay live everywhere.
+  useEffect(() => {
+    const id = setInterval(loadActiveAgents, 5000);
+    loadActiveAgents();
     return () => clearInterval(id);
   }, []);
 
@@ -2059,7 +2102,6 @@ function App() {
         <div className="sidebar-header">
           <div className="sidebar-logo">SYNTHIA</div>
         </div>
-        <div className="sidebar-scroll">
         <nav className="sidebar-nav">
           <button
             className={`nav-item ${currentSection === "agents" ? "active" : ""}`}
@@ -2120,147 +2162,6 @@ function App() {
           </button>
         </nav>
 
-        {usageStats && (
-          <div className="usage-widget">
-            <div className="usage-header">
-              <span className="usage-title">Claude Usage</span>
-              {usageStats.subscription_type && (
-                <span className="usage-badge">{usageStats.subscription_type}</span>
-              )}
-            </div>
-
-            {usageStats.error ? (
-              <div className="usage-error">
-                Usage unavailable
-                <div className="usage-error-detail">{usageStats.error}</div>
-              </div>
-            ) : (
-              <>
-                <div className="usage-section">
-                  <div className="usage-label">5-hour</div>
-                  <div className="usage-bar-row">
-                    <div className="usage-bar">
-                      <div
-                        className="usage-bar-fill"
-                        style={{
-                          width: `${Math.min(100, usageStats.five_hour_pct)}%`,
-                          background: usageBarColor(usageStats.five_hour_pct),
-                        }}
-                      />
-                    </div>
-                    <span className="usage-pct">
-                      {formatPct(usageStats.five_hour_pct)}
-                    </span>
-                  </div>
-                  {usageStats.five_hour_resets_in && (
-                    <div className="usage-meta">
-                      Resets in {usageStats.five_hour_resets_in}
-                    </div>
-                  )}
-                </div>
-
-                <div className="usage-section">
-                  <div className="usage-label">7-day</div>
-                  <div className="usage-bar-row">
-                    <div className="usage-bar">
-                      <div
-                        className="usage-bar-fill"
-                        style={{
-                          width: `${Math.min(100, usageStats.seven_day_pct)}%`,
-                          background: usageBarColor(usageStats.seven_day_pct),
-                        }}
-                      />
-                    </div>
-                    <span className="usage-pct">
-                      {formatPct(usageStats.seven_day_pct)}
-                    </span>
-                  </div>
-                  {usageStats.seven_day_resets_in && (
-                    <div className="usage-meta">
-                      Resets in {usageStats.seven_day_resets_in}
-                    </div>
-                  )}
-                </div>
-
-                {usageStats.seven_day_opus_pct !== null && (
-                  <div className="usage-section">
-                    <div className="usage-label">7-day Opus</div>
-                    <div className="usage-bar-row">
-                      <div className="usage-bar">
-                        <div
-                          className="usage-bar-fill"
-                          style={{
-                            width: `${Math.min(100, usageStats.seven_day_opus_pct ?? 0)}%`,
-                            background: usageBarColor(usageStats.seven_day_opus_pct ?? 0),
-                          }}
-                        />
-                      </div>
-                      <span className="usage-pct">
-                        {formatPct(usageStats.seven_day_opus_pct ?? 0)}
-                      </span>
-                    </div>
-                    {usageStats.seven_day_opus_resets_in && (
-                      <div className="usage-meta">
-                        Resets in {usageStats.seven_day_opus_resets_in}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {usageStats.seven_day_sonnet_pct !== null && (
-                  <div className="usage-section">
-                    <div className="usage-label">7-day Sonnet</div>
-                    <div className="usage-bar-row">
-                      <div className="usage-bar">
-                        <div
-                          className="usage-bar-fill"
-                          style={{
-                            width: `${Math.min(100, usageStats.seven_day_sonnet_pct ?? 0)}%`,
-                            background: usageBarColor(usageStats.seven_day_sonnet_pct ?? 0),
-                          }}
-                        />
-                      </div>
-                      <span className="usage-pct">
-                        {formatPct(usageStats.seven_day_sonnet_pct ?? 0)}
-                      </span>
-                    </div>
-                    {usageStats.seven_day_sonnet_resets_in && (
-                      <div className="usage-meta">
-                        Resets in {usageStats.seven_day_sonnet_resets_in}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-        </div>
-
-        <div className="sidebar-footer">
-          <button
-            type="button"
-            className={`voice-toggle-row ${voiceMuted ? "muted" : ""}`}
-            onClick={() => handleToggleVoiceMute()}
-            title={voiceMuted ? "Voice muted — click to unmute" : "Voice on — click to mute"}
-            aria-pressed={!voiceMuted}
-          >
-            <span className="voice-toggle-icon" aria-hidden="true">
-              {voiceMuted ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></svg>
-              )}
-            </span>
-            <span className="voice-toggle-label">
-              <span className="voice-toggle-title">Voice output</span>
-              <span className="voice-toggle-state">{voiceMuted ? "Muted" : "On"}</span>
-            </span>
-            <span className={`voice-toggle-switch ${voiceMuted ? "off" : "on"}`} aria-hidden="true">
-              <span className="voice-toggle-switch-thumb" />
-            </span>
-          </button>
-        </div>
       </div>
     );
   }
@@ -4236,20 +4137,116 @@ function App() {
     );
   }
 
+  function renderStatusBar() {
+    const activeCount = activeAgents.filter((a) => a.status === "active").length;
+    const idleCount = activeAgents.filter((a) => a.status === "idle").length;
+
+    function chip(label: string, pct: number | null | undefined) {
+      const v = pct ?? 0;
+      const color = usageBarColor(v);
+      return (
+        <div className="statusbar-usage" title={`${label}: ${formatPct(v)}`}>
+          <span className="statusbar-usage-label">{label}</span>
+          <span className="statusbar-usage-bar">
+            <span
+              className="statusbar-usage-fill"
+              style={{ width: `${Math.min(100, v)}%`, background: color }}
+            />
+          </span>
+          <span className="statusbar-usage-pct">{formatPct(v)}</span>
+        </div>
+      );
+    }
+
+    let weatherText = "Weather unavailable";
+    let weatherIcon = "🌡️";
+    if (weather && weather.error) {
+      weatherText = "Weather offline";
+    } else if (weather && weather.temp_c !== null) {
+      weatherIcon = weather.icon ?? "🌡️";
+      const parts: string[] = [];
+      parts.push(`${weather.temp_c}°C`);
+      if (weather.conditions) parts.push(weather.conditions);
+      if (weather.location) parts.push(weather.location);
+      weatherText = parts.join(" · ");
+    }
+
+    return (
+      <div className="statusbar">
+        <div className="statusbar-section">
+          {usageStats && !usageStats.error ? (
+            <>
+              {chip("5h", usageStats.five_hour_pct)}
+              {chip("7d", usageStats.seven_day_pct)}
+              {usageStats.seven_day_sonnet_pct !== null &&
+                chip("Sonnet", usageStats.seven_day_sonnet_pct)}
+            </>
+          ) : (
+            <span className="statusbar-muted">Usage unavailable</span>
+          )}
+        </div>
+
+        <div className="statusbar-divider" />
+
+        <div className="statusbar-section">
+          <span className="statusbar-agents" title="Active agents (recent activity)">
+            <span className="statusbar-dot statusbar-dot-active" />
+            {activeCount} active
+          </span>
+          <span className="statusbar-agents" title="Idle agents (process running, no recent activity)">
+            <span className="statusbar-dot statusbar-dot-idle" />
+            {idleCount} idle
+          </span>
+        </div>
+
+        <div className="statusbar-divider" />
+
+        <div className="statusbar-section" title={weather?.conditions ?? ""}>
+          <span className="statusbar-weather">
+            <span className="statusbar-weather-icon">{weatherIcon}</span>
+            {weatherText}
+          </span>
+        </div>
+
+        <div className="statusbar-spacer" />
+
+        <button
+          type="button"
+          className={`statusbar-voice ${voiceMuted ? "muted" : ""}`}
+          onClick={() => handleToggleVoiceMute()}
+          title={voiceMuted ? "Voice muted — click to unmute" : "Voice on — click to mute"}
+          aria-pressed={!voiceMuted}
+        >
+          <span className="statusbar-voice-icon" aria-hidden="true">
+            {voiceMuted ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
+            )}
+          </span>
+          Voice {voiceMuted ? "muted" : "on"}
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="app-layout">
-      {renderSidebar()}
-      {renderPromptModal()}
-      <main className="main-content">
-        {currentSection === "agents" && renderAgentsSection()}
-        {currentSection === "security" && renderSecuritySection()}
-        {currentSection === "worktrees" && renderWorktreesSection()}
-        {currentSection === "github" && renderGithubSection()}
-        {currentSection === "knowledge" && renderKnowledgeSection()}
-        {currentSection === "voice" && renderVoiceSection()}
-        {currentSection === "memory" && renderMemorySection()}
-        {currentSection === "config" && renderConfigSection()}
-      </main>
+    <div className="app-shell">
+      <div className="app-layout">
+        {renderSidebar()}
+        {renderPromptModal()}
+        <main className="main-content">
+          {currentSection === "agents" && renderAgentsSection()}
+          {currentSection === "security" && renderSecuritySection()}
+          {currentSection === "worktrees" && renderWorktreesSection()}
+          {currentSection === "github" && renderGithubSection()}
+          {currentSection === "knowledge" && renderKnowledgeSection()}
+          {currentSection === "voice" && renderVoiceSection()}
+          {currentSection === "memory" && renderMemorySection()}
+          {currentSection === "config" && renderConfigSection()}
+        </main>
+      </div>
+      {renderStatusBar()}
     </div>
   );
 }
