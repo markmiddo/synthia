@@ -1798,9 +1798,16 @@ function App() {
     }
 
     function destFromMatched(matched: string): string {
-      // Egress events look like "35.190.46.17:443 (proc claude)" → group by IP only.
-      const m = matched.match(/^([0-9a-fA-F.:]+)/);
-      return m ? m[1] : matched;
+      // Forms produced by egress.rs:
+      //   IPv4 → "35.190.46.17:443 (proc claude)"
+      //   IPv6 → "[2600:1901:0:3084::]:443 (proc claude)"
+      const v6 = matched.match(/^\[([^\]]+)\]/);
+      if (v6) return v6[1];
+      const v4 = matched.match(/^([0-9.]+)/);
+      if (v4) return v4[1];
+      // Fallback: take everything before the first " (".
+      const space = matched.indexOf(" (");
+      return space > 0 ? matched.slice(0, space) : matched;
     }
 
     type EventGroup = { key: string; events: SecurityEvent[]; latest: SecurityEvent };
@@ -1808,8 +1815,10 @@ function App() {
     function groupEvents(evts: SecurityEvent[]): EventGroup[] {
       const groups = new Map<string, SecurityEvent[]>();
       for (const e of evts) {
-        const proc = e.agent_pid?.toString() ?? e.agent_kind ?? "?";
-        const key = `${e.rule}::${proc}::${destFromMatched(e.matched)}`;
+        // Group by agent KIND (e.g. "claude") not pid — different process
+        // instances of the same agent talking to the same host should collapse.
+        const kind = e.agent_kind ?? "?";
+        const key = `${e.rule}::${kind}::${destFromMatched(e.matched)}`;
         const arr = groups.get(key) ?? [];
         arr.push(e);
         groups.set(key, arr);

@@ -95,7 +95,9 @@ const CLOUD_CIDRS: &[(&str, &str)] = &[
     ("2620:11a:a000::/40","Google"),
     ("2a00:1450::/32",    "Google"),
     ("2800:3f0::/32",     "Google"),
+    ("2600:1900::/28",    "Google Cloud"), // GCP IPv6 — covers 2600:1900-190f
     ("2a01:111::/32",     "Microsoft"),
+    ("2603:1000::/24",    "Azure"),
     ("2600:1f00::/24",    "AWS"),
     ("2406:da00::/24",    "AWS"),
     ("2620:107:300f::/48","AWS"),
@@ -399,10 +401,16 @@ fn poll_once(ai_pids: &HashSet<u32>) {
             continue;
         }
         let cwd = read_proc_cwd(c.pid);
+        // Bracket IPv6 addresses so the display + parser can split host:port cleanly.
+        let display_addr = if matches!(parsed_ip, IpAddr::V6(_)) {
+            format!("[{}]:{}", c.peer_ip, c.peer_port)
+        } else {
+            format!("{}:{}", c.peer_ip, c.peer_port)
+        };
         let hit = security::RuleHit {
             rule: "egress-unknown-host",
             severity: security::Severity::Medium,
-            matched: format!("{}:{} (proc {})", c.peer_ip, c.peer_port, c.process),
+            matched: format!("{} (proc {})", display_addr, c.process),
         };
         let raw = serde_json::json!({
             "pid": c.pid,
