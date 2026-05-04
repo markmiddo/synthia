@@ -9,10 +9,17 @@ use std::collections::HashSet;
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use regex::Regex;
+
 use crate::security;
+
+static SS_PID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"pid=(\d+)").expect("SS_PID_RE compiles"));
+static SS_PROC_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\(\("([^"]+)""#).expect("SS_PROC_RE compiles"));
 
 const DEFAULT_ALLOWLIST: &[&str] = &[
     "api.anthropic.com",
@@ -75,7 +82,7 @@ fn resolve_allowlist() -> HashSet<String> {
 }
 
 fn list_ai_pids(self_pid: u32) -> HashSet<u32> {
-    crate::list_ai_processes(self_pid)
+    crate::commands::agents::list_ai_processes(self_pid)
         .into_iter()
         .map(|(pid, _, _, _)| pid)
         .collect()
@@ -105,8 +112,6 @@ fn poll_connections() -> Vec<Connection> {
     };
     let stdout = String::from_utf8_lossy(&out.stdout);
     let mut rows = Vec::new();
-    let pid_re = regex::Regex::new(r#"pid=(\d+)"#).ok();
-    let proc_re = regex::Regex::new(r#"\(\("([^"]+)""#).ok();
     for line in stdout.lines() {
         let toks: Vec<&str> = line.split_whitespace().collect();
         if toks.len() < 5 {
@@ -119,12 +124,12 @@ fn poll_connections() -> Vec<Connection> {
                                  port.parse::<u16>().unwrap_or(0)),
             None => continue,
         };
-        let pid = pid_re.as_ref()
-            .and_then(|r| r.captures(users))
+        let pid = SS_PID_RE
+            .captures(users)
             .and_then(|c| c.get(1))
             .and_then(|m| m.as_str().parse::<u32>().ok());
-        let process = proc_re.as_ref()
-            .and_then(|r| r.captures(users))
+        let process = SS_PROC_RE
+            .captures(users)
             .and_then(|c| c.get(1))
             .map(|m| m.as_str().to_string())
             .unwrap_or_default();
