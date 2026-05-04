@@ -4652,6 +4652,56 @@
 .outcome-ran-info  { background: rgba(125, 211, 252, 0.12); color: #7dd3fc; border: 1px solid rgba(125, 211, 252, 0.30); }
 .outcome-pending   { background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); }
 
+.security-count-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.75rem;
+  background: rgba(148, 163, 184, 0.18);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  letter-spacing: 0.02em;
+}
+
+.security-row-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.claude-btn.small {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.25rem;
+}
+
+.security-occurrences {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 2px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0 0.25rem 0.25rem 0;
+  font-size: 0.78rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.security-occurrences li {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.15rem 0;
+  color: var(--text-muted, #94a3b8);
+}
+.security-occ-ts {
+  font-family: monospace;
+  white-space: nowrap;
+  color: #94a3b8;
+}
+.security-occ-matched {
+  color: #cbd5e1;
+  word-break: break-all;
+}
+
 .neuralguard-install {
   display: flex;
   align-items: center;
