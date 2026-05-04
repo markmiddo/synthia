@@ -25,7 +25,7 @@ use std::process::Command;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use ipnet::Ipv4Net;
+use ipnet::IpNet;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -87,6 +87,18 @@ const CLOUD_CIDRS: &[(&str, &str)] = &[
     ("20.0.0.0/8",        "Azure"),
     ("40.64.0.0/10",      "Azure"),
     ("160.79.104.0/23",   "Anthropic"),
+    // IPv6 — major provider front-end ranges. AI APIs increasingly serve IPv6
+    // via Cloudflare/Google when the client supports it.
+    ("2606:4700::/32",    "Cloudflare"),
+    ("2400:cb00::/32",    "Cloudflare"),
+    ("2607:f8b0::/32",    "Google"),
+    ("2620:11a:a000::/40","Google"),
+    ("2a00:1450::/32",    "Google"),
+    ("2800:3f0::/32",     "Google"),
+    ("2a01:111::/32",     "Microsoft"),
+    ("2600:1f00::/24",    "AWS"),
+    ("2406:da00::/24",    "AWS"),
+    ("2620:107:300f::/48","AWS"),
 ];
 
 /// PTR-record suffixes considered trustworthy. Reverse DNS is informational
@@ -230,16 +242,12 @@ fn resolved_allowlist() -> HashSet<IpAddr> {
 }
 
 /// True if `ip` falls within any of the static `CLOUD_CIDRS`. Returns the
-/// provider label on hit. IPv6 currently never matches (no v6 ranges in the
-/// list).
+/// provider label on hit. Handles both IPv4 and IPv6 (front-end fleets serve
+/// AI APIs over both stacks).
 fn cidr_match(ip: IpAddr) -> Option<&'static str> {
-    let v4 = match ip {
-        IpAddr::V4(v4) => v4,
-        IpAddr::V6(_) => return None,
-    };
     for (cidr, label) in CLOUD_CIDRS {
-        if let Ok(net) = cidr.parse::<Ipv4Net>() {
-            if net.contains(&v4) {
+        if let Ok(net) = cidr.parse::<IpNet>() {
+            if net.contains(&ip) {
                 return Some(label);
             }
         }
@@ -437,7 +445,29 @@ pub fn spawn_watcher() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn cidr_matches_cloudflare_v6() {
+        // 2606:4700::6812:15f6 is in Cloudflare's 2606:4700::/32.
+        let ip = IpAddr::V6("2606:4700::6812:15f6".parse::<Ipv6Addr>().unwrap());
+        let label = cidr_match(ip);
+        assert!(
+            matches!(label, Some("Cloudflare")),
+            "expected Cloudflare label, got {label:?}"
+        );
+    }
+
+    #[test]
+    fn cidr_matches_google_v6() {
+        // 2607:f8b0:: is Google's primary IPv6 range.
+        let ip = IpAddr::V6("2607:f8b0:4001:c00::1".parse::<Ipv6Addr>().unwrap());
+        let label = cidr_match(ip);
+        assert!(
+            matches!(label, Some(l) if l.starts_with("Google")),
+            "expected Google* label, got {label:?}"
+        );
+    }
 
     #[test]
     fn cidr_matches_google_range() {
