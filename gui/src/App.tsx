@@ -4216,6 +4216,7 @@ function App() {
     return (
       <div className="statusbar">
         <div className="statusbar-section">
+          <span className="statusbar-section-icon" title="Claude usage">✨</span>
           {usageStats && !usageStats.error ? (
             <>
               {chip("5h", usageStats.five_hour_pct)}
@@ -4231,6 +4232,7 @@ function App() {
         <div className="statusbar-divider" />
 
         <div className="statusbar-section">
+          <span className="statusbar-section-icon" title="AI agents">🤖</span>
           <span className="statusbar-agents" title="Active agents (recent activity)">
             <span className="statusbar-dot statusbar-dot-active" />
             {activeCount} active

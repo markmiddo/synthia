@@ -987,6 +987,12 @@
   flex: 0 0 auto;
 }
 
+.statusbar-section-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
 .statusbar-spacer { flex: 1; }
 
 .statusbar-muted { color: var(--text-muted, #94a3b8); }
