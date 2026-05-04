@@ -19,24 +19,33 @@ The user has voice input/output enabled. Keep responses conversational and speak
 
 ## Project Overview
 
-Synthia is a voice assistant for Linux with:
+Synthia is a voice assistant + dev workstation companion for Linux with:
 - Speech-to-text (Google Cloud or local Whisper)
 - Text-to-speech (Google Cloud or local Piper)
 - AI assistant (Claude API or local Ollama)
 - Hotkey activation (Right Ctrl for dictation, Right Alt for assistant)
 - Telegram remote access
 - TUI dashboard (Textual)
+- Tauri desktop GUI (sidebar: agents/worktrees/knowledge/security/voice/memory/github/config)
 - Clipboard monitoring
 - Memory system integration
+- AI Security AI security layer (intercepts risky tool calls from local AI agents)
 
 ## Key Directories
 
 - `src/synthia/` - Python core application
 - `src/synthia/remote/` - Telegram bot, inbox, remote access
-- `src/synthia/hooks/` - Claude Code integration hooks
+- `src/synthia/hooks/` - Claude Code integration hooks (incl. `security_gate.py`)
 - `gui/` - Tauri desktop GUI (Rust + React)
-- `tests/` - pytest test suite (298 tests)
-- `docs/` - Documentation and PRDs
+  - `gui/src-tauri/src/lib.rs` - thin orchestrator (~470 lines)
+  - `gui/src-tauri/src/commands/*.rs` - IPC handlers grouped by domain (15 modules)
+  - `gui/src-tauri/src/error.rs` - typed `AppError` (manual Serialize preserves React wire format)
+  - `gui/src-tauri/src/state.rs` - Tauri-managed `AppState`
+  - `gui/src-tauri/src/paths.rs` - canonicalize-checked filesystem helpers
+  - `gui/src-tauri/src/security.rs` + `egress.rs` - AI Security rules + egress filter
+  - `gui/src-tauri/src/yaml_writer.rs` - comment-preserving config writers
+- `tests/` - pytest test suite (593 tests)
+- `docs/` - Documentation, specs, plans
 
 ## Brand
 
@@ -79,15 +88,26 @@ Types: `feat`, `fix`, `refactor`, `docs`, `style`, `test`, `chore`, `ci`
 
 ## Quality Gates
 
-Run all three before committing:
+### Python (always)
 
 ```bash
 source venv/bin/activate
 black --check src/ tests/       # Formatting
 isort --check src/ tests/       # Import ordering
 mypy src/synthia/ --ignore-missing-imports  # Type checking
-pytest tests/ --tb=short -q     # Tests (298 tests)
+pytest tests/ --tb=short -q     # Tests (593 tests)
 ```
+
+### Rust GUI backend (when touching `gui/src-tauri/`)
+
+```bash
+cd gui/src-tauri
+cargo build --release
+cargo clippy --all-targets -- -D warnings   # zero warnings policy
+cargo test --lib                            # 35 tests
+```
+
+The Rust side maintains a strict clippy gate. New code should not introduce warnings.
 
 ## Running Tests
 
