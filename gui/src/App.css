@@ -5104,3 +5104,170 @@
 .usage-meta {
   font-size: 0.7rem; color: var(--text-muted, #888); margin-top: 0.15rem;
 }
+
+/* ── Journal Panel ────────────────────────────────────────── */
+
+.journal-panel {
+  padding: 16px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.journal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.journal-header h3 {
+  margin: 0;
+  font-size: 1.2em;
+}
+
+.journal-count {
+  color: #666;
+  font-size: 0.9em;
+}
+
+.journal-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.filter-group {
+  display: flex;
+  gap: 4px;
+}
+
+.filter-group button {
+  padding: 4px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f5f5f5;
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.filter-group button.active {
+  background: #007acc;
+  color: white;
+  border-color: #007acc;
+}
+
+.journal-loading,
+.journal-empty {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+}
+
+.journal-empty-hint {
+  font-size: 0.9em;
+  margin-top: 8px;
+}
+
+.journal-day {
+  margin-bottom: 24px;
+}
+
+.journal-day-header {
+  font-size: 1em;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.journal-entry-card {
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.journal-entry-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  font-size: 0.85em;
+}
+
+.journal-time {
+  color: #666;
+  font-family: monospace;
+}
+
+.journal-agent {
+  font-weight: 600;
+}
+
+.journal-role {
+  color: #888;
+  font-size: 0.9em;
+}
+
+.journal-project {
+  color: #007acc;
+}
+
+.journal-branch {
+  color: #666;
+  font-size: 0.9em;
+}
+
+.journal-task {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 0.95em;
+  line-height: 1.4;
+}
+
+.journal-check {
+  color: #28a745;
+  font-weight: bold;
+}
+
+.journal-files {
+  margin-top: 8px;
+  font-size: 0.85em;
+  color: #666;
+  font-family: monospace;
+}
+
+.journal-activity {
+  margin-top: 4px;
+  font-size: 0.85em;
+  color: #888;
+  font-style: italic;
+}
+
+/* Agents tab navigation */
+.agents-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #ddd;
+  margin-bottom: 16px;
+}
+
+.agents-tabs button {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.agents-tabs button.active {
+  border-bottom-color: #007acc;
+  color: #007acc;
+  font-weight: 600;
+}
