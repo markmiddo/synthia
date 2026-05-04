@@ -55,6 +55,24 @@ pub struct WorktreesYaml {
     pub repos: Vec<String>,
 }
 
+/// User-managed egress allowlist, read from
+/// `~/.config/synthia/security/allowlist.yaml`. `hosts` are resolved to IPs
+/// at allowlist-load time (1h TTL); `ips` are matched literally as
+/// `IpAddr::parse`-compatible strings.
+///
+/// The egress module reads this file via its own private struct (kept private
+/// because cache/lifecycle concerns belong inside `egress.rs`). This public
+/// type exists for any future direct consumer (e.g. an allowlist editor UI)
+/// and round-trip-tests the on-disk shape.
+#[allow(dead_code)] // public API for future allowlist-editor command
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UserAllowlist {
+    #[serde(default)]
+    pub hosts: Vec<String>,
+    #[serde(default)]
+    pub ips: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +120,28 @@ mod tests {
     fn worktrees_handles_empty() {
         let cfg: WorktreesYaml = serde_yaml::from_str("{}").unwrap();
         assert!(cfg.repos.is_empty());
+    }
+
+    #[test]
+    fn user_allowlist_round_trip() {
+        let original = UserAllowlist {
+            hosts: vec!["api.example.com".to_string(), "internal.local".to_string()],
+            ips: vec!["10.0.0.42".to_string(), "192.0.2.5".to_string()],
+        };
+        let yaml = serde_yaml::to_string(&original).unwrap();
+        let parsed: UserAllowlist = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed.hosts, original.hosts);
+        assert_eq!(parsed.ips, original.ips);
+
+        // Empty file default-fills both fields.
+        let empty: UserAllowlist = serde_yaml::from_str("{}").unwrap();
+        assert!(empty.hosts.is_empty());
+        assert!(empty.ips.is_empty());
+
+        // Either field can be absent.
+        let hosts_only: UserAllowlist =
+            serde_yaml::from_str("hosts:\n  - foo.com\n").unwrap();
+        assert_eq!(hosts_only.hosts, vec!["foo.com".to_string()]);
+        assert!(hosts_only.ips.is_empty());
     }
 }
