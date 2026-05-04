@@ -270,7 +270,7 @@ const BASH_RULES: &[BinRule] = &[
     ("history-tamper", Severity::Medium, &["history"], Some(r"-c\b")),
 ];
 
-const STMT_RULES: &[(&'static str, Severity, &'static str)] = &[
+const STMT_RULES: &[(&str, Severity, &str)] = &[
     ("pipe-to-shell", Severity::Critical, r"(?:^|[\s;&|])(curl|wget|fetch)\b[^|]*\|\s*(sh|bash|zsh|fish)\b"),
     ("base64-exec", Severity::Critical, r"\bbase64\s+(-d|--decode)\b[^|]*\|\s*(sh|bash|python|node)\b"),
     ("shell-rc-tamper", Severity::High, r">>?\s*~?/?\.(bashrc|zshrc|profile|bash_profile|zprofile)\b"),
@@ -282,7 +282,7 @@ fn evaluate_bash(cmd: &str) -> Vec<RuleHit> {
     let mut hits: Vec<RuleHit> = Vec::new();
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
 
-    let mut emit = |rule: &'static str, sev: Severity, matched: String,
+    let emit = |rule: &'static str, sev: Severity, matched: String,
                     seen: &mut std::collections::HashSet<(String, String)>,
                     hits: &mut Vec<RuleHit>| {
         let key = (rule.to_string(), matched.clone());
@@ -379,39 +379,8 @@ fn evaluate_fetch(url: &str) -> Vec<RuleHit> {
     hits
 }
 
-/// Scan a string of text (e.g. tool result) for prompt-injection signatures.
-pub fn evaluate_injection(text: &str) -> Vec<RuleHit> {
-    let mut hits = Vec::new();
-    let lower = text.to_lowercase();
-    if regex_match(&lower, r"ignore\s+(all\s+)?previous\s+instructions") {
-        hits.push(RuleHit { rule: "injection-ignore-previous", severity: Severity::High, matched: "ignore previous instructions".to_string() });
-    }
-    if regex_match(&lower, r"you\s+are\s+now\s+(a\s+)?[a-z\s]{0,30}(jailbreak|developer\s*mode|dan)") {
-        hits.push(RuleHit { rule: "injection-roleplay", severity: Severity::High, matched: "roleplay/jailbreak".to_string() });
-    }
-    if regex_match(text, r"\[SYSTEM\]|<system>|###\s*system\s*###") {
-        hits.push(RuleHit { rule: "injection-system-marker", severity: Severity::Medium, matched: "system marker".to_string() });
-    }
-    // Hidden unicode tag/zero-width
-    if text.chars().any(|c| matches!(c as u32, 0x200B..=0x200F | 0xE0000..=0xE007F)) {
-        hits.push(RuleHit { rule: "injection-hidden-unicode", severity: Severity::High, matched: "zero-width chars".to_string() });
-    }
-    hits
-}
-
 fn regex_match(text: &str, pattern: &str) -> bool {
     regex::Regex::new(pattern).map(|r| r.is_match(text)).unwrap_or(false)
-}
-
-fn match_first(text: &str, patterns: &[&str]) -> Option<String> {
-    for p in patterns {
-        if let Ok(r) = regex::Regex::new(p) {
-            if let Some(m) = r.find(text) {
-                return Some(m.as_str().to_string());
-            }
-        }
-    }
-    None
 }
 
 fn random_id() -> String {
@@ -422,6 +391,7 @@ fn random_id() -> String {
     format!("evt_{:x}", nanos)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn make_event(
     hit: RuleHit,
     tool: &str,
@@ -491,11 +461,10 @@ pub fn recent_max_severity_for_session(session_id: &str, scan_limit: usize) -> O
     let mut max_sev: Option<Severity> = None;
     for line in content.lines().rev().take(scan_limit) {
         if let Ok(e) = serde_json::from_str::<SecurityEvent>(line) {
-            if e.session_id.as_deref() == Some(session_id) {
-                if max_sev.map(|m| e.severity > m).unwrap_or(true) {
+            if e.session_id.as_deref() == Some(session_id)
+                && max_sev.map(|m| e.severity > m).unwrap_or(true) {
                     max_sev = Some(e.severity);
                 }
-            }
         }
     }
     max_sev
