@@ -963,6 +963,102 @@ pub fn toggle_plugin(name: String, enabled: bool) -> AppResult<String> {
     Ok("Plugin toggled".to_string())
 }
 
+use crate::commands::journal::{JournalEntry, add_journal_entry};
+
+/// Check if all todos in a Claude session are completed and journal it.
+fn check_and_journal_completed_tasks(
+    snap: &SessionSnapshot,
+    cwd: &str,
+    branch: Option<String>,
+    kind: &str,
+) {
+    let session_id = match &snap.session_id {
+        Some(id) => id.clone(),
+        None => return,
+    };
+
+    let todos_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join("todos");
+
+    let _pattern = format!("{}-agent-*.json", session_id);
+    let mut all_completed = false;
+    let mut task_summary = String::new();
+
+    let Ok(entries) = std::fs::read_dir(&todos_dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(&format!("{}-agent-", session_id)) {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let Some(todos) = data.as_array() else {
+            continue;
+        };
+
+        let total = todos.len();
+        if total == 0 {
+            continue;
+        }
+
+        let completed = todos
+            .iter()
+            .filter(|t| {
+                t.get("status")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s == "completed")
+                    .unwrap_or(false)
+            })
+            .count();
+
+        if completed == total {
+            all_completed = true;
+            let summaries: Vec<String> = todos
+                .iter()
+                .filter_map(|t| t.get("content").and_then(|c| c.as_str()).map(|s| s.to_string()))
+                .collect();
+            if !summaries.is_empty() {
+                task_summary = summaries.join("; ");
+            }
+        }
+    }
+
+    if all_completed && !task_summary.is_empty() {
+        let entry = JournalEntry {
+            timestamp: chrono::Utc::now(),
+            agent_name: agent_name_for(&session_id).to_string(),
+            agent_kind: kind.to_string(),
+            agent_role: classify_role(snap).0.to_string(),
+            project_name: std::path::Path::new(cwd)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string(),
+            branch,
+            task_summary,
+            files_touched: snap.ext_counts.keys().take(10).cloned().collect(),
+            activity: snap.activity.clone(),
+            session_id: Some(session_id),
+            trigger: "task_list_completed".to_string(),
+        };
+
+        // Best-effort: don't crash if journaling fails
+        let _ = add_journal_entry(entry);
+    }
+}
+
 #[tauri::command]
 pub fn list_active_agents() -> Vec<AgentInfo> {
     let self_pid = std::process::id();
@@ -1094,6 +1190,9 @@ pub fn list_active_agents() -> Vec<AgentInfo> {
         let topic = snap.first_user_msg.as_deref().map(topic_from_first_msg);
         let name_seed = snap.session_id.clone().unwrap_or_else(|| format!("pid:{}", pid));
         let name = agent_name_for(&name_seed).to_string();
+
+        // Journal completed tasks for all agent types
+        check_and_journal_completed_tasks(&snap, &cwd, branch.clone(), kind);
 
         agents.push(AgentInfo {
             pid,
