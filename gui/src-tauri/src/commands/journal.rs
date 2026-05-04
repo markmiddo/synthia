@@ -8,7 +8,19 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use crate::error::AppResult;
+
+/// In-memory dedupe cache: session_id → last journal timestamp.
+/// Prevents writing the same completed task list multiple times.
+use std::sync::LazyLock;
+
+static JOURNAL_CACHE: LazyLock<Mutex<HashMap<String, DateTime<Utc>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const DEDUPE_WINDOW_MINUTES: i64 = 5;
 
 /// A single journal entry — written when an agent completes a task list.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -105,9 +117,36 @@ fn prune_old_journals() -> AppResult<()> {
     Ok(())
 }
 
+/// Check whether this session/task combination has been journaled recently.
+/// Returns true if we should proceed with journaling.
+fn should_journal(session_id: &str) -> bool {
+    let now = Utc::now();
+    let mut cache = match JOURNAL_CACHE.lock() {
+        Ok(g) => g,
+        Err(_) => return true, // Poisoned — best effort, allow through
+    };
+
+    if let Some(&last_time) = cache.get(session_id) {
+        let elapsed = now - last_time;
+        if elapsed.num_minutes() < DEDUPE_WINDOW_MINUTES {
+            return false; // Recently journaled, skip
+        }
+    }
+
+    cache.insert(session_id.to_string(), now);
+    true
+}
+
 /// Append a new entry to today's journal file.
+/// Skips if the same session was journaled within the dedupe window.
 #[tauri::command]
 pub fn add_journal_entry(entry: JournalEntry) -> AppResult<()> {
+    if let Some(ref sid) = entry.session_id {
+        if !should_journal(sid) {
+            return Ok(());
+        }
+    }
+
     let today = Utc::now();
     let mut journal = load_day_journal(&today)?;
     journal.entries.push(entry);
