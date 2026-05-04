@@ -1051,6 +1051,44 @@
   line-height: 1;
 }
 
+.statusbar-news {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.75rem;
+  max-width: 460px;
+  min-width: 0;
+  overflow: hidden;
+}
+.statusbar-news:hover .statusbar-news-text {
+  color: #06b6d4;
+  text-decoration: underline;
+}
+.statusbar-news-icon {
+  font-size: 0.9rem;
+  flex: 0 0 auto;
+}
+.statusbar-news-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  max-width: 420px;
+}
+.statusbar-news-text.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+.statusbar-news-text.out {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
 .statusbar-voice {
   display: flex;
   align-items: center;

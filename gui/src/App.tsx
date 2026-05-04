@@ -72,6 +72,13 @@ interface WeatherSnapshot {
   error: string | null;
 }
 
+interface NewsItem {
+  title: string;
+  link: string;
+  published: string | null;
+  source: string;
+}
+
 interface AgentInfo {
   pid: number;
   kind: string;
@@ -453,6 +460,9 @@ function App() {
   const [securityTabAutoChosen, setSecurityTabAutoChosen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
+  const [news, setNews] = useState<NewsItem[]>([]);
+  const [newsIndex, setNewsIndex] = useState(0);
+  const [newsFade, setNewsFade] = useState(true);
   const [neuralguardStatus, setNeuralguardStatus] = useState<{
     installed: boolean;
     events_path: string;
@@ -705,6 +715,38 @@ function App() {
     loadActiveAgents();
     return () => clearInterval(id);
   }, []);
+
+  // AI news feed — refresh every 15 minutes.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const items = await invoke<NewsItem[]>("get_ai_news");
+        if (!cancelled) setNews(items);
+      } catch (err) {
+        console.error("get_ai_news failed", err);
+      }
+    }
+    load();
+    const id = setInterval(load, 15 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Rotate news headline every 8s with a fade transition.
+  useEffect(() => {
+    if (news.length <= 1) return;
+    const id = setInterval(() => {
+      setNewsFade(false);
+      setTimeout(() => {
+        setNewsIndex((i) => (i + 1) % news.length);
+        setNewsFade(true);
+      }, 250);
+    }, 8000);
+    return () => clearInterval(id);
+  }, [news.length]);
 
   async function loadPendingPrompts() {
     try {
@@ -4207,6 +4249,27 @@ function App() {
             {weatherText}
           </span>
         </div>
+
+        <div className="statusbar-divider" />
+
+        {news.length > 0 && (
+          <button
+            type="button"
+            className="statusbar-news"
+            title={`${news[newsIndex].title} — click to open`}
+            onClick={() => {
+              const link = news[newsIndex]?.link;
+              if (link) {
+                openUrl(link).catch((e) => console.error("openUrl failed", e));
+              }
+            }}
+          >
+            <span className="statusbar-news-icon">📰</span>
+            <span className={`statusbar-news-text ${newsFade ? "in" : "out"}`}>
+              {news[newsIndex]?.title ?? ""}
+            </span>
+          </button>
+        )}
 
         <div className="statusbar-spacer" />
 
