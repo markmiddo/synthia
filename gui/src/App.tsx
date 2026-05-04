@@ -2059,6 +2059,7 @@ function App() {
         <div className="sidebar-header">
           <div className="sidebar-logo">SYNTHIA</div>
         </div>
+        <div className="sidebar-scroll">
         <nav className="sidebar-nav">
           <button
             className={`nav-item ${currentSection === "agents" ? "active" : ""}`}
@@ -2234,6 +2235,7 @@ function App() {
             )}
           </div>
         )}
+        </div>
 
         <div className="sidebar-footer">
           <button
