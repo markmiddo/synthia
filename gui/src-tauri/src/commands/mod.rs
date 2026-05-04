@@ -7,6 +7,7 @@ pub mod github;
 pub mod history;
 pub mod hotkeys;
 pub mod inbox;
+pub mod journal;
 pub mod lifecycle;
 pub mod memory;
 pub mod neuralguard;
