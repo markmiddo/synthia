@@ -967,31 +967,99 @@
   text-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
 }
 
-.voice-toggle {
-  background: transparent;
-  border: 1px solid rgba(6, 182, 212, 0.3);
-  color: #06b6d4;
-  font-size: 1.1rem;
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 0.4rem;
+.sidebar-footer {
+  border-top: 1px solid rgba(6, 182, 212, 0.1);
+  padding: 0.6rem;
+  margin-top: auto;
+}
+
+.voice-toggle-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  color: #cbd5e1;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  text-align: left;
+}
+.voice-toggle-row:hover {
+  background: rgba(6, 182, 212, 0.06);
+  border-color: rgba(6, 182, 212, 0.25);
+}
+.voice-toggle-row.muted {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.18);
+}
+.voice-toggle-row.muted:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.voice-toggle-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: #06b6d4;
+  flex: 0 0 auto;
 }
-.voice-toggle:hover {
-  background: rgba(6, 182, 212, 0.1);
-  border-color: rgba(6, 182, 212, 0.6);
-}
-.voice-toggle.muted {
-  border-color: rgba(239, 68, 68, 0.5);
+.voice-toggle-row.muted .voice-toggle-icon {
   color: #ef4444;
-  background: rgba(239, 68, 68, 0.08);
 }
-.voice-toggle.muted:hover {
-  background: rgba(239, 68, 68, 0.15);
+
+.voice-toggle-label {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.voice-toggle-title {
+  font-size: 0.78rem;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+.voice-toggle-state {
+  font-size: 0.7rem;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 0.05rem;
+}
+.voice-toggle-row.muted .voice-toggle-state {
+  color: #f87171;
+}
+
+.voice-toggle-switch {
+  width: 2.1rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+  position: relative;
+  flex: 0 0 auto;
+  transition: background 0.18s ease;
+}
+.voice-toggle-switch.on {
+  background: rgba(6, 182, 212, 0.55);
+}
+.voice-toggle-switch.off {
+  background: rgba(239, 68, 68, 0.4);
+}
+.voice-toggle-switch-thumb {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: #f8fafc;
+  transition: transform 0.18s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.voice-toggle-switch.on .voice-toggle-switch-thumb {
+  transform: translateX(0.95rem);
 }
 
 .sidebar-nav {
