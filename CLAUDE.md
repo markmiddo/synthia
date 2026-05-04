@@ -29,7 +29,7 @@ Synthia is a voice assistant + dev workstation companion for Linux with:
 - Tauri desktop GUI (sidebar: agents/worktrees/knowledge/security/voice/memory/github/config)
 - Clipboard monitoring
 - Memory system integration
-- NeuralGuard AI security layer (intercepts risky tool calls from local AI agents)
+- AI Security AI security layer (intercepts risky tool calls from local AI agents)
 
 ## Key Directories
 
@@ -42,7 +42,7 @@ Synthia is a voice assistant + dev workstation companion for Linux with:
   - `gui/src-tauri/src/error.rs` - typed `AppError` (manual Serialize preserves React wire format)
   - `gui/src-tauri/src/state.rs` - Tauri-managed `AppState`
   - `gui/src-tauri/src/paths.rs` - canonicalize-checked filesystem helpers
-  - `gui/src-tauri/src/security.rs` + `egress.rs` - NeuralGuard rules + egress filter
+  - `gui/src-tauri/src/security.rs` + `egress.rs` - AI Security rules + egress filter
   - `gui/src-tauri/src/yaml_writer.rs` - comment-preserving config writers
 - `tests/` - pytest test suite (593 tests)
 - `docs/` - Documentation, specs, plans

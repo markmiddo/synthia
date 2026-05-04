@@ -95,7 +95,7 @@ SYNTHIA includes a native desktop application built with Tauri 2 (Rust + React).
 - **Agents** — Live monitor of running Claude Code / Codex / Kimi / Kilo CLI agents. See PIDs, CPUs, working dirs, kill misbehaving ones
 - **Worktrees** — Track git worktrees across repos with progress bars, issue linking, and Claude session resume
 - **Knowledge** — Markdown notes browser with preview, folder navigation, pinned + recent lists
-- **Security** — NeuralGuard AI security layer. Real-time prompt/tool review with rule + LLM classifier, approval queue, event log
+- **Security** — AI Security AI security layer. Real-time prompt/tool review with rule + LLM classifier, approval queue, event log
 - **Voice** — History of past transcriptions, copy + resend, mute toggle, recording overlay
 - **Memory** — Browse, search, edit, delete persistent memory entries by category
 - **GitHub** — Pull and triage issues from configured repos
@@ -344,7 +344,7 @@ telegram_allowed_users: [123456789]     # Your Telegram user ID
 
 ---
 
-## NeuralGuard — AI Security Layer
+## AI Security — AI Security Layer
 
 A defensive security layer that intercepts tool calls from local AI coding agents (Claude Code, Codex, Kimi, Kilo) and blocks/asks-for-approval on risky operations *before* they execute. Phase 1 is rules-based, Phase 2 adds LLM classification.
 
@@ -381,7 +381,7 @@ Drop the security gate into Claude Code's hook config:
 }
 ```
 
-Optional policy file at `~/.config/synthia/security/policy.yaml` — see `docs/neuralguard-policy.example.yaml`.
+Optional policy file at `~/.config/synthia/security/policy.yaml` — see `docs/security-policy.example.yaml`.
 
 ### GUI integration
 
