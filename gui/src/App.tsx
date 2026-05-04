@@ -442,6 +442,8 @@ function App() {
   const [voiceMuted, setVoiceMuted] = useState(false);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
   const [securityFilter, setSecurityFilter] = useState<"all" | "high+">("all");
+  const [securityTabAutoChosen, setSecurityTabAutoChosen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [neuralguardStatus, setNeuralguardStatus] = useState<{
     installed: boolean;
     events_path: string;
@@ -643,6 +645,16 @@ function App() {
     const id = setInterval(loadSecurityEvents, 4000);
     return () => clearInterval(id);
   }, [currentSection]);
+
+  // Smart default tab: auto-pick "high+" if any HIGH/CRITICAL exists on first event load.
+  useEffect(() => {
+    if (securityTabAutoChosen || securityEvents.length === 0) return;
+    const hasHigh = securityEvents.some(
+      (e) => e.severity === "high" || e.severity === "critical",
+    );
+    setSecurityFilter(hasHigh ? "high+" : "all");
+    setSecurityTabAutoChosen(true);
+  }, [securityEvents, securityTabAutoChosen]);
 
   // Pending security prompts poll (runs always so modal can interrupt anywhere)
   useEffect(() => {
@@ -1773,7 +1785,6 @@ function App() {
     const filtered = securityEvents.filter((e) =>
       securityFilter === "all" ? true : sevRank[e.severity] >= 3,
     );
-    const sortedDesc = [...filtered].reverse();
     const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
     for (const e of securityEvents) counts[e.severity] = (counts[e.severity] || 0) + 1;
 
@@ -1783,6 +1794,55 @@ function App() {
         return d.toLocaleString();
       } catch {
         return iso;
+      }
+    }
+
+    function destFromMatched(matched: string): string {
+      // Forms produced by egress.rs:
+      //   IPv4 → "35.190.46.17:443 (proc claude)"
+      //   IPv6 → "[2600:1901:0:3084::]:443 (proc claude)"
+      const v6 = matched.match(/^\[([^\]]+)\]/);
+      if (v6) return v6[1];
+      const v4 = matched.match(/^([0-9.]+)/);
+      if (v4) return v4[1];
+      // Fallback: take everything before the first " (".
+      const space = matched.indexOf(" (");
+      return space > 0 ? matched.slice(0, space) : matched;
+    }
+
+    type EventGroup = { key: string; events: SecurityEvent[]; latest: SecurityEvent };
+
+    function groupEvents(evts: SecurityEvent[]): EventGroup[] {
+      const groups = new Map<string, SecurityEvent[]>();
+      for (const e of evts) {
+        // Group by agent KIND (e.g. "claude") not pid — different process
+        // instances of the same agent talking to the same host should collapse.
+        const kind = e.agent_kind ?? "?";
+        const key = `${e.rule}::${kind}::${destFromMatched(e.matched)}`;
+        const arr = groups.get(key) ?? [];
+        arr.push(e);
+        groups.set(key, arr);
+      }
+      return [...groups.entries()]
+        .map(([key, arr]) => {
+          const sorted = arr.sort((a, b) => b.ts.localeCompare(a.ts));
+          return { key, events: sorted, latest: sorted[0] };
+        })
+        .sort((a, b) => b.latest.ts.localeCompare(a.latest.ts));
+    }
+
+    const groups = groupEvents(filtered);
+
+    async function handleAllowHost(evt: SecurityEvent) {
+      const host = destFromMatched(evt.matched);
+      try {
+        await invoke("add_to_allowlist", { host });
+        // Optimistically remove this group's events from view.
+        setSecurityEvents((prev) =>
+          prev.filter((e) => destFromMatched(e.matched) !== host),
+        );
+      } catch (err) {
+        console.error("add_to_allowlist failed", err);
       }
     }
 
@@ -1888,16 +1948,19 @@ function App() {
         </div>
 
         <div className="security-feed">
-          {sortedDesc.length === 0 ? (
+          {groups.length === 0 ? (
             <div className="security-empty">
               No security events. Run an agent and any flagged tool calls will appear here.
             </div>
           ) : (
-            sortedDesc.map((e) => {
+            groups.map((g) => {
+              const e = g.latest;
               const info = RULE_INFO[e.rule];
               const outcome = eventOutcome(e.decision, e.actor);
+              const isOpen = !!expandedGroups[g.key];
+              const isEgress = e.rule === "egress-unknown-host";
               return (
-                <div key={e.id} className={`security-row severity-${e.severity}`}>
+                <div key={g.key} className={`security-row severity-${e.severity}`}>
                   <div className="security-row-head">
                     <span className={`severity-pill sev-${e.severity}`}>
                       {e.severity.toUpperCase()}
@@ -1905,6 +1968,14 @@ function App() {
                     <span className="security-rule">
                       {info ? info.title : e.rule}
                     </span>
+                    {g.events.length > 1 && (
+                      <span
+                        className="security-count-badge"
+                        title={`${g.events.length} events grouped — click to expand`}
+                      >
+                        ×{g.events.length}
+                      </span>
+                    )}
                     <span className={`outcome-pill outcome-${outcome.tone}`}>
                       {outcome.label}
                     </span>
@@ -1926,6 +1997,40 @@ function App() {
                     {e.agent_cwd && <span title={e.agent_cwd}>{e.agent_cwd.split("/").slice(-2).join("/")}</span>}
                     <span>· {e.actor} → {e.decision}</span>
                   </div>
+                  <div className="security-row-actions">
+                    {isEgress && (
+                      <button
+                        className="claude-btn small"
+                        onClick={() => handleAllowHost(e)}
+                        title="Add this host to your egress allowlist"
+                      >
+                        Allow host
+                      </button>
+                    )}
+                    {g.events.length > 1 && (
+                      <button
+                        className="claude-btn small"
+                        onClick={() =>
+                          setExpandedGroups((prev) => ({
+                            ...prev,
+                            [g.key]: !prev[g.key],
+                          }))
+                        }
+                      >
+                        {isOpen ? "Collapse" : `Show ${g.events.length} occurrences`}
+                      </button>
+                    )}
+                  </div>
+                  {isOpen && g.events.length > 1 && (
+                    <ul className="security-occurrences">
+                      {g.events.map((occ) => (
+                        <li key={occ.id}>
+                          <span className="security-occ-ts">{formatTs(occ.ts)}</span>
+                          <span className="security-occ-matched">{occ.matched}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               );
             })

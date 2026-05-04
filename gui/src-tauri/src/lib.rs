@@ -438,6 +438,7 @@ pub fn run() {
             commands::neuralguard::uninstall_neuralguard_hooks,
             commands::neuralguard::get_egress_enabled,
             commands::neuralguard::set_egress_enabled,
+            commands::neuralguard::add_to_allowlist,
             commands::agents::list_hooks,
             commands::agents::list_plugins,
             commands::agents::toggle_plugin,

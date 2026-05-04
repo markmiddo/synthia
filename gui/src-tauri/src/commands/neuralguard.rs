@@ -24,6 +24,39 @@ fn pending_prompts_dir() -> PathBuf {
     PathBuf::from(home).join(".config/synthia/security/pending-prompts")
 }
 
+fn security_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".config/synthia/security")
+}
+
+/// Validate a hostname for the user allowlist. Rejects empty, slashes,
+/// whitespace, and overlong (DNS RFC 1035 cap is 253 chars).
+fn validate_host(host: &str) -> AppResult<()> {
+    if host.is_empty()
+        || host.contains('/')
+        || host.contains(' ')
+        || host.contains('\t')
+        || host.contains('\n')
+        || host.len() > 253
+    {
+        return Err(AppError::Validation(format!("bad host: {host}")));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn add_to_allowlist(host: String) -> AppResult<()> {
+    validate_host(&host)?;
+    let dir = security_dir();
+    let path = dir.join("allowlist.yaml");
+    fs::create_dir_all(&dir)?;
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let new_content = crate::yaml_writer::append_allowlist_host(&existing, &host);
+    fs::write(&path, new_content)?;
+    crate::egress::invalidate_allowlist_cache();
+    Ok(())
+}
+
 fn prompt_responses_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/synthia/security/prompt-responses")
@@ -184,6 +217,46 @@ pub fn install_neuralguard_hooks() -> AppResult<String> {
     fs::write(&settings, serialized)?;
     security::ensure_dir().map_err(|e| AppError::Io(e.to_string()))?;
     Ok("NeuralGuard hooks installed".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_to_allowlist_rejects_bad_host() {
+        // Empty.
+        assert!(matches!(
+            validate_host(""),
+            Err(AppError::Validation(_))
+        ));
+        // Slash (path traversal / URL leak).
+        assert!(matches!(
+            validate_host("foo/bar"),
+            Err(AppError::Validation(_))
+        ));
+        // Whitespace.
+        assert!(matches!(
+            validate_host("foo bar.com"),
+            Err(AppError::Validation(_))
+        ));
+        assert!(matches!(
+            validate_host("foo\tbar"),
+            Err(AppError::Validation(_))
+        ));
+        assert!(matches!(
+            validate_host("foo\nbar"),
+            Err(AppError::Validation(_))
+        ));
+        // Too long (>253).
+        let long = "a".repeat(254);
+        assert!(matches!(
+            validate_host(&long),
+            Err(AppError::Validation(_))
+        ));
+        // Sanity: a normal host passes validation.
+        assert!(validate_host("api.example.com").is_ok());
+    }
 }
 
 #[tauri::command]
