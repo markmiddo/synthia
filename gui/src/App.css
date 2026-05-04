@@ -968,12 +968,16 @@
   color: #cbd5e1;
   height: 36px;
   user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .statusbar-section {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .statusbar-divider {
@@ -1025,6 +1029,7 @@
   align-items: center;
   gap: 0.3rem;
   color: #cbd5e1;
+  white-space: nowrap;
 }
 .statusbar-dot {
   width: 7px;
@@ -1045,6 +1050,10 @@
   align-items: center;
   gap: 0.4rem;
   color: #cbd5e1;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .statusbar-weather-icon {
   font-size: 0.95rem;
@@ -1061,9 +1070,11 @@
   cursor: pointer;
   padding: 0;
   font-size: 0.75rem;
-  max-width: 460px;
+  flex: 1 1 0;
   min-width: 0;
+  max-width: 520px;
   overflow: hidden;
+  white-space: nowrap;
 }
 .statusbar-news:hover .statusbar-news-text {
   color: #06b6d4;
@@ -1118,6 +1129,19 @@
 .statusbar-voice-icon {
   display: inline-flex;
   align-items: center;
+}
+
+/* Tighten things up on narrow windows so the news chip still has room. */
+@media (max-width: 1100px) {
+  .statusbar-weather {
+    max-width: 130px;
+  }
+  .statusbar-usage-bar { width: 28px; }
+}
+@media (max-width: 900px) {
+  .statusbar-weather-text { display: none; }
+  .statusbar-news { max-width: 320px; }
+  .statusbar-usage-pct { display: none; }
 }
 
 .sidebar-header {

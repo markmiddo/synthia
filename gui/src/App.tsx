@@ -4243,10 +4243,10 @@ function App() {
 
         <div className="statusbar-divider" />
 
-        <div className="statusbar-section" title={weather?.conditions ?? ""}>
+        <div className="statusbar-section" title={weatherText}>
           <span className="statusbar-weather">
             <span className="statusbar-weather-icon">{weatherIcon}</span>
-            {weatherText}
+            <span className="statusbar-weather-text">{weatherText}</span>
           </span>
         </div>
 
