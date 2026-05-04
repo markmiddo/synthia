@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
+import { JournalPanel } from "./components/JournalPanel";
 import "./App.css";
 type Status = "stopped" | "running" | "recording" | "thinking";
 
@@ -527,6 +528,7 @@ function App() {
   const [activeAgents, setActiveAgents] = useState<AgentInfo[]>([]);
   const [expandedAgentPid, setExpandedAgentPid] = useState<number | null>(null);
   const [activeAgentsLoading, setActiveAgentsLoading] = useState(true);
+  const [agentsTab, setAgentsTab] = useState<"active" | "journal">("active");
 
   // Usage stats state
   const [usageStats, setUsageStats] = useState<{
@@ -1741,7 +1743,24 @@ function App() {
           </span>
         </div>
 
-        {activeAgentsLoading && activeAgents.length === 0 ? (
+        <div className="agents-tabs">
+          <button
+            className={agentsTab === "active" ? "active" : ""}
+            onClick={() => setAgentsTab("active")}
+          >
+            Active Agents
+          </button>
+          <button
+            className={agentsTab === "journal" ? "active" : ""}
+            onClick={() => setAgentsTab("journal")}
+          >
+            Journal
+          </button>
+        </div>
+
+        {agentsTab === "journal" ? (
+          <JournalPanel />
+        ) : activeAgentsLoading && activeAgents.length === 0 ? (
           <div className="agents-loading">Scanning…</div>
         ) : activeAgents.length === 0 ? (
           <div className="agents-empty">No AI agents running</div>
