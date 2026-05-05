@@ -3948,7 +3948,7 @@ function App() {
       return (
         <div className="notes-section">
           <div className="notes-editor-header">
-            <button className="back-btn" onClick={handleCloseNote}>
+            <button className="back-btn" onClick={handleSmartClose} title="Close (Esc) — auto-saves changes">
               ← Back
             </button>
             {editingNoteName ? (
@@ -3973,7 +3973,7 @@ function App() {
                   setNoteNameInput(fileName.replace(/\.md$/, ""));
                   setEditingNoteName(true);
                 }}
-                title="Click to rename"
+                title="Click to rename (Ctrl+R)"
               >
                 {fileName}
               </div>
@@ -3982,26 +3982,28 @@ function App() {
               <button
                 className={`notes-pin-btn ${isPinned ? "active" : ""}`}
                 onClick={() => togglePinNote(selectedNote)}
-                title={isPinned ? "Unpin" : "Pin"}
+                title={`${isPinned ? "Unpin" : "Pin"} (Ctrl+Shift+P)`}
               >
                 {isPinned ? "Unpin" : "Pin"}
               </button>
               <button
                 className={`notes-preview-btn ${notePreview === false ? "active" : ""}`}
                 onClick={() => setNotePreview(notePreview === false ? null : false)}
+                title="Edit only (Ctrl+E)"
               >
                 Edit
               </button>
               <button
                 className={`notes-preview-btn ${notePreview === true ? "active" : ""}`}
                 onClick={() => setNotePreview(notePreview === true ? null : true)}
+                title="Preview only (Ctrl+P) — Ctrl+\\ for split"
               >
                 Preview
               </button>
               <button
                 className={`notes-copy-path-btn ${copiedPath ? "copied" : ""}`}
                 onClick={() => handleCopyPath(selectedNote)}
-                title="Copy file path"
+                title="Copy file path (Ctrl+Shift+C)"
               >
                 {copiedPath ? "Copied!" : "Copy Path"}
               </button>
@@ -4009,12 +4011,14 @@ function App() {
                 className={`notes-save-btn ${noteSaving ? "saving" : ""} ${noteSaved ? "saved" : ""}`}
                 onClick={handleSaveNote}
                 disabled={noteSaving}
+                title="Save (Ctrl+S)"
               >
                 {noteSaving ? "Saving..." : noteSaved ? "Saved!" : "Save"}
               </button>
               <button
                 className="notes-delete-btn"
                 onClick={() => { if (confirm("Delete this note?")) handleDeleteNote(selectedNote); }}
+                title="Delete (Ctrl+Delete)"
               >
                 Delete
               </button>
