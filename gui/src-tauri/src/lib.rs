@@ -454,6 +454,8 @@ pub fn run() {
             commands::notes::create_folder,
             commands::notes::delete_note,
             commands::usage::get_usage_stats,
+            commands::weather::get_weather,
+            commands::news::get_ai_news,
             commands::notes::get_pinned_note,
             commands::notes::save_pinned_note,
             commands::github::get_github_config,
@@ -461,7 +463,10 @@ pub fn run() {
             commands::github::get_github_issues,
             commands::notes::get_notes_base_path_cmd,
             commands::agents::list_active_agents,
-            commands::agents::kill_agent
+            commands::agents::kill_agent,
+            commands::journal::add_journal_entry,
+            commands::journal::get_journal_entries,
+            commands::journal::get_journal_entries_by_agent
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

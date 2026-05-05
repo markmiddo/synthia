@@ -78,6 +78,17 @@ Always write "Synthia" with capital S. Website is synthia-ai.com.
 5. CI runs automatically on the PR
 6. Merge after CI passes
 
+### Worktrees & Branch Base Selection
+
+Before creating a worktree or feature branch:
+
+1. **Check current branch first.** `git branch --show-current` — if it's an active feature branch with unmerged UI work (e.g. `feat/voice-toggle-redesign`), branching from `development` will give a worktree missing that work and the dev build will look stale.
+2. **Run `git fetch --all` and check `git log --oneline development..feat/<active>`.** If the active feature branch has commits not in `development`, it represents the user's real workspace.
+3. **Branch the new feature off the active branch (or its origin remote), not `development`,** unless the new work is genuinely independent and the user wants it isolated for a clean PR to `development`.
+4. **When in doubt, ask the user** which base they want — "branch off `development` (clean PR target) or `feat/<active>` (matches your current workspace)?"
+
+The cost of getting this wrong is silently shipping a worktree that doesn't reflect the user's app, then having to rebase or cherry-pick later.
+
 ### Commit Convention
 
 Use conventional commits: `type: description`

@@ -23,10 +23,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 image = "0.24"
 regex = "1"
 dirs = "5"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 notify = { version = "7", default-features = false, features = ["macos_kqueue"] }
 ipnet = "2"
 dns-lookup = "2"
-
+feed-rs = "2.3.1"
