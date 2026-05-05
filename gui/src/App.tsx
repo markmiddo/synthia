@@ -486,6 +486,8 @@ function App() {
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState("");
+  // @ts-ignore used in Task 2 for dirty detection
+  const [noteSavedContent, setNoteSavedContent] = useState("");
   const [noteEditing, setNoteEditing] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
@@ -1099,6 +1101,7 @@ function App() {
       const content = await invoke<string>("read_note", { path });
       setSelectedNote(path);
       setNoteContent(content);
+      setNoteSavedContent(content);
       setNoteEditing(true);
       setNotePreview(null);
       trackRecentNote(path);
@@ -1112,6 +1115,7 @@ function App() {
     setNoteSaving(true);
     try {
       await invoke("save_note", { path: selectedNote, content: noteContent });
+      setNoteSavedContent(noteContent);
       setNoteSaving(false);
       setNoteSaved(true);
       setTimeout(() => setNoteSaved(false), 2000);
