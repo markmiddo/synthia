@@ -1134,7 +1134,6 @@ function App() {
     loadNotes("");
   }
 
-  // @ts-ignore will be used in Task 3 for keyboard handler
   async function handleSmartClose() {
     if (!selectedNote) return;
     if (noteContent !== noteSavedContent) {
@@ -1317,6 +1316,89 @@ function App() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!noteEditing || !selectedNote) return;
+    if (editingNoteName) return; // filename input owns its own keys
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore modifier-only keypresses
+      if (e.key === "Control" || e.key === "Shift" || e.key === "Alt" || e.key === "Meta") return;
+
+      // Esc: auto-save if dirty, then close
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleSmartClose();
+        return;
+      }
+
+      if (!e.ctrlKey) return;
+
+      // Ctrl+Shift combos first (more specific)
+      if (e.shiftKey) {
+        if (e.key === "P" || e.key === "p") {
+          e.preventDefault();
+          togglePinNote(selectedNote);
+          return;
+        }
+        if (e.key === "C" || e.key === "c") {
+          e.preventDefault();
+          handleCopyPath(selectedNote);
+          return;
+        }
+        return;
+      }
+
+      // Ctrl-only combos
+      switch (e.key) {
+        case "s":
+        case "S":
+          e.preventDefault();
+          handleSaveNote();
+          break;
+        case "e":
+        case "E":
+          e.preventDefault();
+          setNotePreview(false);
+          break;
+        case "p":
+        case "P":
+          e.preventDefault();
+          setNotePreview(true);
+          break;
+        case "\\":
+          e.preventDefault();
+          setNotePreview(null);
+          break;
+        case "r":
+        case "R":
+          e.preventDefault();
+          if (selectedNote) {
+            const fileName = selectedNote.split("/").pop() || selectedNote;
+            setNoteNameInput(fileName.replace(/\.md$/, ""));
+            setEditingNoteName(true);
+          }
+          break;
+        case "Delete":
+          e.preventDefault();
+          if (confirm("Delete this note?")) {
+            handleDeleteNote(selectedNote);
+          }
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    noteEditing,
+    selectedNote,
+    editingNoteName,
+    noteContent,
+    noteSavedContent,
+    pinnedNotes,
+    notePreview,
+  ]);
 
   async function handleCopyPath(relativePath: string) {
     const success = await copyNotePath(relativePath);
