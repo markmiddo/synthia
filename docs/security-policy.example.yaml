@@ -1,4 +1,4 @@
-# NeuralGuard policy file — drop into ~/.config/synthia/security/policy.yaml
+# AI Security policy file — drop into ~/.config/synthia/security/policy.yaml
 #
 # Phase 1 keys honoured by src/synthia/hooks/security_gate.py:
 #

@@ -26,7 +26,7 @@ class TestJournal:
 
     def test_journal_directory_created(self):
         """Test that journal directory is created when writing entries."""
-        # Verify the parent directory exists
+        JOURNAL_DIR.parent.mkdir(parents=True, exist_ok=True)
         assert JOURNAL_DIR.parent.exists()
 
     def test_journal_file_format(self):

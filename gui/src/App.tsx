@@ -65,6 +65,21 @@ interface AgentConfig {
   body: string;
 }
 
+interface WeatherSnapshot {
+  temp_c: number | null;
+  conditions: string | null;
+  location: string | null;
+  icon: string | null;
+  error: string | null;
+}
+
+interface NewsItem {
+  title: string;
+  link: string;
+  published: string | null;
+  source: string;
+}
+
 interface AgentInfo {
   pid: number;
   kind: string;
@@ -443,6 +458,12 @@ function App() {
   const [voiceMuted, setVoiceMuted] = useState(false);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
   const [securityFilter, setSecurityFilter] = useState<"all" | "high+">("all");
+  const [securityTabAutoChosen, setSecurityTabAutoChosen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
+  const [news, setNews] = useState<NewsItem[]>([]);
+  const [newsIndex, setNewsIndex] = useState(0);
+  const [newsFade, setNewsFade] = useState(true);
   const [neuralguardStatus, setNeuralguardStatus] = useState<{
     installed: boolean;
     events_path: string;
@@ -465,6 +486,7 @@ function App() {
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState("");
+  const [noteSavedContent, setNoteSavedContent] = useState("");
   const [noteEditing, setNoteEditing] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
@@ -646,12 +668,88 @@ function App() {
     return () => clearInterval(id);
   }, [currentSection]);
 
+  // Smart default tab: auto-pick "high+" if any HIGH/CRITICAL exists on first event load.
+  useEffect(() => {
+    if (securityTabAutoChosen || securityEvents.length === 0) return;
+    const hasHigh = securityEvents.some(
+      (e) => e.severity === "high" || e.severity === "critical",
+    );
+    setSecurityFilter(hasHigh ? "high+" : "all");
+    setSecurityTabAutoChosen(true);
+  }, [securityEvents, securityTabAutoChosen]);
+
   // Pending security prompts poll (runs always so modal can interrupt anywhere)
   useEffect(() => {
     loadPendingPrompts();
     const id = setInterval(loadPendingPrompts, 1500);
     return () => clearInterval(id);
   }, []);
+
+  // Weather snapshot for status bar — refresh every 30 minutes.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const w = await invoke<WeatherSnapshot>("get_weather");
+        if (!cancelled) setWeather(w);
+      } catch (err) {
+        if (!cancelled)
+          setWeather({
+            temp_c: null,
+            conditions: null,
+            location: null,
+            icon: null,
+            error: String(err),
+          });
+      }
+    }
+    load();
+    const id = setInterval(load, 30 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Active agents status-bar polling — runs even when not on the agents tab so
+  // the bottom counts stay live everywhere.
+  useEffect(() => {
+    const id = setInterval(loadActiveAgents, 5000);
+    loadActiveAgents();
+    return () => clearInterval(id);
+  }, []);
+
+  // AI news feed — refresh every 15 minutes.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const items = await invoke<NewsItem[]>("get_ai_news");
+        if (!cancelled) setNews(items);
+      } catch (err) {
+        console.error("get_ai_news failed", err);
+      }
+    }
+    load();
+    const id = setInterval(load, 15 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Rotate news headline every 8s with a fade transition.
+  useEffect(() => {
+    if (news.length <= 1) return;
+    const id = setInterval(() => {
+      setNewsFade(false);
+      setTimeout(() => {
+        setNewsIndex((i) => (i + 1) % news.length);
+        setNewsFade(true);
+      }, 250);
+    }, 8000);
+    return () => clearInterval(id);
+  }, [news.length]);
 
   async function loadPendingPrompts() {
     try {
@@ -1002,6 +1100,7 @@ function App() {
       const content = await invoke<string>("read_note", { path });
       setSelectedNote(path);
       setNoteContent(content);
+      setNoteSavedContent(content);
       setNoteEditing(true);
       setNotePreview(null);
       trackRecentNote(path);
@@ -1012,9 +1111,11 @@ function App() {
 
   async function handleSaveNote() {
     if (!selectedNote) return;
+    if (noteSaving) return;
     setNoteSaving(true);
     try {
       await invoke("save_note", { path: selectedNote, content: noteContent });
+      setNoteSavedContent(noteContent);
       setNoteSaving(false);
       setNoteSaved(true);
       setTimeout(() => setNoteSaved(false), 2000);
@@ -1032,6 +1133,14 @@ function App() {
     setNotePreview(null);
     // Refresh the notes list to show any new or updated notes
     loadNotes("");
+  }
+
+  async function handleSmartClose() {
+    if (!selectedNote) return;
+    if (noteContent !== noteSavedContent) {
+      await handleSaveNote();
+    }
+    handleCloseNote();
   }
 
   async function handleDeleteNote(path: string) {
@@ -1208,6 +1317,89 @@ function App() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!noteEditing || !selectedNote) return;
+    if (editingNoteName) return; // filename input owns its own keys
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore modifier-only keypresses
+      if (e.key === "Control" || e.key === "Shift" || e.key === "Alt" || e.key === "Meta") return;
+
+      // Esc: auto-save if dirty, then close
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleSmartClose();
+        return;
+      }
+
+      if (!e.ctrlKey) return;
+
+      // Ctrl+Shift combos first (more specific)
+      if (e.shiftKey) {
+        if (e.key === "P" || e.key === "p") {
+          e.preventDefault();
+          togglePinNote(selectedNote);
+          return;
+        }
+        if (e.key === "C" || e.key === "c") {
+          e.preventDefault();
+          handleCopyPath(selectedNote);
+          return;
+        }
+        return;
+      }
+
+      // Ctrl-only combos
+      switch (e.key) {
+        case "s":
+        case "S":
+          e.preventDefault();
+          handleSaveNote();
+          break;
+        case "e":
+        case "E":
+          e.preventDefault();
+          setNotePreview(false);
+          break;
+        case "p":
+        case "P":
+          e.preventDefault();
+          setNotePreview(true);
+          break;
+        case "\\":
+          e.preventDefault();
+          setNotePreview(null);
+          break;
+        case "r":
+        case "R":
+          e.preventDefault();
+          if (selectedNote) {
+            const fileName = selectedNote.split("/").pop() || selectedNote;
+            setNoteNameInput(fileName.replace(/\.md$/, ""));
+            setEditingNoteName(true);
+          }
+          break;
+        case "Delete":
+          e.preventDefault();
+          if (confirm("Delete this note?")) {
+            handleDeleteNote(selectedNote);
+          }
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    noteEditing,
+    selectedNote,
+    editingNoteName,
+    noteContent,
+    noteSavedContent,
+    pinnedNotes,
+    notePreview,
+  ]);
 
   async function handleCopyPath(relativePath: string) {
     const success = await copyNotePath(relativePath);
@@ -1792,7 +1984,6 @@ function App() {
     const filtered = securityEvents.filter((e) =>
       securityFilter === "all" ? true : sevRank[e.severity] >= 3,
     );
-    const sortedDesc = [...filtered].reverse();
     const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
     for (const e of securityEvents) counts[e.severity] = (counts[e.severity] || 0) + 1;
 
@@ -1802,6 +1993,55 @@ function App() {
         return d.toLocaleString();
       } catch {
         return iso;
+      }
+    }
+
+    function destFromMatched(matched: string): string {
+      // Forms produced by egress.rs:
+      //   IPv4 → "35.190.46.17:443 (proc claude)"
+      //   IPv6 → "[2600:1901:0:3084::]:443 (proc claude)"
+      const v6 = matched.match(/^\[([^\]]+)\]/);
+      if (v6) return v6[1];
+      const v4 = matched.match(/^([0-9.]+)/);
+      if (v4) return v4[1];
+      // Fallback: take everything before the first " (".
+      const space = matched.indexOf(" (");
+      return space > 0 ? matched.slice(0, space) : matched;
+    }
+
+    type EventGroup = { key: string; events: SecurityEvent[]; latest: SecurityEvent };
+
+    function groupEvents(evts: SecurityEvent[]): EventGroup[] {
+      const groups = new Map<string, SecurityEvent[]>();
+      for (const e of evts) {
+        // Group by agent KIND (e.g. "claude") not pid — different process
+        // instances of the same agent talking to the same host should collapse.
+        const kind = e.agent_kind ?? "?";
+        const key = `${e.rule}::${kind}::${destFromMatched(e.matched)}`;
+        const arr = groups.get(key) ?? [];
+        arr.push(e);
+        groups.set(key, arr);
+      }
+      return [...groups.entries()]
+        .map(([key, arr]) => {
+          const sorted = arr.sort((a, b) => b.ts.localeCompare(a.ts));
+          return { key, events: sorted, latest: sorted[0] };
+        })
+        .sort((a, b) => b.latest.ts.localeCompare(a.latest.ts));
+    }
+
+    const groups = groupEvents(filtered);
+
+    async function handleAllowHost(evt: SecurityEvent) {
+      const host = destFromMatched(evt.matched);
+      try {
+        await invoke("add_to_allowlist", { host });
+        // Optimistically remove this group's events from view.
+        setSecurityEvents((prev) =>
+          prev.filter((e) => destFromMatched(e.matched) !== host),
+        );
+      } catch (err) {
+        console.error("add_to_allowlist failed", err);
       }
     }
 
@@ -1907,16 +2147,19 @@ function App() {
         </div>
 
         <div className="security-feed">
-          {sortedDesc.length === 0 ? (
+          {groups.length === 0 ? (
             <div className="security-empty">
               No security events. Run an agent and any flagged tool calls will appear here.
             </div>
           ) : (
-            sortedDesc.map((e) => {
+            groups.map((g) => {
+              const e = g.latest;
               const info = RULE_INFO[e.rule];
               const outcome = eventOutcome(e.decision, e.actor);
+              const isOpen = !!expandedGroups[g.key];
+              const isEgress = e.rule === "egress-unknown-host";
               return (
-                <div key={e.id} className={`security-row severity-${e.severity}`}>
+                <div key={g.key} className={`security-row severity-${e.severity}`}>
                   <div className="security-row-head">
                     <span className={`severity-pill sev-${e.severity}`}>
                       {e.severity.toUpperCase()}
@@ -1924,6 +2167,14 @@ function App() {
                     <span className="security-rule">
                       {info ? info.title : e.rule}
                     </span>
+                    {g.events.length > 1 && (
+                      <span
+                        className="security-count-badge"
+                        title={`${g.events.length} events grouped — click to expand`}
+                      >
+                        ×{g.events.length}
+                      </span>
+                    )}
                     <span className={`outcome-pill outcome-${outcome.tone}`}>
                       {outcome.label}
                     </span>
@@ -1945,6 +2196,40 @@ function App() {
                     {e.agent_cwd && <span title={e.agent_cwd}>{e.agent_cwd.split("/").slice(-2).join("/")}</span>}
                     <span>· {e.actor} → {e.decision}</span>
                   </div>
+                  <div className="security-row-actions">
+                    {isEgress && (
+                      <button
+                        className="claude-btn small"
+                        onClick={() => handleAllowHost(e)}
+                        title="Add this host to your egress allowlist"
+                      >
+                        Allow host
+                      </button>
+                    )}
+                    {g.events.length > 1 && (
+                      <button
+                        className="claude-btn small"
+                        onClick={() =>
+                          setExpandedGroups((prev) => ({
+                            ...prev,
+                            [g.key]: !prev[g.key],
+                          }))
+                        }
+                      >
+                        {isOpen ? "Collapse" : `Show ${g.events.length} occurrences`}
+                      </button>
+                    )}
+                  </div>
+                  {isOpen && g.events.length > 1 && (
+                    <ul className="security-occurrences">
+                      {g.events.map((occ) => (
+                        <li key={occ.id}>
+                          <span className="security-occ-ts">{formatTs(occ.ts)}</span>
+                          <span className="security-occ-matched">{occ.matched}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               );
             })
@@ -1972,14 +2257,6 @@ function App() {
       <div className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-logo">SYNTHIA</div>
-          <button
-            className={`voice-toggle ${voiceMuted ? "muted" : ""}`}
-            onClick={() => handleToggleVoiceMute()}
-            title={voiceMuted ? "Voice muted — click to unmute" : "Voice on — click to mute"}
-            aria-label={voiceMuted ? "Unmute voice" : "Mute voice"}
-          >
-            {voiceMuted ? "🔇" : "🔊"}
-          </button>
         </div>
         <nav className="sidebar-nav">
           <button
@@ -2041,121 +2318,6 @@ function App() {
           </button>
         </nav>
 
-        {usageStats && (
-          <div className="usage-widget">
-            <div className="usage-header">
-              <span className="usage-title">Claude Usage</span>
-              {usageStats.subscription_type && (
-                <span className="usage-badge">{usageStats.subscription_type}</span>
-              )}
-            </div>
-
-            {usageStats.error ? (
-              <div className="usage-error">
-                Usage unavailable
-                <div className="usage-error-detail">{usageStats.error}</div>
-              </div>
-            ) : (
-              <>
-                <div className="usage-section">
-                  <div className="usage-label">5-hour</div>
-                  <div className="usage-bar-row">
-                    <div className="usage-bar">
-                      <div
-                        className="usage-bar-fill"
-                        style={{
-                          width: `${Math.min(100, usageStats.five_hour_pct)}%`,
-                          background: usageBarColor(usageStats.five_hour_pct),
-                        }}
-                      />
-                    </div>
-                    <span className="usage-pct">
-                      {formatPct(usageStats.five_hour_pct)}
-                    </span>
-                  </div>
-                  {usageStats.five_hour_resets_in && (
-                    <div className="usage-meta">
-                      Resets in {usageStats.five_hour_resets_in}
-                    </div>
-                  )}
-                </div>
-
-                <div className="usage-section">
-                  <div className="usage-label">7-day</div>
-                  <div className="usage-bar-row">
-                    <div className="usage-bar">
-                      <div
-                        className="usage-bar-fill"
-                        style={{
-                          width: `${Math.min(100, usageStats.seven_day_pct)}%`,
-                          background: usageBarColor(usageStats.seven_day_pct),
-                        }}
-                      />
-                    </div>
-                    <span className="usage-pct">
-                      {formatPct(usageStats.seven_day_pct)}
-                    </span>
-                  </div>
-                  {usageStats.seven_day_resets_in && (
-                    <div className="usage-meta">
-                      Resets in {usageStats.seven_day_resets_in}
-                    </div>
-                  )}
-                </div>
-
-                {usageStats.seven_day_opus_pct !== null && (
-                  <div className="usage-section">
-                    <div className="usage-label">7-day Opus</div>
-                    <div className="usage-bar-row">
-                      <div className="usage-bar">
-                        <div
-                          className="usage-bar-fill"
-                          style={{
-                            width: `${Math.min(100, usageStats.seven_day_opus_pct ?? 0)}%`,
-                            background: usageBarColor(usageStats.seven_day_opus_pct ?? 0),
-                          }}
-                        />
-                      </div>
-                      <span className="usage-pct">
-                        {formatPct(usageStats.seven_day_opus_pct ?? 0)}
-                      </span>
-                    </div>
-                    {usageStats.seven_day_opus_resets_in && (
-                      <div className="usage-meta">
-                        Resets in {usageStats.seven_day_opus_resets_in}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {usageStats.seven_day_sonnet_pct !== null && (
-                  <div className="usage-section">
-                    <div className="usage-label">7-day Sonnet</div>
-                    <div className="usage-bar-row">
-                      <div className="usage-bar">
-                        <div
-                          className="usage-bar-fill"
-                          style={{
-                            width: `${Math.min(100, usageStats.seven_day_sonnet_pct ?? 0)}%`,
-                            background: usageBarColor(usageStats.seven_day_sonnet_pct ?? 0),
-                          }}
-                        />
-                      </div>
-                      <span className="usage-pct">
-                        {formatPct(usageStats.seven_day_sonnet_pct ?? 0)}
-                      </span>
-                    </div>
-                    {usageStats.seven_day_sonnet_resets_in && (
-                      <div className="usage-meta">
-                        Resets in {usageStats.seven_day_sonnet_resets_in}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
       </div>
     );
   }
@@ -3787,7 +3949,7 @@ function App() {
       return (
         <div className="notes-section">
           <div className="notes-editor-header">
-            <button className="back-btn" onClick={handleCloseNote}>
+            <button className="back-btn" onClick={handleSmartClose} title="Close (Esc) — auto-saves changes">
               ← Back
             </button>
             {editingNoteName ? (
@@ -3812,7 +3974,7 @@ function App() {
                   setNoteNameInput(fileName.replace(/\.md$/, ""));
                   setEditingNoteName(true);
                 }}
-                title="Click to rename"
+                title="Click to rename (Ctrl+R)"
               >
                 {fileName}
               </div>
@@ -3821,26 +3983,28 @@ function App() {
               <button
                 className={`notes-pin-btn ${isPinned ? "active" : ""}`}
                 onClick={() => togglePinNote(selectedNote)}
-                title={isPinned ? "Unpin" : "Pin"}
+                title={`${isPinned ? "Unpin" : "Pin"} (Ctrl+Shift+P)`}
               >
                 {isPinned ? "Unpin" : "Pin"}
               </button>
               <button
                 className={`notes-preview-btn ${notePreview === false ? "active" : ""}`}
                 onClick={() => setNotePreview(notePreview === false ? null : false)}
+                title="Edit only (Ctrl+E)"
               >
                 Edit
               </button>
               <button
                 className={`notes-preview-btn ${notePreview === true ? "active" : ""}`}
                 onClick={() => setNotePreview(notePreview === true ? null : true)}
+                title={"Preview only (Ctrl+P) — Ctrl+\\ for split"}
               >
                 Preview
               </button>
               <button
                 className={`notes-copy-path-btn ${copiedPath ? "copied" : ""}`}
                 onClick={() => handleCopyPath(selectedNote)}
-                title="Copy file path"
+                title="Copy file path (Ctrl+Shift+C)"
               >
                 {copiedPath ? "Copied!" : "Copy Path"}
               </button>
@@ -3848,12 +4012,14 @@ function App() {
                 className={`notes-save-btn ${noteSaving ? "saving" : ""} ${noteSaved ? "saved" : ""}`}
                 onClick={handleSaveNote}
                 disabled={noteSaving}
+                title="Save (Ctrl+S)"
               >
                 {noteSaving ? "Saving..." : noteSaved ? "Saved!" : "Save"}
               </button>
               <button
                 className="notes-delete-btn"
                 onClick={() => { if (confirm("Delete this note?")) handleDeleteNote(selectedNote); }}
+                title="Delete (Ctrl+Delete)"
               >
                 Delete
               </button>
@@ -4131,20 +4297,139 @@ function App() {
     );
   }
 
+  function renderStatusBar() {
+    const activeCount = activeAgents.filter((a) => a.status === "active").length;
+    const idleCount = activeAgents.filter((a) => a.status === "idle" || a.status === "stale").length;
+
+    function chip(label: string, pct: number | null | undefined) {
+      const v = pct ?? 0;
+      const color = usageBarColor(v);
+      return (
+        <div className="statusbar-usage" title={`${label}: ${formatPct(v)}`}>
+          <span className="statusbar-usage-label">{label}</span>
+          <span className="statusbar-usage-bar">
+            <span
+              className="statusbar-usage-fill"
+              style={{ width: `${Math.min(100, v)}%`, background: color }}
+            />
+          </span>
+          <span className="statusbar-usage-pct">{formatPct(v)}</span>
+        </div>
+      );
+    }
+
+    let weatherText = "Weather unavailable";
+    let weatherIcon = "🌡️";
+    if (weather && weather.error) {
+      weatherText = "Weather offline";
+    } else if (weather && weather.temp_c !== null) {
+      weatherIcon = weather.icon ?? "🌡️";
+      const parts: string[] = [];
+      parts.push(`${weather.temp_c}°C`);
+      if (weather.conditions) parts.push(weather.conditions);
+      if (weather.location) parts.push(weather.location);
+      weatherText = parts.join(" · ");
+    }
+
+    return (
+      <div className="statusbar">
+        <div className="statusbar-section">
+          <span className="statusbar-section-icon" title="Claude usage">📊</span>
+          {usageStats && !usageStats.error ? (
+            <>
+              {chip("5h", usageStats.five_hour_pct)}
+              {chip("7d", usageStats.seven_day_pct)}
+              {usageStats.seven_day_sonnet_pct !== null &&
+                chip("Sonnet", usageStats.seven_day_sonnet_pct)}
+            </>
+          ) : (
+            <span className="statusbar-muted">Usage unavailable</span>
+          )}
+        </div>
+
+        <div className="statusbar-divider" />
+
+        <div className="statusbar-section">
+          <span className="statusbar-section-icon" title="AI agents">🤖</span>
+          <span className="statusbar-agents" title="Active agents (recent activity)">
+            <span className="statusbar-dot statusbar-dot-active" />
+            {activeCount} active
+          </span>
+          <span className="statusbar-agents" title="Idle agents (process running, no recent activity, includes stale)">
+            <span className="statusbar-dot statusbar-dot-idle" />
+            {idleCount} idle
+          </span>
+        </div>
+
+        <div className="statusbar-divider" />
+
+        <div className="statusbar-section" title={weatherText}>
+          <span className="statusbar-weather">
+            <span className="statusbar-weather-icon">{weatherIcon}</span>
+            <span className="statusbar-weather-text">{weatherText}</span>
+          </span>
+        </div>
+
+        <div className="statusbar-divider" />
+
+        {news.length > 0 && (
+          <button
+            type="button"
+            className="statusbar-news"
+            title={`${news[newsIndex].title} — click to open`}
+            onClick={() => {
+              const link = news[newsIndex]?.link;
+              if (link) {
+                openUrl(link).catch((e) => console.error("openUrl failed", e));
+              }
+            }}
+          >
+            <span className="statusbar-news-icon">📰</span>
+            <span className={`statusbar-news-text ${newsFade ? "in" : "out"}`}>
+              {news[newsIndex]?.title ?? ""}
+            </span>
+          </button>
+        )}
+
+        <div className="statusbar-spacer" />
+
+        <button
+          type="button"
+          className={`statusbar-voice ${voiceMuted ? "muted" : ""}`}
+          onClick={() => handleToggleVoiceMute()}
+          title={voiceMuted ? "Voice muted — click to unmute" : "Voice on — click to mute"}
+          aria-pressed={!voiceMuted}
+        >
+          <span className="statusbar-voice-icon" aria-hidden="true">
+            {voiceMuted ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
+            )}
+          </span>
+          Voice {voiceMuted ? "muted" : "on"}
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="app-layout">
-      {renderSidebar()}
-      {renderPromptModal()}
-      <main className="main-content">
-        {currentSection === "agents" && renderAgentsSection()}
-        {currentSection === "security" && renderSecuritySection()}
-        {currentSection === "worktrees" && renderWorktreesSection()}
-        {currentSection === "github" && renderGithubSection()}
-        {currentSection === "knowledge" && renderKnowledgeSection()}
-        {currentSection === "voice" && renderVoiceSection()}
-        {currentSection === "memory" && renderMemorySection()}
-        {currentSection === "config" && renderConfigSection()}
-      </main>
+    <div className="app-shell">
+      <div className="app-layout">
+        {renderSidebar()}
+        {renderPromptModal()}
+        <main className="main-content">
+          {currentSection === "agents" && renderAgentsSection()}
+          {currentSection === "security" && renderSecuritySection()}
+          {currentSection === "worktrees" && renderWorktreesSection()}
+          {currentSection === "github" && renderGithubSection()}
+          {currentSection === "knowledge" && renderKnowledgeSection()}
+          {currentSection === "voice" && renderVoiceSection()}
+          {currentSection === "memory" && renderMemorySection()}
+          {currentSection === "config" && renderConfigSection()}
+        </main>
+      </div>
+      {renderStatusBar()}
     </div>
   );
 }

@@ -90,19 +90,25 @@ Hold **Right Alt**, say something, and watch the magic happen.
 
 ## Desktop GUI
 
-SYNTHIA includes a native desktop application built with Tauri (Rust + React):
+SYNTHIA includes a native desktop application built with Tauri 2 (Rust + React). Eight sections in the sidebar:
 
-- **System tray integration** — Lives in your taskbar, always accessible
-- **One-click start/stop** — No terminal required
-- **Remote mode toggle** — Enable Telegram control instantly
-- **Voice history** — Browse, copy, and re-send past transcriptions
-- **Clipboard history** — Recent clipboard items with one-click restore
-- **Usage stats** — Claude API usage tracking (today/this week)
-- **Hotkey editor** — Customize dictation and assistant keys live
-- **Notes browser** — Markdown editor with preview, folder navigation
-- **Worktree manager** — Track git worktrees with progress bars and session linking
-- **Task kanban** — Drag-and-drop task board (To Do, In Progress, Done)
-- **Config editor** — Manage Synthia settings, agents, commands, hooks, and plugins
+- **Agents** — Live monitor of running Claude Code / Codex / Kimi / Kilo CLI agents. See PIDs, CPUs, working dirs, kill misbehaving ones
+- **Worktrees** — Track git worktrees across repos with progress bars, issue linking, and Claude session resume
+- **Knowledge** — Markdown notes browser with preview, folder navigation, pinned + recent lists
+- **Security** — AI Security AI security layer. Real-time prompt/tool review with rule + LLM classifier, approval queue, event log
+- **Voice** — History of past transcriptions, copy + resend, mute toggle, recording overlay
+- **Memory** — Browse, search, edit, delete persistent memory entries by category
+- **GitHub** — Pull and triage issues from configured repos
+- **Config** — Synthia settings + Agents + Commands + Skills + Hooks + Plugins tabs
+
+Other GUI niceties:
+
+- System tray integration with recording-state icon
+- One-click start/stop + mode switcher
+- Remote (Telegram) toggle
+- Live hotkey editor + word-replacement dictionary
+- Clipboard history with one-click restore
+- Claude API usage stats (5h + weekly windows, Opus/Sonnet split)
 
 Build the GUI:
 ```bash
@@ -110,6 +116,8 @@ cd gui
 npm install
 npm run tauri build
 ```
+
+Architecture note: the Rust backend (`gui/src-tauri/`) is split into focused modules under `commands/` — error handling via typed `AppError`, Tauri-managed state, canonicalize-checked path safety, comment-preserving YAML writers. See `docs/superpowers/specs/2026-05-04-rust-a-grade-refactor-design.md` for the design rationale.
 
 ---
 
@@ -333,6 +341,74 @@ Files sent via Telegram are saved to the inbox:
 telegram_bot_token: "your-bot-token"    # Get from @BotFather
 telegram_allowed_users: [123456789]     # Your Telegram user ID
 ```
+
+---
+
+## AI Security — AI Security Layer
+
+A defensive security layer that intercepts tool calls from local AI coding agents (Claude Code, Codex, Kimi, Kilo) and blocks/asks-for-approval on risky operations *before* they execute. Phase 1 is rules-based, Phase 2 adds LLM classification.
+
+### What it catches
+
+- **Destructive shell** — `rm -rf /`, `dd of=/dev/sd*`, `mkfs`, force-pushes, `chmod -R 777`
+- **Credential exfiltration** — reads of `.env`, `id_rsa`, `~/.ssh`, `~/.aws/credentials`, `.npmrc`
+- **Prompt injection signatures** in tool results — "ignore previous instructions", role-play jailbreaks, hidden zero-width chars
+- **Suspicious egress** — outbound connections from agent processes to non-allowlisted hosts
+- **Risky writes** — direct edits of `/etc/`, sudoers, systemd unit files
+
+### Setup
+
+Drop the security gate into Claude Code's hook config:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "hooks": [{
+        "type": "command",
+        "command": "/path/to/synthia/venv/bin/python /path/to/synthia/src/synthia/hooks/security_gate.py",
+        "timeout": 10
+      }]
+    }],
+    "PostToolUse": [{
+      "hooks": [{
+        "type": "command",
+        "command": "/path/to/synthia/venv/bin/python /path/to/synthia/src/synthia/hooks/security_gate.py",
+        "timeout": 10
+      }]
+    }]
+  }
+}
+```
+
+Optional policy file at `~/.config/synthia/security/policy.yaml` — see `docs/security-policy.example.yaml`.
+
+### GUI integration
+
+Open the **Security** section in the GUI for:
+
+- Live event stream (severity, rule, matched text, agent, decision)
+- Pending approval queue (allow / deny with reason)
+- Egress watchlist toggle
+- Hook install / uninstall buttons
+- Audit log at `~/.config/synthia/security/events.jsonl`
+
+---
+
+## GitHub Issues Integration
+
+Pull open issues from configured repos directly into the GUI. Useful for triage + linking worktrees to issue numbers.
+
+Configure repos in the GitHub section settings, or directly in `~/.config/synthia/github.yaml`:
+
+```yaml
+repos:
+  - markmiddo/synthia
+  - eventfloHQ/fan-experience
+refresh_interval_seconds: 300
+```
+
+Requires `gh` CLI authenticated (`gh auth login`).
 
 ---
 
