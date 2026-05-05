@@ -3996,7 +3996,7 @@ function App() {
               <button
                 className={`notes-preview-btn ${notePreview === true ? "active" : ""}`}
                 onClick={() => setNotePreview(notePreview === true ? null : true)}
-                title="Preview only (Ctrl+P) — Ctrl+\\ for split"
+                title={"Preview only (Ctrl+P) — Ctrl+\\ for split"}
               >
                 Preview
               </button>
