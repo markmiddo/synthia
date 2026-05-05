@@ -30,4 +30,3 @@ notify = { version = "7", default-features = false, features = ["macos_kqueue"] 
 ipnet = "2"
 dns-lookup = "2"
 feed-rs = "2.3.1"
-
