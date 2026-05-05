@@ -486,7 +486,6 @@ function App() {
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState("");
-  // @ts-ignore used in Task 2 for dirty detection
   const [noteSavedContent, setNoteSavedContent] = useState("");
   const [noteEditing, setNoteEditing] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
@@ -1133,6 +1132,15 @@ function App() {
     setNotePreview(null);
     // Refresh the notes list to show any new or updated notes
     loadNotes("");
+  }
+
+  // @ts-ignore will be used in Task 3 for keyboard handler
+  async function handleSmartClose() {
+    if (!selectedNote) return;
+    if (noteContent !== noteSavedContent) {
+      await handleSaveNote();
+    }
+    handleCloseNote();
   }
 
   async function handleDeleteNote(path: string) {
