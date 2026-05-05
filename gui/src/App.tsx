@@ -1111,6 +1111,7 @@ function App() {
 
   async function handleSaveNote() {
     if (!selectedNote) return;
+    if (noteSaving) return;
     setNoteSaving(true);
     try {
       await invoke("save_note", { path: selectedNote, content: noteContent });
