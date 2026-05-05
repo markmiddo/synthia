@@ -4299,7 +4299,7 @@ function App() {
 
   function renderStatusBar() {
     const activeCount = activeAgents.filter((a) => a.status === "active").length;
-    const idleCount = activeAgents.filter((a) => a.status === "idle").length;
+    const idleCount = activeAgents.filter((a) => a.status === "idle" || a.status === "stale").length;
 
     function chip(label: string, pct: number | null | undefined) {
       const v = pct ?? 0;
@@ -4355,7 +4355,7 @@ function App() {
             <span className="statusbar-dot statusbar-dot-active" />
             {activeCount} active
           </span>
-          <span className="statusbar-agents" title="Idle agents (process running, no recent activity)">
+          <span className="statusbar-agents" title="Idle agents (process running, no recent activity, includes stale)">
             <span className="statusbar-dot statusbar-dot-idle" />
             {idleCount} idle
           </span>
