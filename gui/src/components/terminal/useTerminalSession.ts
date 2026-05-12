@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -43,7 +43,6 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
   const fitRef = useRef<FitAddon | null>(null);
 
   useEffect(() => {
-    let unlistenOutput: UnlistenFn | undefined;
     let unlistenExit: UnlistenFn | undefined;
     let disposed = false;
     let spawnedId: string | null = null;
@@ -86,14 +85,16 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
         setSessionId(sessionMeta.id);
         setMeta(sessionMeta);
 
-        unlistenOutput = await listen<string>(
-          `terminal-output-${sessionMeta.id}`,
-          (event) => {
-            const bytes = Uint8Array.from(atob(event.payload), (c) => c.charCodeAt(0));
-            term.write(bytes);
-          },
-        );
+        // Build a typed Channel for PTY output. This bypasses the global event
+        // router and eliminates the per-chunk routing overhead that caused
+        // visible keystroke lag.
+        const outputChannel = new Channel<string>();
+        outputChannel.onmessage = (encoded: string) => {
+          const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+          term.write(bytes);
+        };
 
+        // Exit events remain on the low-frequency event bus.
         unlistenExit = await listen<number>(
           `terminal-exit-${sessionMeta.id}`,
           (event) => {
@@ -114,9 +115,12 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
           );
         });
 
-        // Now that listeners are attached, tell Rust to start streaming PTY output.
-        // Without this, the shell's first prompt is emitted before we subscribe.
-        await invoke("terminal_attach", { sessionId: sessionMeta.id });
+        // Pass the channel to terminal_attach — Rust streams PTY output directly
+        // through it without touching the global event bus.
+        await invoke("terminal_attach", {
+          sessionId: sessionMeta.id,
+          onOutput: outputChannel,
+        });
 
         if (initialCommand) {
           await invoke("terminal_write", {
@@ -142,7 +146,6 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
       cleanupPromise.then((maybeCleanup) => {
         if (typeof maybeCleanup === "function") maybeCleanup();
       });
-      unlistenOutput?.();
       unlistenExit?.();
       if (spawnedId) {
         invoke("terminal_kill", { sessionId: spawnedId }).catch(() => {});

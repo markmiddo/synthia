@@ -10,7 +10,7 @@ use std::io::Read;
 use base64::Engine;
 use chrono::Utc;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, ipc::Channel};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -124,14 +124,19 @@ pub async fn terminal_spawn(
 
 /// Start streaming PTY output for an already-spawned session.
 ///
-/// React must call this AFTER subscribing to `terminal-output-{id}` and
-/// `terminal-exit-{id}` events, otherwise the first burst of output (often
-/// the shell prompt) is emitted into the void.
+/// `on_output` is a `Channel<String>` that receives base64-encoded PTY chunks.
+/// Using a typed channel instead of the global event bus eliminates per-byte
+/// routing overhead and removes visible keystroke lag.
+///
+/// React must call this AFTER setting up `channel.onmessage` and subscribing
+/// to `terminal-exit-{id}`, otherwise the first burst of output (the shell
+/// prompt) may be missed.
 #[tauri::command]
 pub async fn terminal_attach(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: Uuid,
+    on_output: Channel<String>,
 ) -> AppResult<()> {
     let mut reader = {
         let mut guard = state
@@ -160,11 +165,16 @@ pub async fn terminal_attach(
                 Ok(n) => {
                     let encoded =
                         base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                    let _ = app_handle.emit(&format!("terminal-output-{session_id}"), encoded);
+                    // Channel::send is much faster than app_handle.emit for high-frequency
+                    // streaming: it bypasses the global event router entirely.
+                    if on_output.send(encoded).is_err() {
+                        break;
+                    }
                 }
                 Err(_) => break,
             }
         }
+        // Exit notification stays on the event bus — it fires once and is low-frequency.
         let _ = app_handle.emit(&format!("terminal-exit-{session_id}"), 0_i32);
     });
 
