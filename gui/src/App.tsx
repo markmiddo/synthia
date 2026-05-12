@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
 import { JournalPanel } from "./components/JournalPanel";
+import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import "./App.css";
 type Status = "stopped" | "running" | "recording" | "thinking";
 
@@ -395,7 +396,7 @@ interface GitHubIssuesResponse {
   error: string | null;
 }
 
-type Section = "worktrees" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github";
+type Section = "worktrees" | "terminal" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github";
 
 interface KnowledgeMeta {
   pinned: string[];
@@ -2286,6 +2287,13 @@ function App() {
           >
             <span className="nav-item-icon">&#128193;</span>
             Worktrees
+          </button>
+          <button
+            className={`nav-item ${currentSection === "terminal" ? "active" : ""}`}
+            onClick={() => setCurrentSection("terminal")}
+          >
+            <span className="nav-item-icon">▸_</span>
+            Terminal
           </button>
           <button
             className={`nav-item ${currentSection === "github" ? "active" : ""}`}
@@ -4422,6 +4430,9 @@ function App() {
           {currentSection === "agents" && renderAgentsSection()}
           {currentSection === "security" && renderSecuritySection()}
           {currentSection === "worktrees" && renderWorktreesSection()}
+          {currentSection === "terminal" && (
+            <TerminalPanel visible={currentSection === "terminal"} />
+          )}
           {currentSection === "github" && renderGithubSection()}
           {currentSection === "knowledge" && renderKnowledgeSection()}
           {currentSection === "voice" && renderVoiceSection()}
