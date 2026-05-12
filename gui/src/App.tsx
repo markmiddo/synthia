@@ -2258,7 +2258,21 @@ function App() {
     return (
       <div className="sidebar">
         <div className="sidebar-header">
-          <div className="sidebar-logo">SYNTHIA</div>
+          <div className="sidebar-logo">
+            <svg className="sidebar-logo-mark" viewBox="0 0 24 24" aria-hidden="true">
+              <defs>
+                <linearGradient id="synthia-bars" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#67e8f9" />
+                  <stop offset="100%" stopColor="#f472b6" />
+                </linearGradient>
+              </defs>
+              <rect x="2" y="9" width="3" height="6" rx="1" fill="url(#synthia-bars)" className="bar bar-1" />
+              <rect x="7" y="5" width="3" height="14" rx="1" fill="url(#synthia-bars)" className="bar bar-2" />
+              <rect x="12" y="2" width="3" height="20" rx="1" fill="url(#synthia-bars)" className="bar bar-3" />
+              <rect x="17" y="6" width="3" height="12" rx="1" fill="url(#synthia-bars)" className="bar bar-4" />
+            </svg>
+            <span className="sidebar-logo-text">SYNTHIA</span>
+          </div>
         </div>
         <nav className="sidebar-nav">
           <button

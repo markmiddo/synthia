@@ -26,8 +26,11 @@ export function TerminalView(props: TerminalViewProps) {
 
   useEffect(() => {
     if (props.visible) {
-      session.fit();
-      session.focus();
+      // Defer until after the display:block repaint so clientWidth is correct.
+      requestAnimationFrame(() => {
+        session.fit();
+        session.focus();
+      });
     }
   }, [props.visible, session]);
 

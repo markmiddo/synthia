@@ -46,6 +46,7 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
     let unlistenExit: UnlistenFn | undefined;
     let disposed = false;
     let spawnedId: string | null = null;
+    let onWinResize: (() => void) | undefined;
 
     async function start(): Promise<(() => void) | undefined> {
       if (!containerRef.current) return;
@@ -84,7 +85,11 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
       }
 
       term.open(containerRef.current);
-      fit.fit();
+      // Defer fit to next paint so the container has its final dimensions.
+      requestAnimationFrame(() => fit.fit());
+
+      onWinResize = () => fit.fit();
+      window.addEventListener("resize", onWinResize);
 
       // Log the actual renderer that loaded so we can verify it in console.
       if (webglAddon !== null) {
@@ -186,6 +191,7 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
       termRef.current?.dispose();
       termRef.current = null;
       fitRef.current = null;
+      if (onWinResize) window.removeEventListener("resize", onWinResize);
     };
   }, [containerRef, cwd, shell, initialCommand, onExit]);
 
