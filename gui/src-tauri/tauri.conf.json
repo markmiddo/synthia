@@ -21,7 +21,8 @@
         "resizable": true,
         "visible": true,
         "center": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "devtools": true
       },
       {
         "label": "overlay",

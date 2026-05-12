@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { CanvasAddon } from "@xterm/addon-canvas";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
 import { glassTheme, terminalFont } from "./theme";
@@ -57,32 +58,17 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
         fontSize: terminalFont.size,
         lineHeight: terminalFont.lineHeight,
         fontWeight: terminalFont.weight,
-        cursorBlink: true,
-        scrollback: 5000,
+        cursorBlink: false,
+        scrollback: 1000,
         allowProposedApi: true,
+        disableStdin: false,
+        convertEol: false,
+        fastScrollModifier: "shift",
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
       term.loadAddon(new WebLinksAddon());
       term.loadAddon(new SearchAddon());
-
-      // Attempt WebGL renderer — fastest rendering path.
-      // We track success explicitly so we know which renderer is active.
-      let webglAddon: WebglAddon | null = null;
-      try {
-        webglAddon = new WebglAddon();
-        // Propagate WebGL context-loss as an error so we can fall through
-        // to the canvas renderer without leaving a broken addon attached.
-        webglAddon.onContextLoss(() => {
-          webglAddon?.dispose();
-          webglAddon = null;
-          console.warn("[terminal] WebGL context lost — renderer degraded to canvas");
-        });
-        term.loadAddon(webglAddon);
-      } catch (e) {
-        webglAddon = null;
-        console.warn("[terminal] WebGL addon failed to load — falling back to canvas renderer", e);
-      }
 
       term.open(containerRef.current);
       // Defer fit to next paint so the container has its final dimensions.
@@ -91,12 +77,29 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
       onWinResize = () => fit.fit();
       window.addEventListener("resize", onWinResize);
 
-      // Log the actual renderer that loaded so we can verify it in console.
-      if (webglAddon !== null) {
-        console.info("[terminal] WebGL renderer active");
-      } else {
-        console.warn("[terminal] Using canvas/DOM renderer — install @xterm/addon-canvas for better performance");
+      // Renderer load order: WebGL (fastest) → Canvas (mid-tier) → DOM (slowest fallback).
+      // On webkit2gtk/COSMIC, WebGL may silently fall back to the DOM renderer internally.
+      // The Canvas addon avoids that by using the 2D canvas API which is always accelerated.
+      let rendererName = "dom";
+      try {
+        const webglAddon = new WebglAddon();
+        // Propagate WebGL context-loss so we degrade gracefully without a broken addon.
+        webglAddon.onContextLoss(() => {
+          webglAddon.dispose();
+          console.warn("[terminal] WebGL context lost — falling back to dom renderer");
+        });
+        term.loadAddon(webglAddon);
+        rendererName = "webgl";
+      } catch (e) {
+        console.warn("[terminal] WebGL unavailable, trying canvas", e);
+        try {
+          term.loadAddon(new CanvasAddon());
+          rendererName = "canvas";
+        } catch (e2) {
+          console.warn("[terminal] Canvas unavailable, using DOM (slowest)", e2);
+        }
       }
+      console.info(`[terminal] renderer = ${rendererName}`);
 
       termRef.current = term;
       fitRef.current = fit;
@@ -115,8 +118,30 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
         // Zero base64 overhead in both directions.
         const outputChannel = new Channel<ArrayBuffer>();
         outputChannel.onmessage = (buf: ArrayBuffer) => {
+          console.debug("[terminal] chunk", buf.byteLength);
           term.write(new Uint8Array(buf));
         };
+
+        // Optional write-timing diagnostics: set localStorage.SYNTHIA_TERM_DEBUG = '1'
+        // in DevTools console and reload to enable. Logs inter-write delta + payload length.
+        const debug =
+          typeof localStorage !== "undefined" &&
+          localStorage.getItem("SYNTHIA_TERM_DEBUG") === "1";
+        if (debug) {
+          let lastWrite = performance.now();
+          const origWrite = term.write.bind(term);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (term as any).write = function (data: any) {
+            const now = performance.now();
+            console.debug(
+              `[terminal] write Δ${(now - lastWrite).toFixed(1)}ms len=${
+                typeof data === "string" ? data.length : data.byteLength
+              }`,
+            );
+            lastWrite = now;
+            return origWrite(data);
+          };
+        }
 
         // Exit events remain on the low-frequency event bus.
         unlistenExit = await listen<number>(
