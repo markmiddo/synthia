@@ -1,4 +1,9 @@
 //! Built-in PTY terminal sessions. See `docs/superpowers/specs/2026-05-13-terminal-emulator-design.md`.
+//!
+//! Orphan cleanup: portable-pty 0.8/0.9 does not expose `pre_exec` on `CommandBuilder`,
+//! so we cannot install `PR_SET_PDEATHSIG`. Graceful shutdown is handled by the `Drop`
+//! impl on `TerminalRegistry`. Hard parent crashes (SIGKILL/SIGSEGV) will leave shell
+//! children orphaned — deferred to v2.
 
 use std::io::Read;
 
