@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
 import { JournalPanel } from "./components/JournalPanel";
 import { TerminalPanel } from "./components/terminal/TerminalPanel";
+import { requestTerminal } from "./components/terminal/spawnRequest";
 import "./App.css";
 type Status = "stopped" | "running" | "recording" | "thinking";
 
@@ -2428,6 +2429,16 @@ function App() {
             <div className="task-panel-header">
               <span className="task-panel-title">Tasks</span>
               <div className="task-panel-actions">
+                <button
+                  className="task-panel-btn"
+                  onClick={() => {
+                    requestTerminal({ cwd: selectedWorktree.path });
+                    setCurrentSection("terminal");
+                  }}
+                  title="Open Terminal cwd'd to this worktree"
+                >
+                  Open Terminal
+                </button>
                 <button
                   className="task-panel-btn primary"
                   onClick={() => handleResumeSession(selectedWorktree)}
