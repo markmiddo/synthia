@@ -205,6 +205,11 @@ pub async fn terminal_kill(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn terminal_list(state: State<'_, AppState>) -> AppResult<Vec<SessionMeta>> {
+    Ok(state.terminals.list())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,5 +281,16 @@ mod tests {
         child.kill().unwrap();
         let _ = child.wait();
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn session_cap_constant_matches_spec() {
+        assert_eq!(MAX_SESSIONS, 16);
+    }
+
+    #[test]
+    fn terminal_list_empty_initially() {
+        let reg = crate::state::TerminalRegistry::default();
+        assert!(reg.list().is_empty());
     }
 }
