@@ -64,14 +64,35 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
       term.loadAddon(fit);
       term.loadAddon(new WebLinksAddon());
       term.loadAddon(new SearchAddon());
+
+      // Attempt WebGL renderer — fastest rendering path.
+      // We track success explicitly so we know which renderer is active.
+      let webglAddon: WebglAddon | null = null;
       try {
-        term.loadAddon(new WebglAddon());
+        webglAddon = new WebglAddon();
+        // Propagate WebGL context-loss as an error so we can fall through
+        // to the canvas renderer without leaving a broken addon attached.
+        webglAddon.onContextLoss(() => {
+          webglAddon?.dispose();
+          webglAddon = null;
+          console.warn("[terminal] WebGL context lost — renderer degraded to canvas");
+        });
+        term.loadAddon(webglAddon);
       } catch (e) {
-        console.warn("[terminal] WebGL addon unavailable, falling back to canvas", e);
+        webglAddon = null;
+        console.warn("[terminal] WebGL addon failed to load — falling back to canvas renderer", e);
       }
 
       term.open(containerRef.current);
       fit.fit();
+
+      // Log the actual renderer that loaded so we can verify it in console.
+      if (webglAddon !== null) {
+        console.info("[terminal] WebGL renderer active");
+      } else {
+        console.warn("[terminal] Using canvas/DOM renderer — install @xterm/addon-canvas for better performance");
+      }
+
       termRef.current = term;
       fitRef.current = fit;
 
@@ -85,13 +106,11 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
         setSessionId(sessionMeta.id);
         setMeta(sessionMeta);
 
-        // Build a typed Channel for PTY output. This bypasses the global event
-        // router and eliminates the per-chunk routing overhead that caused
-        // visible keystroke lag.
-        const outputChannel = new Channel<string>();
-        outputChannel.onmessage = (encoded: string) => {
-          const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
-          term.write(bytes);
+        // Binary channel: Rust sends InvokeResponseBody::Raw → JS receives ArrayBuffer.
+        // Zero base64 overhead in both directions.
+        const outputChannel = new Channel<ArrayBuffer>();
+        outputChannel.onmessage = (buf: ArrayBuffer) => {
+          term.write(new Uint8Array(buf));
         };
 
         // Exit events remain on the low-frequency event bus.
@@ -103,10 +122,24 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
           },
         );
 
+        // Keystroke coalescing: batch multiple onData callbacks that fire within
+        // the same JS microtask queue drain into a single invoke call.
+        // Eliminates redundant IPC round-trips during paste or fast typing.
+        let pendingInput = "";
+        let inputScheduled = false;
         term.onData((data) => {
-          invoke("terminal_write", { sessionId: sessionMeta.id, data }).catch((e) =>
-            console.error("[terminal] write failed", e),
-          );
+          pendingInput += data;
+          if (!inputScheduled) {
+            inputScheduled = true;
+            queueMicrotask(() => {
+              const batch = pendingInput;
+              pendingInput = "";
+              inputScheduled = false;
+              invoke("terminal_write", { sessionId: sessionMeta.id, data: batch }).catch(
+                (e) => console.error("[terminal] write failed", e),
+              );
+            });
+          }
         });
 
         term.onResize(({ cols, rows }) => {

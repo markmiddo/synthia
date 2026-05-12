@@ -374,9 +374,7 @@ pub fn run() {
             }
 
             if let Some(watcher) = spawn_state_watcher(app_handle, normal_icon, recording_icon) {
-                if let Ok(mut guard) = app.state::<state::AppState>().watchers.lock() {
-                    guard.push(Box::new(watcher));
-                }
+                app.state::<state::AppState>().watchers.lock().push(Box::new(watcher));
             }
 
             Ok(())

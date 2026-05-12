@@ -22,7 +22,7 @@ pub fn get_status() -> String {
 
 #[tauri::command]
 pub fn start_synthia(state: tauri::State<'_, AppState>) -> AppResult<String> {
-    let mut proc = state.synthia_process.lock().unwrap();
+    let mut proc = state.synthia_process.lock();
     if proc.is_some() {
         return Ok("Already running".to_string());
     }
@@ -51,7 +51,7 @@ pub fn stop_synthia(state: tauri::State<'_, AppState>) -> AppResult<String> {
         .args(["-f", "synthia.main"])
         .output();
 
-    let mut proc = state.synthia_process.lock().unwrap();
+    let mut proc = state.synthia_process.lock();
     *proc = None;
 
     Ok("Synthia stopped".to_string())

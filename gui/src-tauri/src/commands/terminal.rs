@@ -4,13 +4,25 @@
 //! so we cannot install `PR_SET_PDEATHSIG`. Graceful shutdown is handled by the `Drop`
 //! impl on `TerminalRegistry`. Hard parent crashes (SIGKILL/SIGSEGV) will leave shell
 //! children orphaned — deferred to v2.
+//!
+//! # Performance notes
+//!
+//! - **Binary channel**: PTY output is sent as raw bytes via `InvokeResponseBody::Raw`
+//!   (no base64 encode on Rust side, no atob on JS side). Saves ~33% bandwidth and
+//!   eliminates CPU-intensive encode/decode on every keystroke echo.
+//! - **Read coalescing**: a blocking reader thread feeds an unbounded mpsc channel; an
+//!   async batcher task drains it every ~1 ms before forwarding to the IPC channel.
+//!   This collapses many 1-byte reads (shell echo) into a single IPC message while
+//!   keeping first-byte latency ≤ 1 ms.
+//! - **parking_lot::Mutex**: used throughout `AppState` — faster than std, no poison.
 
 use std::io::Read;
+use std::time::Duration;
 
-use base64::Engine;
 use chrono::Utc;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use tauri::{AppHandle, Emitter, State, ipc::Channel};
+use tauri::{AppHandle, Emitter, State, ipc::Channel, ipc::InvokeResponseBody};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -18,6 +30,10 @@ use crate::state::{AppState, PtySession, SessionMeta};
 
 const MAX_SESSIONS: usize = 16;
 const READ_CHUNK_SIZE: usize = 4096;
+
+/// How long the batcher waits for additional bytes before flushing.
+/// 1 ms gives responsive typing feel while still coalescing multi-byte escapes.
+const BATCH_WINDOW: Duration = Duration::from_millis(1);
 
 fn detect_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
@@ -49,11 +65,7 @@ pub async fn terminal_spawn(
         .ok_or_else(|| AppError::Terminal("no usable cwd".into()))?;
 
     {
-        let guard = state
-            .terminals
-            .sessions
-            .lock()
-            .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+        let guard = state.terminals.sessions.lock();
         if guard.len() >= MAX_SESSIONS {
             return Err(AppError::Terminal(format!(
                 "max {MAX_SESSIONS} terminals"
@@ -111,12 +123,7 @@ pub async fn terminal_spawn(
         meta: meta.clone(),
     };
 
-    state
-        .terminals
-        .sessions
-        .lock()
-        .map_err(|_| AppError::Terminal("registry poisoned".into()))?
-        .insert(session_id, session);
+    state.terminals.sessions.lock().insert(session_id, session);
 
     let _ = app; // app handle is used by terminal_attach
     Ok(meta)
@@ -124,9 +131,14 @@ pub async fn terminal_spawn(
 
 /// Start streaming PTY output for an already-spawned session.
 ///
-/// `on_output` is a `Channel<String>` that receives base64-encoded PTY chunks.
-/// Using a typed channel instead of the global event bus eliminates per-byte
-/// routing overhead and removes visible keystroke lag.
+/// `on_output` is a `Channel<InvokeResponseBody>` that receives raw PTY bytes.
+/// Using raw binary (`InvokeResponseBody::Raw`) avoids base64 encoding overhead
+/// on both sides: no encode in Rust, no `atob` in JavaScript.
+///
+/// Read coalescing: a blocking reader thread pushes chunks into an unbounded mpsc
+/// channel; an async batcher task drains it within a 1 ms window before sending
+/// a single coalesced IPC message. This eliminates per-byte round-trips for
+/// single-keystroke echo while keeping first-byte latency ≤ 1 ms.
 ///
 /// React must call this AFTER setting up `channel.onmessage` and subscribing
 /// to `terminal-exit-{id}`, otherwise the first burst of output (the shell
@@ -136,14 +148,10 @@ pub async fn terminal_attach(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: Uuid,
-    on_output: Channel<String>,
+    on_output: Channel<InvokeResponseBody>,
 ) -> AppResult<()> {
     let mut reader = {
-        let mut guard = state
-            .terminals
-            .sessions
-            .lock()
-            .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+        let mut guard = state.terminals.sessions.lock();
         let session = guard
             .get_mut(&session_id)
             .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
@@ -156,33 +164,54 @@ pub async fn terminal_attach(
             .ok_or_else(|| AppError::Terminal("session has no reader".into()))?
     };
 
-    let app_handle = app.clone();
-    let task = tokio::task::spawn_blocking(move || {
+    // Unbounded channel from the blocking reader thread → async batcher task.
+    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+    // Blocking reader thread: reads PTY output as fast as the OS delivers it.
+    tokio::task::spawn_blocking(move || {
         let mut buf = vec![0u8; READ_CHUNK_SIZE];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let encoded =
-                        base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                    // Channel::send is much faster than app_handle.emit for high-frequency
-                    // streaming: it bypasses the global event router entirely.
-                    if on_output.send(encoded).is_err() {
+                    if tx.send(buf[..n].to_vec()).is_err() {
                         break;
                     }
                 }
                 Err(_) => break,
             }
         }
+    });
+
+    // Async batcher task: coalesces reads within BATCH_WINDOW and sends a
+    // single binary IPC message per window.
+    let app_handle = app.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            // Wait for the first chunk (blocking until PTY has data).
+            let first = match rx.recv().await {
+                Some(v) => v,
+                None => break,
+            };
+
+            let mut batch = first;
+
+            // Drain any immediately-available chunks within the batch window.
+            let deadline = tokio::time::Instant::now() + BATCH_WINDOW;
+            while let Ok(Some(more)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+                batch.extend_from_slice(&more);
+            }
+
+            // Send as raw bytes — JS receives an ArrayBuffer, zero encode/decode cost.
+            if on_output.send(InvokeResponseBody::Raw(batch)).is_err() {
+                break;
+            }
+        }
         // Exit notification stays on the event bus — it fires once and is low-frequency.
         let _ = app_handle.emit(&format!("terminal-exit-{session_id}"), 0_i32);
     });
 
-    let mut guard = state
-        .terminals
-        .sessions
-        .lock()
-        .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+    let mut guard = state.terminals.sessions.lock();
     if let Some(session) = guard.get_mut(&session_id) {
         session.reader_task = Some(task);
     } else {
@@ -207,11 +236,7 @@ pub async fn terminal_write(
     session_id: Uuid,
     data: String,
 ) -> AppResult<()> {
-    let mut guard = state
-        .terminals
-        .sessions
-        .lock()
-        .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+    let mut guard = state.terminals.sessions.lock();
     let session = guard
         .get_mut(&session_id)
         .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
@@ -225,11 +250,7 @@ pub async fn terminal_resize(
     cols: u16,
     rows: u16,
 ) -> AppResult<()> {
-    let guard = state
-        .terminals
-        .sessions
-        .lock()
-        .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+    let guard = state.terminals.sessions.lock();
     let session = guard
         .get(&session_id)
         .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
@@ -251,11 +272,7 @@ pub async fn terminal_kill(
     state: State<'_, AppState>,
     session_id: Uuid,
 ) -> AppResult<()> {
-    let mut guard = state
-        .terminals
-        .sessions
-        .lock()
-        .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+    let mut guard = state.terminals.sessions.lock();
     let mut session = guard
         .remove(&session_id)
         .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
@@ -274,8 +291,8 @@ pub async fn terminal_list(state: State<'_, AppState>) -> AppResult<Vec<SessionM
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use std::io::Read;
+    use std::time::Duration;
 
     #[test]
     fn detect_shell_returns_something() {

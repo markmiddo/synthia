@@ -4163,7 +4163,6 @@ dependencies = [
 name = "synthia-gui"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
  "dns-lookup",
@@ -4171,6 +4170,7 @@ dependencies = [
  "image 0.24.9",
  "ipnet",
  "notify",
+ "parking_lot",
  "portable-pty",
  "regex",
  "reqwest",

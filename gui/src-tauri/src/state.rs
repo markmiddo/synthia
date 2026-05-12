@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 use std::process::Child;
-use std::sync::Mutex;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
+use parking_lot::Mutex;
 use portable_pty::{Child as PtyChild, MasterPty};
 use serde::Serialize;
 use tokio::task::JoinHandle;
@@ -71,19 +71,13 @@ pub struct TerminalRegistry {
 #[allow(dead_code)]
 impl TerminalRegistry {
     pub fn list(&self) -> Vec<SessionMeta> {
-        match self.sessions.lock() {
-            Ok(g) => g.values().map(|s| s.meta.clone()).collect(),
-            Err(_) => Vec::new(),
-        }
+        self.sessions.lock().values().map(|s| s.meta.clone()).collect()
     }
 }
 
 impl Drop for TerminalRegistry {
     fn drop(&mut self) {
-        let mut guard = match self.sessions.lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
-        };
+        let mut guard = self.sessions.lock();
         for (_id, mut sess) in guard.drain() {
             let _ = sess.child.kill();
             if let Some(t) = sess.reader_task.take() {
