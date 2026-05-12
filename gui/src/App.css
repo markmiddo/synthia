@@ -1,3 +1,5 @@
+@import "./components/terminal/terminal.css";
+
 @font-face {
   font-family: 'Ethnocentric';
   src: url('./assets/fonts/Ethnocentric-Regular.otf') format('opentype');
