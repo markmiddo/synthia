@@ -159,6 +159,52 @@ pub async fn terminal_write(
     write_to_writer(session.writer.as_mut(), &data)
 }
 
+#[tauri::command]
+pub async fn terminal_resize(
+    state: State<'_, AppState>,
+    session_id: Uuid,
+    cols: u16,
+    rows: u16,
+) -> AppResult<()> {
+    let guard = state
+        .terminals
+        .sessions
+        .lock()
+        .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+    let session = guard
+        .get(&session_id)
+        .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
+    let cols = cols.max(1);
+    let rows = rows.max(1);
+    session
+        .master
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| AppError::Terminal(format!("resize: {e}")))
+}
+
+#[tauri::command]
+pub async fn terminal_kill(
+    state: State<'_, AppState>,
+    session_id: Uuid,
+) -> AppResult<()> {
+    let mut guard = state
+        .terminals
+        .sessions
+        .lock()
+        .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+    let mut session = guard
+        .remove(&session_id)
+        .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
+    let _ = session.child.kill();
+    session.reader_task.abort();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +246,35 @@ mod tests {
         assert!(echoed.contains("hello"));
 
         child.kill().unwrap();
+    }
+
+    #[test]
+    fn resize_changes_pty_size_no_panic() {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+        pair.master
+            .resize(PtySize { rows: 1, cols: 1, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+        pair.master
+            .resize(PtySize { rows: 200, cols: 500, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+    }
+
+    #[test]
+    fn kill_terminates_child_quickly() {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+        let mut cmd = CommandBuilder::new("/bin/sleep");
+        cmd.arg("60");
+        let mut child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+        let start = std::time::Instant::now();
+        child.kill().unwrap();
+        let _ = child.wait();
+        assert!(start.elapsed() < Duration::from_secs(2));
     }
 }
