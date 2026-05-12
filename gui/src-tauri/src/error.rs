@@ -25,6 +25,8 @@ pub enum AppError {
     Http(String),
     #[error("other: {0}")]
     Other(String),
+    #[error("terminal: {0}")]
+    Terminal(String),
 }
 
 impl serde::Serialize for AppError {
@@ -83,6 +85,13 @@ mod tests {
         let err = AppError::Validation("bad name".to_string());
         let json = serde_json::to_string(&err).unwrap();
         assert_eq!(json, "\"validation: bad name\"");
+    }
+
+    #[test]
+    fn terminal_variant_serializes() {
+        let err = AppError::Terminal("spawn failed".to_string());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"terminal: spawn failed\"");
     }
 
     #[test]
