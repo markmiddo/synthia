@@ -15,6 +15,7 @@ pub mod news;
 pub mod notes;
 pub mod overlay;
 pub mod remote;
+pub mod terminal;
 pub mod usage;
 pub mod weather;
 pub mod worktrees;
