@@ -16,10 +16,14 @@ use crate::commands::usage::UsageStats;
 #[derive(Default)]
 pub struct AppState {
     pub synthia_process: Mutex<Option<Child>>,
+    /// Cached OAuth bearer token + the moment it was fetched.
     pub usage_cache: Mutex<Option<UsageTokenCache>>,
+    /// Cached `UsageStats` response payload + fetch timestamp.
     pub usage_response_cache: Mutex<Option<UsageResponseCache>>,
-    #[allow(dead_code)]
+    /// Filesystem watchers kept alive for the app lifetime; populated in CP9.
+    #[allow(dead_code)] // wired up in CP9
     pub watchers: Mutex<Vec<Box<dyn std::any::Any + Send + Sync>>>,
+    /// Kept alive for custom Drop impl; manages PTY session lifecycle.
     #[allow(dead_code)]
     pub terminals: TerminalRegistry,
 }
