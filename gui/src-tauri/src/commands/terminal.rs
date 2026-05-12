@@ -88,7 +88,7 @@ pub async fn terminal_spawn(
         .master
         .take_writer()
         .map_err(|e| AppError::Terminal(format!("take_writer: {e}")))?;
-    let mut reader = pair
+    let reader = pair
         .master
         .try_clone_reader()
         .map_err(|e| AppError::Terminal(format!("try_clone_reader: {e}")))?;
@@ -102,8 +102,57 @@ pub async fn terminal_spawn(
         created_at: Utc::now(),
     };
 
+    let session = PtySession {
+        master: pair.master,
+        writer,
+        child,
+        reader_task: None,
+        pending_reader: Some(reader),
+        meta: meta.clone(),
+    };
+
+    state
+        .terminals
+        .sessions
+        .lock()
+        .map_err(|_| AppError::Terminal("registry poisoned".into()))?
+        .insert(session_id, session);
+
+    let _ = app; // app handle is used by terminal_attach
+    Ok(meta)
+}
+
+/// Start streaming PTY output for an already-spawned session.
+///
+/// React must call this AFTER subscribing to `terminal-output-{id}` and
+/// `terminal-exit-{id}` events, otherwise the first burst of output (often
+/// the shell prompt) is emitted into the void.
+#[tauri::command]
+pub async fn terminal_attach(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: Uuid,
+) -> AppResult<()> {
+    let mut reader = {
+        let mut guard = state
+            .terminals
+            .sessions
+            .lock()
+            .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+        let session = guard
+            .get_mut(&session_id)
+            .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
+        if session.reader_task.is_some() {
+            return Ok(()); // idempotent
+        }
+        session
+            .pending_reader
+            .take()
+            .ok_or_else(|| AppError::Terminal("session has no reader".into()))?
+    };
+
     let app_handle = app.clone();
-    let reader_task = tokio::task::spawn_blocking(move || {
+    let task = tokio::task::spawn_blocking(move || {
         let mut buf = vec![0u8; READ_CHUNK_SIZE];
         loop {
             match reader.read(&mut buf) {
@@ -119,22 +168,17 @@ pub async fn terminal_spawn(
         let _ = app_handle.emit(&format!("terminal-exit-{session_id}"), 0_i32);
     });
 
-    let session = PtySession {
-        master: pair.master,
-        writer,
-        child,
-        reader_task,
-        meta: meta.clone(),
-    };
-
-    state
+    let mut guard = state
         .terminals
         .sessions
         .lock()
-        .map_err(|_| AppError::Terminal("registry poisoned".into()))?
-        .insert(session_id, session);
-
-    Ok(meta)
+        .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+    if let Some(session) = guard.get_mut(&session_id) {
+        session.reader_task = Some(task);
+    } else {
+        task.abort();
+    }
+    Ok(())
 }
 
 fn write_to_writer(writer: &mut dyn std::io::Write, data: &str) -> AppResult<()> {
@@ -206,7 +250,9 @@ pub async fn terminal_kill(
         .remove(&session_id)
         .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
     let _ = session.child.kill();
-    session.reader_task.abort();
+    if let Some(t) = session.reader_task.take() {
+        t.abort();
+    }
     Ok(())
 }
 

@@ -468,6 +468,7 @@ pub fn run() {
             commands::journal::get_journal_entries,
             commands::journal::get_journal_entries_by_agent,
             commands::terminal::terminal_spawn,
+            commands::terminal::terminal_attach,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_kill,

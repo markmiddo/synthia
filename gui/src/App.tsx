@@ -2262,6 +2262,13 @@ function App() {
         </div>
         <nav className="sidebar-nav">
           <button
+            className={`nav-item ${currentSection === "terminal" ? "active" : ""}`}
+            onClick={() => setCurrentSection("terminal")}
+          >
+            <span className="nav-item-icon">▸_</span>
+            Terminal
+          </button>
+          <button
             className={`nav-item ${currentSection === "agents" ? "active" : ""}`}
             onClick={() => setCurrentSection("agents")}
           >
@@ -2288,13 +2295,6 @@ function App() {
           >
             <span className="nav-item-icon">&#128193;</span>
             Worktrees
-          </button>
-          <button
-            className={`nav-item ${currentSection === "terminal" ? "active" : ""}`}
-            onClick={() => setCurrentSection("terminal")}
-          >
-            <span className="nav-item-icon">▸_</span>
-            Terminal
           </button>
           <button
             className={`nav-item ${currentSection === "github" ? "active" : ""}`}

@@ -54,7 +54,12 @@ pub struct PtySession {
     pub master: Box<dyn MasterPty + Send>,
     pub writer: Box<dyn std::io::Write + Send>,
     pub child: Box<dyn PtyChild + Send + Sync>,
-    pub reader_task: JoinHandle<()>,
+    /// Reader task starts in `terminal_attach`, not `terminal_spawn` —
+    /// avoids a race where bash's first prompt is emitted before React
+    /// subscribes to `terminal-output-{id}`.
+    pub reader_task: Option<JoinHandle<()>>,
+    /// Reader handle stored until `terminal_attach` consumes it.
+    pub pending_reader: Option<Box<dyn std::io::Read + Send>>,
     pub meta: SessionMeta,
 }
 
@@ -81,7 +86,9 @@ impl Drop for TerminalRegistry {
         };
         for (_id, mut sess) in guard.drain() {
             let _ = sess.child.kill();
-            sess.reader_task.abort();
+            if let Some(t) = sess.reader_task.take() {
+                t.abort();
+            }
         }
     }
 }

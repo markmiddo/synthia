@@ -114,6 +114,10 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
           );
         });
 
+        // Now that listeners are attached, tell Rust to start streaming PTY output.
+        // Without this, the shell's first prompt is emitted before we subscribe.
+        await invoke("terminal_attach", { sessionId: sessionMeta.id });
+
         if (initialCommand) {
           await invoke("terminal_write", {
             sessionId: sessionMeta.id,
