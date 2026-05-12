@@ -23,8 +23,8 @@ pub struct AppState {
     /// Filesystem watchers kept alive for the app lifetime; populated in CP9.
     #[allow(dead_code)] // wired up in CP9
     pub watchers: Mutex<Vec<Box<dyn std::any::Any + Send + Sync>>>,
-    /// Kept alive for custom Drop impl; manages PTY session lifecycle.
-    #[allow(dead_code)]
+    /// PTY session registry; read via `terminal_*` commands starting in Task 3.
+    #[allow(dead_code)] // wired up in commands/terminal.rs
     pub terminals: TerminalRegistry,
 }
 
