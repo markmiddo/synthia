@@ -132,9 +132,38 @@ pub async fn terminal_spawn(
     Ok(meta)
 }
 
+fn write_to_writer(writer: &mut dyn std::io::Write, data: &str) -> AppResult<()> {
+    writer
+        .write_all(data.as_bytes())
+        .map_err(|e| AppError::Terminal(format!("write: {e}")))?;
+    writer
+        .flush()
+        .map_err(|e| AppError::Terminal(format!("flush: {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn terminal_write(
+    state: State<'_, AppState>,
+    session_id: Uuid,
+    data: String,
+) -> AppResult<()> {
+    let mut guard = state
+        .terminals
+        .sessions
+        .lock()
+        .map_err(|_| AppError::Terminal("registry poisoned".into()))?;
+    let session = guard
+        .get_mut(&session_id)
+        .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
+    write_to_writer(session.writer.as_mut(), &data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+    use std::io::Read;
 
     #[test]
     fn detect_shell_returns_something() {
@@ -146,5 +175,30 @@ mod tests {
     fn derive_title_formats_correctly() {
         assert_eq!(derive_title("/bin/zsh", "/home/me/synthia"), "zsh · synthia");
         assert_eq!(derive_title("/bin/bash", "/"), "bash · /");
+    }
+
+    #[test]
+    fn write_forwards_bytes_to_pty() {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+        let mut cmd = CommandBuilder::new("/bin/cat");
+        cmd.env("TERM", "xterm-256color");
+        let mut child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+
+        let mut writer = pair.master.take_writer().unwrap();
+        let mut reader = pair.master.try_clone_reader().unwrap();
+
+        write_to_writer(&mut writer, "hello\n").unwrap();
+
+        let mut buf = [0u8; 64];
+        std::thread::sleep(Duration::from_millis(100));
+        let n = reader.read(&mut buf).unwrap();
+        let echoed = String::from_utf8_lossy(&buf[..n]);
+        assert!(echoed.contains("hello"));
+
+        child.kill().unwrap();
     }
 }

@@ -467,7 +467,8 @@ pub fn run() {
             commands::journal::add_journal_entry,
             commands::journal::get_journal_entries,
             commands::journal::get_journal_entries_by_agent,
-            commands::terminal::terminal_spawn
+            commands::terminal::terminal_spawn,
+            commands::terminal::terminal_write
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
