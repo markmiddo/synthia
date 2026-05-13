@@ -184,6 +184,7 @@ pub async fn native_term_attach(
         renderer: renderer_arc,
         grid,
         leased,
+        writer: writer_arc,
         reader_task,
         render_task,
         input_task,
@@ -195,9 +196,9 @@ pub async fn native_term_attach(
 
 /// Show the persistent terminal at the given rect.  On first call it spawns
 /// a PTY and creates the subsurface; on subsequent calls (e.g. after the
-/// user navigates away and back) it reuses the same PTY + subsurface and
-/// just repositions the overlay.  The returned `Uuid` identifies the
-/// persistent session for follow-up `hide`/`resize` calls.
+/// user navigates away and back) it reuses the preserved grid + PTY +
+/// reader task and rebuilds only the subsurface / softbuffer / render
+/// pipeline.  The returned `Uuid` identifies the session.
 #[tauri::command]
 #[allow(dead_code)] // registered in lib.rs
 pub async fn native_term_show(
@@ -205,96 +206,241 @@ pub async fn native_term_show(
     state: State<'_, AppState>,
     geom: TermGeom,
 ) -> AppResult<Uuid> {
-    // Fast path: persistent session already exists and is still in the
-    // native registry.  Reposition + resize and return.
-    let existing = *state.native_terminals.persistent.lock();
-    if let Some(id) = existing {
-        let mut sessions = state.native_terminals.sessions.lock();
-        if let Some(session) = sessions.get_mut(&id) {
-            // Bring subsurface back on-screen and resize to current rect.
-            let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(13.5);
-            let usable_w =
-                geom.width.saturating_sub(crate::native_term::renderer::PADDING_X * 2);
-            let usable_h =
-                geom.height.saturating_sub(crate::native_term::renderer::PADDING_Y * 2);
-            let cols = (usable_w / cell_w).max(1) as usize;
-            let rows = (usable_h / cell_h).max(1) as usize;
-            {
-                let h = session.subsurface.lock();
-                h.subsurface.set_position(geom.x, geom.y);
-                h.child_surface.commit();
-                h.parent_surface.commit();
-            }
-            session.grid.lock().resize(rows, cols);
-            let _ = crate::commands::terminal::set_pty_size(
-                &state.terminals, id, cols as u16, rows as u16,
-            );
-            {
-                let mut r = session.renderer.lock();
-                r.width = geom.width;
-                r.height = geom.height;
-                r.cell_w = cell_w;
-                r.cell_h = cell_h;
-                r.buffer = vec![0u32; (geom.width * geom.height) as usize];
-            }
-            {
-                let mut sb = session.softbuffer.lock();
-                sb.surface
-                    .resize(
-                        std::num::NonZeroU32::new(geom.width)
-                            .ok_or_else(|| AppError::Terminal("zero w".into()))?,
-                        std::num::NonZeroU32::new(geom.height)
-                            .ok_or_else(|| AppError::Terminal("zero h".into()))?,
-                    )
-                    .map_err(|e| AppError::Terminal(format!("sb resize: {e}")))?;
-            }
-            // Mark grid dirty so the render loop repaints immediately at the
-            // new position (otherwise it might be idle for up to 530ms).
-            session.grid.lock().dirty = true;
-            return Ok(id);
+    // Already-active session: just reposition + resize.
+    {
+        let existing = state.native_terminals.sessions.lock();
+        if let Some((id, _)) = existing.iter().next() {
+            let id = *id;
+            drop(existing);
+            return reposition_active_session(&state, id, geom);
         }
-        // Stale id — fall through to spawn fresh.
     }
 
-    // Slow path: spawn a new PTY and attach a new subsurface.
+    // Hidden persistent state available?  Re-attach the subsurface using
+    // the preserved grid + writer + reader_task + PTY lease.
+    let persistent = state.native_terminals.persistent.lock().take();
+    if let Some(p) = persistent {
+        return attach_from_persistent(app, state, p, geom).await;
+    }
+
+    // No persistent state — spawn a fresh PTY and full session.
     let meta =
         crate::commands::terminal::spawn_pty_session_inline(&state.terminals, None, None)?;
     let session_id = meta.id;
     native_term_attach(app, state.clone(), session_id, geom).await?;
-    *state.native_terminals.persistent.lock() = Some(session_id);
     Ok(session_id)
 }
 
-/// Hide the persistent terminal without destroying it.  Paints a panel-
-/// coloured buffer, moves the subsurface off-screen, and commits both child
-/// and parent — but keeps the PTY, render loop, and subsurface alive so a
-/// subsequent `native_term_show` reattaches instantly.
+fn reposition_active_session(
+    state: &State<'_, AppState>,
+    id: Uuid,
+    geom: TermGeom,
+) -> AppResult<Uuid> {
+    let mut sessions = state.native_terminals.sessions.lock();
+    let session = sessions
+        .get_mut(&id)
+        .ok_or_else(|| AppError::Terminal("session vanished mid-show".into()))?;
+    let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(13.5);
+    let usable_w =
+        geom.width.saturating_sub(crate::native_term::renderer::PADDING_X * 2);
+    let usable_h =
+        geom.height.saturating_sub(crate::native_term::renderer::PADDING_Y * 2);
+    let cols = (usable_w / cell_w).max(1) as usize;
+    let rows = (usable_h / cell_h).max(1) as usize;
+    {
+        let h = session.subsurface.lock();
+        h.subsurface.set_position(geom.x, geom.y);
+        h.child_surface.commit();
+        h.parent_surface.commit();
+    }
+    session.grid.lock().resize(rows, cols);
+    let _ = crate::commands::terminal::set_pty_size(
+        &state.terminals, id, cols as u16, rows as u16,
+    );
+    {
+        let mut r = session.renderer.lock();
+        r.width = geom.width;
+        r.height = geom.height;
+        r.cell_w = cell_w;
+        r.cell_h = cell_h;
+        r.buffer = vec![0u32; (geom.width * geom.height) as usize];
+    }
+    {
+        let mut sb = session.softbuffer.lock();
+        sb.surface
+            .resize(
+                std::num::NonZeroU32::new(geom.width)
+                    .ok_or_else(|| AppError::Terminal("zero w".into()))?,
+                std::num::NonZeroU32::new(geom.height)
+                    .ok_or_else(|| AppError::Terminal("zero h".into()))?,
+            )
+            .map_err(|e| AppError::Terminal(format!("sb resize: {e}")))?;
+    }
+    session.grid.lock().dirty = true;
+    Ok(id)
+}
+
+/// Recreate subsurface + softbuffer + renderer + render/input tasks for
+/// a session whose state survived a hide.  The grid + writer + reader_task
+/// are reused from the persistent slot.
+async fn attach_from_persistent(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    p: crate::native_term::PersistentNativeState,
+    geom: TermGeom,
+) -> AppResult<Uuid> {
+    use raw_window_handle::RawDisplayHandle;
+    use raw_window_handle::HasDisplayHandle as _;
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| AppError::Terminal("no main window".into()))?;
+    let parent_ptr = crate::native_term::subsurface::parent_surface_from_tauri(&window)?;
+    let display_handle = window
+        .display_handle()
+        .map_err(|e| AppError::Terminal(format!("display_handle: {e}")))?;
+    let display_ptr = match display_handle.as_raw() {
+        RawDisplayHandle::Wayland(h) => h.display,
+        _ => return Err(AppError::Terminal("display not wayland".into())),
+    };
+    let conn = crate::native_term::wayland_connection()
+        .cloned()
+        .ok_or_else(|| AppError::Terminal("wayland conn not initialised".into()))?;
+
+    let subsurface = crate::native_term::subsurface::create_subsurface(
+        &conn, parent_ptr, geom.x, geom.y, geom.width, geom.height,
+    )?;
+    let subsurface_arc = std::sync::Arc::new(parking_lot::Mutex::new(subsurface));
+    let child_surface_ptr = {
+        use wayland_client::Proxy as _;
+        let id = subsurface_arc.lock().child_surface.id();
+        let raw = id.as_ptr();
+        std::ptr::NonNull::new(raw as *mut std::ffi::c_void)
+            .ok_or_else(|| AppError::Terminal("null child surface ptr".into()))?
+    };
+    let softbuffer_state = crate::native_term::subsurface::init_softbuffer(
+        display_ptr, child_surface_ptr, geom.width, geom.height,
+    )?;
+    let softbuffer_arc = std::sync::Arc::new(parking_lot::Mutex::new(softbuffer_state));
+
+    let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(13.5);
+    let usable_w =
+        geom.width.saturating_sub(crate::native_term::renderer::PADDING_X * 2);
+    let usable_h =
+        geom.height.saturating_sub(crate::native_term::renderer::PADDING_Y * 2);
+    let cols = (usable_w / cell_w).max(1) as usize;
+    let rows = (usable_h / cell_h).max(1) as usize;
+    p.grid.lock().resize(rows, cols);
+    let _ = crate::commands::terminal::set_pty_size(
+        &state.terminals, p.session_id, cols as u16, rows as u16,
+    );
+
+    let renderer = crate::native_term::renderer::Renderer::new(
+        geom.width, geom.height, cell_w, cell_h, 13.5,
+    )?;
+    let renderer_arc = std::sync::Arc::new(parking_lot::Mutex::new(renderer));
+    p.grid.lock().dirty = true;
+
+    let grid_for_render = p.grid.clone();
+    let renderer_for_render = renderer_arc.clone();
+    let softbuffer_for_render = softbuffer_arc.clone();
+    let render_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        let start = std::time::Instant::now();
+        let mut last_blink = true;
+        loop {
+            interval.tick().await;
+            let phase = (start.elapsed().as_millis() / 530).is_multiple_of(2);
+            let dirty = {
+                let mut g = grid_for_render.lock();
+                if g.dirty { g.dirty = false; true } else { false }
+            };
+            let blink_changed = phase != last_blink;
+            if dirty || blink_changed {
+                last_blink = phase;
+                let g = grid_for_render.lock();
+                let mut r = renderer_for_render.lock();
+                r.render_grid(&g, phase);
+                let _ = crate::native_term::subsurface::present_buffer(
+                    &softbuffer_for_render,
+                    &r.buffer,
+                );
+            }
+        }
+    });
+
+    let writer_for_input = p.writer.clone();
+    let conn_for_input = conn.clone();
+    let input_task = tokio::task::spawn_blocking(move || {
+        if let Err(e) =
+            crate::native_term::keyboard::run_keyboard_loop(conn_for_input, writer_for_input)
+        {
+            eprintln!("[native-term] keyboard loop ended: {e}");
+        }
+    });
+
+    let session = crate::native_term::NativeSession {
+        session_id: p.session_id,
+        subsurface: subsurface_arc,
+        softbuffer: softbuffer_arc,
+        renderer: renderer_arc,
+        grid: p.grid,
+        leased: p.leased,
+        writer: p.writer,
+        reader_task: p.reader_task,
+        render_task,
+        input_task,
+    };
+
+    state
+        .native_terminals
+        .sessions
+        .lock()
+        .insert(p.session_id, session);
+    Ok(p.session_id)
+}
+
+/// Hide the persistent terminal.
+///
+/// Destroys the subsurface (so it visually disappears via the next parent
+/// commit) but preserves the PTY lease, grid, writer, and reader_task in
+/// the persistent slot.  When `native_term_show` is called again we rebuild
+/// the subsurface/softbuffer/render-task using those preserved pieces, so
+/// the shell state, scrollback, and any running command survive the
+/// navigation away.
 #[tauri::command]
 #[allow(dead_code)] // registered in lib.rs
 pub async fn native_term_hide(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
-    let id = match *state.native_terminals.persistent.lock() {
-        Some(id) => id,
-        None => return Ok(()),
+    let session = {
+        let mut sessions = state.native_terminals.sessions.lock();
+        let id = match sessions.keys().next().copied() {
+            Some(id) => id,
+            None => return Ok(()),
+        };
+        sessions.remove(&id)
     };
-    let sessions = state.native_terminals.sessions.lock();
-    let Some(session) = sessions.get(&id) else {
-        return Ok(());
-    };
-    {
-        let mut r = session.renderer.lock();
-        r.paint_blank();
-        let _ = crate::native_term::subsurface::present_buffer(
-            &session.softbuffer,
-            &r.buffer,
-        );
-    }
+    let Some(session) = session else { return Ok(()) };
+
+    // Abort the show-bound tasks.  reader_task survives — it drains the PTY
+    // into the grid even while hidden, so output from background commands
+    // is captured.
+    session.render_task.abort();
+    session.input_task.abort();
+
+    // Tear the subsurface down.  desync commit on the child applies the
+    // null-buffer immediately; destroy queues parent state which the
+    // webview's natural commit (triggered by the React unmount + DOM
+    // mutation that called us) will apply on its next frame.
     {
         let h = session.subsurface.lock();
         h.subsurface.set_position(-100000, -100000);
+        h.child_surface.attach(None, 0, 0);
         h.child_surface.commit();
+        h.subsurface.destroy();
+        h.child_surface.destroy();
         h.parent_surface.commit();
     }
     if let Some(conn) = crate::native_term::wayland_connection() {
@@ -313,6 +459,25 @@ pub async fn native_term_hide(
              requestAnimationFrame(()=>{document.body.style.opacity='1';});",
         );
     }
+
+    // Dropping `softbuffer_arc` here when sessions removes the session
+    // releases the wl_buffer (already replaced by null attach above).
+    let crate::native_term::NativeSession {
+        session_id,
+        grid,
+        leased,
+        writer,
+        reader_task,
+        ..
+    } = session;
+    *state.native_terminals.persistent.lock() =
+        Some(crate::native_term::PersistentNativeState {
+            session_id,
+            grid,
+            leased,
+            writer,
+            reader_task,
+        });
     Ok(())
 }
 

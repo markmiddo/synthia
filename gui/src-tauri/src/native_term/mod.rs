@@ -34,20 +34,36 @@ pub struct NativeSession {
     pub renderer: std::sync::Arc<parking_lot::Mutex<renderer::Renderer>>,
     pub grid: std::sync::Arc<parking_lot::Mutex<grid::Grid>>,
     pub leased: crate::commands::terminal::LeasedPty,
+    /// PTY writer shared with the input task — also stored here so the
+    /// writer survives hide → show cycles (input_task is aborted on hide).
+    pub writer:
+        std::sync::Arc<parking_lot::Mutex<Box<dyn std::io::Write + Send>>>,
     pub reader_task: tokio::task::JoinHandle<()>,
     pub render_task: tokio::task::JoinHandle<()>,
     pub input_task: tokio::task::JoinHandle<()>,
+}
+
+/// State preserved across hide → show transitions.  The subsurface +
+/// softbuffer + renderer + render_task + input_task are torn down on hide
+/// (so the subsurface visually disappears via destroy + parent commit)
+/// but `grid`, `leased`, and `reader_task` keep running so PTY output is
+/// drained and the on-screen state is rebuilt instantly on the next show.
+pub struct PersistentNativeState {
+    pub session_id: Uuid,
+    pub grid: std::sync::Arc<parking_lot::Mutex<grid::Grid>>,
+    pub leased: crate::commands::terminal::LeasedPty,
+    pub writer:
+        std::sync::Arc<parking_lot::Mutex<Box<dyn std::io::Write + Send>>>,
+    pub reader_task: tokio::task::JoinHandle<()>,
 }
 
 #[derive(Default)]
 pub struct NativeTermRegistry {
     #[allow(dead_code)] // wired up in commands.rs (D Task 13)
     pub sessions: Mutex<HashMap<Uuid, NativeSession>>,
-    /// Single persistent terminal session that survives navigation away
-    /// from the Terminal panel.  When the React component remounts after
-    /// the user returns to the Terminal section, we reuse this session
-    /// instead of spawning a fresh PTY.
-    pub persistent: Mutex<Option<Uuid>>,
+    /// Hidden persistent state.  When `Some`, contains the grid + PTY of
+    /// a terminal that's been hidden but kept alive for a future `show`.
+    pub persistent: Mutex<Option<PersistentNativeState>>,
 }
 
 #[allow(dead_code)] // wired up in commands.rs (D Task 13)
