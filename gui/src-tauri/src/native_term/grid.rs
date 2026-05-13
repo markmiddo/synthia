@@ -174,14 +174,18 @@ impl Grid {
                 }
             }
             b'K' => {
-                // EL: erase in line. param 2 = entire line.
+                // EL: erase in line. 0=cursor→EOL (default), 1=BOL→cursor, 2=entire line.
                 let n = params.first().copied().unwrap_or(0);
-                if n == 2 {
-                    let blank = Cell { ch: ' ', fg: self.fg, bg: self.bg, bold: false };
-                    let row = self.cursor_row;
-                    for c in 0..self.cols {
-                        self.cells[row * self.cols + c] = blank;
-                    }
+                let blank = Cell { ch: ' ', fg: self.fg, bg: self.bg, bold: false };
+                let row = self.cursor_row;
+                let row_start = row * self.cols;
+                let (lo, hi) = match n {
+                    1 => (0usize, self.cursor_col + 1),
+                    2 => (0usize, self.cols),
+                    _ => (self.cursor_col, self.cols),
+                };
+                for c in lo..hi.min(self.cols) {
+                    self.cells[row_start + c] = blank;
                 }
             }
             _ => { /* unhandled — silent */ }
@@ -218,7 +222,14 @@ impl vte::Perform for Grid {
                 self.dirty = true;
             }
             b'\r' => { self.cursor_col = 0; self.dirty = true; }
-            0x08 => { self.cursor_col = self.cursor_col.saturating_sub(1); self.dirty = true; }
+            0x08 => {
+                self.cursor_col = self.cursor_col.saturating_sub(1);
+                let idx = self.cursor_row * self.cols + self.cursor_col;
+                if idx < self.cells.len() {
+                    self.cells[idx] = Cell { ch: ' ', fg: self.fg, bg: self.bg, bold: false };
+                }
+                self.dirty = true;
+            }
             0x07 => { /* bell — ignore */ }
             _ => {}
         }
