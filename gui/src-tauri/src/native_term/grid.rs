@@ -188,6 +188,50 @@ impl Grid {
         }
         self.dirty = true;
     }
+
+    pub fn resize(&mut self, rows: usize, cols: usize) {
+        let mut new_cells = vec![Cell::default(); rows * cols];
+        let copy_rows = self.rows.min(rows);
+        let copy_cols = self.cols.min(cols);
+        for r in 0..copy_rows {
+            for c in 0..copy_cols {
+                new_cells[r * cols + c] = self.cells[r * self.cols + c];
+            }
+        }
+        self.rows = rows;
+        self.cols = cols;
+        self.cells = new_cells;
+        self.cursor_row = self.cursor_row.min(rows.saturating_sub(1));
+        self.cursor_col = self.cursor_col.min(cols.saturating_sub(1));
+        self.dirty = true;
+    }
+}
+
+impl vte::Perform for Grid {
+    fn print(&mut self, ch: char) {
+        self.apply_print(ch);
+    }
+    fn execute(&mut self, byte: u8) {
+        match byte {
+            b'\n' => {
+                self.cursor_row = (self.cursor_row + 1).min(self.rows.saturating_sub(1));
+                self.dirty = true;
+            }
+            b'\r' => { self.cursor_col = 0; self.dirty = true; }
+            0x08 => { self.cursor_col = self.cursor_col.saturating_sub(1); self.dirty = true; }
+            0x07 => { /* bell — ignore */ }
+            _ => {}
+        }
+    }
+    fn csi_dispatch(&mut self, params: &vte::Params, _intermediates: &[u8], _ignore: bool, action: char) {
+        let nums: Vec<u16> = params.iter().map(|p| p.first().copied().unwrap_or(0)).collect();
+        Grid::csi_dispatch(self, action as u8, &nums);
+    }
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
+    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
+    fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {}
+    fn put(&mut self, _byte: u8) {}
+    fn unhook(&mut self) {}
 }
 
 #[cfg(test)]
@@ -325,5 +369,63 @@ mod tests {
         for c in 0..g.cols {
             assert_eq!(g.cell_at(0, c).ch, ' ');
         }
+    }
+
+    #[test]
+    fn vte_performer_handles_print() {
+        let mut g = Grid::new(5, 10);
+        let mut parser = vte::Parser::new();
+        for &b in b"hi" {
+            parser.advance(&mut g, b);
+        }
+        assert_eq!(g.cell_at(0, 0).ch, 'h');
+        assert_eq!(g.cell_at(0, 1).ch, 'i');
+    }
+
+    #[test]
+    fn vte_performer_handles_color_seq() {
+        let mut g = Grid::new(5, 10);
+        let mut parser = vte::Parser::new();
+        // \x1b[31m R \x1b[0m
+        for &b in b"\x1b[31mR\x1b[0m" {
+            parser.advance(&mut g, b);
+        }
+        assert_eq!(g.cell_at(0, 0).ch, 'R');
+        assert_eq!(g.cell_at(0, 0).fg, Color::rgb(0xfd, 0xa4, 0xaf));
+    }
+
+    #[test]
+    fn vte_performer_newline() {
+        let mut g = Grid::new(5, 10);
+        let mut parser = vte::Parser::new();
+        for &b in b"a\nb" {
+            parser.advance(&mut g, b);
+        }
+        assert_eq!(g.cell_at(0, 0).ch, 'a');
+        assert_eq!(g.cell_at(1, 1).ch, 'b'); // \n moves down + col stays at 1
+    }
+
+    #[test]
+    fn grid_resize_preserves_visible_cells() {
+        let mut g = Grid::new(3, 5);
+        g.apply_print('a'); g.apply_print('b'); g.apply_print('c');
+        g.resize(5, 10);
+        assert_eq!(g.cell_at(0, 0).ch, 'a');
+        assert_eq!(g.cell_at(0, 1).ch, 'b');
+        assert_eq!(g.cell_at(0, 2).ch, 'c');
+        assert_eq!(g.rows, 5);
+        assert_eq!(g.cols, 10);
+    }
+
+    #[test]
+    fn grid_resize_smaller_drops_overflow() {
+        let mut g = Grid::new(5, 10);
+        for ch in "abcdefghij".chars() { g.apply_print(ch); }
+        g.resize(2, 5);
+        assert_eq!(g.cell_at(0, 0).ch, 'a');
+        assert_eq!(g.rows, 2);
+        assert_eq!(g.cols, 5);
+        assert!(g.cursor_row < g.rows);
+        assert!(g.cursor_col < g.cols);
     }
 }
