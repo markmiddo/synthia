@@ -82,15 +82,23 @@ pub async fn native_term_attach(
     let mut leased = crate::commands::terminal::lease_for_native(&state.terminals, session_id)?
         .ok_or_else(|| AppError::Terminal("session already leased or not spawned".into()))?;
 
-    // Compute cell dims from font metrics (8x16 placeholder; D Task 16+ calibrates from cosmic-text).
-    let cell_w = 8u32;
-    let cell_h = 16u32;
+    // Measure cell dims from cosmic-text actual glyph metrics.
+    let mut probe_system = cosmic_text::FontSystem::new();
+    let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(&mut probe_system, 13.5);
     let cols = (geom.width / cell_w).max(1) as usize;
     let rows = (geom.height / cell_h).max(1) as usize;
 
-    let renderer = crate::native_term::renderer::Renderer::new(geom.width, geom.height, cell_w, cell_h, 13.0)?;
+    eprintln!("[native-term] attach geom = ({}, {}) {}x{}", geom.x, geom.y, geom.width, geom.height);
+    eprintln!("[native-term] cell_w={cell_w} cell_h={cell_h} cols={cols} rows={rows}");
+
+    let renderer = crate::native_term::renderer::Renderer::new(geom.width, geom.height, cell_w, cell_h, 13.5)?;
     let renderer_arc = std::sync::Arc::new(parking_lot::Mutex::new(renderer));
     let grid = std::sync::Arc::new(parking_lot::Mutex::new(crate::native_term::grid::Grid::new(rows, cols)));
+
+    // Inform the PTY child of the real terminal size so bash wraps lines correctly.
+    let _ = crate::commands::terminal::set_pty_size(
+        &state.terminals, session_id, cols as u16, rows as u16,
+    );
 
     // Take reader out of leased into a separate var so it can move into the spawn_blocking closure.
     let mut reader = std::mem::replace(
@@ -191,11 +199,15 @@ pub async fn native_term_resize(
         h.subsurface.set_position(geom.x, geom.y);
         h.child_surface.commit();
     }
-    let cell_w = 8u32;
-    let cell_h = 16u32;
+    let mut probe_system = cosmic_text::FontSystem::new();
+    let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(&mut probe_system, 13.5);
     let cols = (geom.width / cell_w).max(1) as usize;
     let rows = (geom.height / cell_h).max(1) as usize;
     session.grid.lock().resize(rows, cols);
+    // Propagate new size to PTY child so bash/vim re-wrap at the new width.
+    let _ = crate::commands::terminal::set_pty_size(
+        &state.terminals, session_id, cols as u16, rows as u16,
+    );
     {
         let mut r = session.renderer.lock();
         r.width = geom.width;

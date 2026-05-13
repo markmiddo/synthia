@@ -323,6 +323,31 @@ pub fn lease_for_native(
     Ok(Some(LeasedPty { reader, writer: real_writer }))
 }
 
+/// Send a new PTY window size to the child process.
+/// Called by the native renderer after computing cell dims so that bash/vim
+/// wraps at the correct column count instead of the default 80x24.
+#[allow(dead_code)]
+pub fn set_pty_size(
+    registry: &crate::state::TerminalRegistry,
+    session_id: Uuid,
+    cols: u16,
+    rows: u16,
+) -> AppResult<()> {
+    let guard = registry.sessions.lock();
+    let session = guard
+        .get(&session_id)
+        .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
+    session
+        .master
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| AppError::Terminal(format!("pty resize: {e}")))
+}
+
 /// Restore a previously-leased reader+writer back into the session.
 /// Used on detach so subsequent xterm.js attaches still work.
 // wired up in native_term/commands.rs (D Task 13)

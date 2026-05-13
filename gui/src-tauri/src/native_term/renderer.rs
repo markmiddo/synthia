@@ -146,6 +146,29 @@ pub fn blend_alpha(bg: u32, fg: u32, alpha: u8) -> u32 {
     ((br + fr) << 16) | ((bg_g + fg_g) << 8) | (bb + fb)
 }
 
+/// Measure cell dimensions for a monospace font at the given size.
+/// Returns `(advance_width_px, line_height_px)`, both ceil'd to whole pixels.
+/// Uses cosmic-text to shape the letter 'M' and read its glyph advance width.
+pub fn measure_cell(system: &mut FontSystem, font_size: f32) -> (u32, u32) {
+    let metrics = Metrics::new(font_size, font_size * 1.4);
+    let mut buffer = Buffer::new(system, metrics);
+    buffer.set_size(system, Some(1024.0), Some(metrics.line_height));
+    buffer.set_text(system, "M", Attrs::new(), Shaping::Advanced);
+    buffer.shape_until_scroll(system, false);
+    // Fallback: ~0.6em for a typical monospace face.
+    let mut advance: f32 = font_size * 0.6;
+    for run in buffer.layout_runs() {
+        for g in run.glyphs.iter() {
+            if g.w > advance {
+                advance = g.w;
+            }
+        }
+    }
+    let cell_w = advance.ceil() as u32;
+    let cell_h = metrics.line_height.ceil() as u32;
+    (cell_w.max(1), cell_h.max(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

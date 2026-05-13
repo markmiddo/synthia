@@ -28,11 +28,15 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
   const computeGeom = useCallback((): TermGeom | null => {
     if (!containerRef.current) return null;
     const rect = containerRef.current.getBoundingClientRect();
+    // Wayland subsurface positions are in surface-local pixels. On HiDPI
+    // compositors (devicePixelRatio > 1) the webview surface is already
+    // physical-pixel-sized, so we must scale CSS pixel coords up.
+    const dpr = window.devicePixelRatio || 1;
     return {
-      x: Math.round(rect.left),
-      y: Math.round(rect.top),
-      width: Math.max(1, Math.round(rect.width)),
-      height: Math.max(1, Math.round(rect.height)),
+      x: Math.round(rect.left * dpr),
+      y: Math.round(rect.top * dpr),
+      width: Math.max(1, Math.round(rect.width * dpr)),
+      height: Math.max(1, Math.round(rect.height * dpr)),
     };
   }, []);
 
