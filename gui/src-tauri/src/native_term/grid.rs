@@ -12,7 +12,10 @@ pub struct Color {
 
 impl Color {
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self { Self { r, g, b } }
-    pub const fn black() -> Self { Self::rgb(0x1a, 0x1b, 0x26) }
+    /// Synthia panel background.  Matches `body` in `App.css` (`#0a0b14`)
+    /// so the native terminal blends into the surrounding chrome instead of
+    /// looking like a popup overlay.
+    pub const fn black() -> Self { Self::rgb(0x0a, 0x0b, 0x14) }
     pub const fn white() -> Self { Self::rgb(0xe6, 0xe6, 0xfa) }
 }
 

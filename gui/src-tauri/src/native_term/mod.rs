@@ -43,6 +43,11 @@ pub struct NativeSession {
 pub struct NativeTermRegistry {
     #[allow(dead_code)] // wired up in commands.rs (D Task 13)
     pub sessions: Mutex<HashMap<Uuid, NativeSession>>,
+    /// Single persistent terminal session that survives navigation away
+    /// from the Terminal panel.  When the React component remounts after
+    /// the user returns to the Terminal section, we reuse this session
+    /// instead of spawning a fresh PTY.
+    pub persistent: Mutex<Option<Uuid>>,
 }
 
 #[allow(dead_code)] // wired up in commands.rs (D Task 13)

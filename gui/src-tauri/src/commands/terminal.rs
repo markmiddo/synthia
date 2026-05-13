@@ -52,10 +52,12 @@ fn derive_title(shell: &str, cwd: &str) -> String {
     format!("{shell_name} · {cwd_name}")
 }
 
-#[tauri::command]
-pub async fn terminal_spawn(
-    app: AppHandle,
-    state: State<'_, AppState>,
+/// Internal helper used by both `terminal_spawn` (the JS-facing command) and
+/// `native_term_show` (which transparently creates a PTY on first display).
+/// Returns the new session's metadata; the session is inserted into the
+/// registry with `pending_reader` set.
+pub fn spawn_pty_session_inline(
+    state: &crate::state::TerminalRegistry,
     cwd: Option<String>,
     shell: Option<String>,
 ) -> AppResult<SessionMeta> {
@@ -66,7 +68,7 @@ pub async fn terminal_spawn(
         .ok_or_else(|| AppError::Terminal("no usable cwd".into()))?;
 
     {
-        let guard = state.terminals.sessions.lock();
+        let guard = state.sessions.lock();
         if guard.len() >= MAX_SESSIONS {
             return Err(AppError::Terminal(format!(
                 "max {MAX_SESSIONS} terminals"
@@ -76,12 +78,7 @@ pub async fn terminal_spawn(
 
     let pty_system = native_pty_system();
     let pair = pty_system
-        .openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
+        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| AppError::Terminal(format!("openpty: {e}")))?;
 
     let mut cmd = CommandBuilder::new(&shell);
@@ -124,10 +121,19 @@ pub async fn terminal_spawn(
         meta: meta.clone(),
     };
 
-    state.terminals.sessions.lock().insert(session_id, session);
-
-    let _ = app; // app handle is used by terminal_attach
+    state.sessions.lock().insert(session_id, session);
     Ok(meta)
+}
+
+#[tauri::command]
+pub async fn terminal_spawn(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    cwd: Option<String>,
+    shell: Option<String>,
+) -> AppResult<SessionMeta> {
+    let _ = app;
+    spawn_pty_session_inline(&state.terminals, cwd, shell)
 }
 
 /// Start streaming PTY output for an already-spawned session.

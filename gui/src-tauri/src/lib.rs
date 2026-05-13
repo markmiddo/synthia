@@ -493,7 +493,9 @@ pub fn run() {
             commands::native_term::native_term_kill,
             crate::native_term::commands::native_term_attach,
             crate::native_term::commands::native_term_resize,
-            crate::native_term::commands::native_term_detach
+            crate::native_term::commands::native_term_detach,
+            crate::native_term::commands::native_term_show,
+            crate::native_term::commands::native_term_hide
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-interface SessionMeta {
-  id: string;
-  cwd: string;
-  shell: string;
-  title: string;
-  created_at: string;
-}
-
 interface NativeTerminalViewProps {
   visible: boolean;
 }
@@ -28,9 +20,6 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
   const computeGeom = useCallback((): TermGeom | null => {
     if (!containerRef.current) return null;
     const rect = containerRef.current.getBoundingClientRect();
-    // Wayland subsurface positions are in logical pixels on this setup.
-    // The compositor handles DPI scaling internally — do NOT multiply by
-    // devicePixelRatio here or the position/size will be double-counted.
     return {
       x: Math.round(rect.left),
       y: Math.round(rect.top),
@@ -39,58 +28,65 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
     };
   }, []);
 
-  // Spawn + attach on mount when visible
+  // Show on mount / when becoming visible.  Hide (but don't kill) on
+  // unmount / when becoming hidden.  The backend keeps the PTY + subsurface
+  // alive between hide/show cycles, so navigating away and back preserves
+  // shell state, scrollback, and any running command.
   useEffect(() => {
-    if (!visible || !containerRef.current || sessionRef.current) return;
+    if (!visible) {
+      // Hide path: tell backend to move subsurface off-screen + paint blank.
+      invoke("native_term_hide").catch(() => {});
+      return;
+    }
+    if (!containerRef.current) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const meta = await invoke<SessionMeta>("terminal_spawn", {});
-        if (cancelled) {
-          await invoke("terminal_kill", { sessionId: meta.id }).catch(() => {});
-          return;
-        }
-        const geom = computeGeom();
-        if (!geom) throw new Error("no geom");
-        await invoke("native_term_attach", { sessionId: meta.id, geom });
-        sessionRef.current = meta.id;
-      } catch (e) {
-        setError(String(e));
+    // Wait for layout: getBoundingClientRect after mount can return 0×0
+    // for one frame.  rAF + a fallback timeout cover both cases.
+    const showWhenReady = () => {
+      if (cancelled) return;
+      const geom = computeGeom();
+      if (!geom || geom.width <= 1 || geom.height <= 1) {
+        requestAnimationFrame(showWhenReady);
+        return;
       }
-    })();
+      invoke<string>("native_term_show", { geom })
+        .then((id) => {
+          sessionRef.current = id;
+        })
+        .catch((e) => setError(String(e)));
+    };
+    requestAnimationFrame(showWhenReady);
     return () => {
       cancelled = true;
-      if (sessionRef.current) {
-        const id = sessionRef.current;
-        sessionRef.current = null;
-        invoke("native_term_detach", { sessionId: id })
-          .catch(() => {})
-          .then(() => invoke("terminal_kill", { sessionId: id }).catch(() => {}));
-      }
+      // On unmount (section change), hide the persistent terminal so the
+      // subsurface clears off-screen and the next section's content shows.
+      // The PTY + render loop stay alive so a return to Terminal restores
+      // the same shell state.
+      invoke("native_term_hide").catch(() => {});
     };
   }, [visible, computeGeom]);
 
-  // Detach + kill when component becomes hidden (mode toggle or section switch)
-  // without unmounting (e.g. when parent keeps both renderers in the tree).
-  useEffect(() => {
-    if (visible) return; // only act when transitioning to hidden
-    if (!sessionRef.current) return;
-    const id = sessionRef.current;
-    sessionRef.current = null;
-    invoke("native_term_detach", { sessionId: id })
-      .catch(() => {})
-      .then(() => invoke("terminal_kill", { sessionId: id }).catch(() => {}));
-  }, [visible]);
-
-  // Reposition on resize / move
+  // Reposition on resize / move — only push to backend when geom actually
+  // changes so we don't spam the resize path at 4 Hz when idle.
   useEffect(() => {
     if (!visible) return;
+    let last: TermGeom | null = null;
     const reposition = () => {
-      if (!sessionRef.current) return;
       const geom = computeGeom();
-      if (geom) {
-        invoke("native_term_resize", { sessionId: sessionRef.current, geom }).catch(() => {});
+      if (!geom) return;
+      if (
+        last &&
+        last.x === geom.x &&
+        last.y === geom.y &&
+        last.width === geom.width &&
+        last.height === geom.height
+      ) {
+        return;
       }
+      last = geom;
+      // native_term_show is idempotent — reuses persistent session and just
+      // repositions/resizes when one already exists.
+      invoke("native_term_show", { geom }).catch(() => {});
     };
     const observer = new ResizeObserver(reposition);
     if (containerRef.current) observer.observe(containerRef.current);
@@ -107,11 +103,11 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
     <div
       ref={containerRef}
       className="native-terminal-pane"
-      style={{ width: "100%", height: "100%", background: "#0d1117" }}
+      style={{ width: "100%", height: "100%", background: "#0a0b14" }}
     >
       {error && (
         <div style={{ color: "#fda4af", fontFamily: "monospace", padding: 12 }}>
-          Native terminal failed: {error}. Toggle back to xterm.js.
+          Native terminal failed: {error}.
         </div>
       )}
     </div>

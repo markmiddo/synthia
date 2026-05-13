@@ -132,17 +132,26 @@ pub async fn native_term_attach(
     let renderer_for_render = renderer_arc.clone();
     let softbuffer_for_render = softbuffer_arc.clone();
     let render_task = tokio::spawn(async move {
+        // 16ms render tick.  Cursor blinks at ~530ms half-cycle, repainting
+        // even when the grid hasn't changed so the user gets a visible
+        // "this terminal is alive and accepting input" cue.
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        let start = std::time::Instant::now();
+        let mut last_blink = true;
         loop {
             interval.tick().await;
+            // Blink phase: visible for 530ms, hidden for 530ms.
+            let phase = (start.elapsed().as_millis() / 530).is_multiple_of(2);
             let dirty = {
                 let mut g = grid_for_render.lock();
                 if g.dirty { g.dirty = false; true } else { false }
             };
-            if dirty {
+            let blink_changed = phase != last_blink;
+            if dirty || blink_changed {
+                last_blink = phase;
                 let g = grid_for_render.lock();
                 let mut r = renderer_for_render.lock();
-                r.render_grid(&g);
+                r.render_grid(&g, phase);
                 let _ = crate::native_term::subsurface::present_buffer(
                     &softbuffer_for_render,
                     &r.buffer,
@@ -181,6 +190,129 @@ pub async fn native_term_attach(
     };
 
     state.native_terminals.sessions.lock().insert(session_id, session);
+    Ok(())
+}
+
+/// Show the persistent terminal at the given rect.  On first call it spawns
+/// a PTY and creates the subsurface; on subsequent calls (e.g. after the
+/// user navigates away and back) it reuses the same PTY + subsurface and
+/// just repositions the overlay.  The returned `Uuid` identifies the
+/// persistent session for follow-up `hide`/`resize` calls.
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs
+pub async fn native_term_show(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    geom: TermGeom,
+) -> AppResult<Uuid> {
+    // Fast path: persistent session already exists and is still in the
+    // native registry.  Reposition + resize and return.
+    let existing = *state.native_terminals.persistent.lock();
+    if let Some(id) = existing {
+        let mut sessions = state.native_terminals.sessions.lock();
+        if let Some(session) = sessions.get_mut(&id) {
+            // Bring subsurface back on-screen and resize to current rect.
+            let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(13.5);
+            let usable_w =
+                geom.width.saturating_sub(crate::native_term::renderer::PADDING_X * 2);
+            let usable_h =
+                geom.height.saturating_sub(crate::native_term::renderer::PADDING_Y * 2);
+            let cols = (usable_w / cell_w).max(1) as usize;
+            let rows = (usable_h / cell_h).max(1) as usize;
+            {
+                let h = session.subsurface.lock();
+                h.subsurface.set_position(geom.x, geom.y);
+                h.child_surface.commit();
+                h.parent_surface.commit();
+            }
+            session.grid.lock().resize(rows, cols);
+            let _ = crate::commands::terminal::set_pty_size(
+                &state.terminals, id, cols as u16, rows as u16,
+            );
+            {
+                let mut r = session.renderer.lock();
+                r.width = geom.width;
+                r.height = geom.height;
+                r.cell_w = cell_w;
+                r.cell_h = cell_h;
+                r.buffer = vec![0u32; (geom.width * geom.height) as usize];
+            }
+            {
+                let mut sb = session.softbuffer.lock();
+                sb.surface
+                    .resize(
+                        std::num::NonZeroU32::new(geom.width)
+                            .ok_or_else(|| AppError::Terminal("zero w".into()))?,
+                        std::num::NonZeroU32::new(geom.height)
+                            .ok_or_else(|| AppError::Terminal("zero h".into()))?,
+                    )
+                    .map_err(|e| AppError::Terminal(format!("sb resize: {e}")))?;
+            }
+            // Mark grid dirty so the render loop repaints immediately at the
+            // new position (otherwise it might be idle for up to 530ms).
+            session.grid.lock().dirty = true;
+            return Ok(id);
+        }
+        // Stale id — fall through to spawn fresh.
+    }
+
+    // Slow path: spawn a new PTY and attach a new subsurface.
+    let meta =
+        crate::commands::terminal::spawn_pty_session_inline(&state.terminals, None, None)?;
+    let session_id = meta.id;
+    native_term_attach(app, state.clone(), session_id, geom).await?;
+    *state.native_terminals.persistent.lock() = Some(session_id);
+    Ok(session_id)
+}
+
+/// Hide the persistent terminal without destroying it.  Paints a panel-
+/// coloured buffer, moves the subsurface off-screen, and commits both child
+/// and parent — but keeps the PTY, render loop, and subsurface alive so a
+/// subsequent `native_term_show` reattaches instantly.
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs
+pub async fn native_term_hide(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let id = match *state.native_terminals.persistent.lock() {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+    let sessions = state.native_terminals.sessions.lock();
+    let Some(session) = sessions.get(&id) else {
+        return Ok(());
+    };
+    {
+        let mut r = session.renderer.lock();
+        r.paint_blank();
+        let _ = crate::native_term::subsurface::present_buffer(
+            &session.softbuffer,
+            &r.buffer,
+        );
+    }
+    {
+        let h = session.subsurface.lock();
+        h.subsurface.set_position(-100000, -100000);
+        h.child_surface.commit();
+        h.parent_surface.commit();
+    }
+    if let Some(conn) = crate::native_term::wayland_connection() {
+        let _ = conn.flush();
+        let _ = conn.roundtrip();
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        if let Ok(size) = window.outer_size() {
+            let w = size.width;
+            let h = size.height;
+            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w, h + 1)));
+            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w, h)));
+        }
+        let _ = window.eval(
+            "document.body.style.opacity='0.999';\
+             requestAnimationFrame(()=>{document.body.style.opacity='1';});",
+        );
+    }
     Ok(())
 }
 
@@ -229,6 +361,7 @@ pub async fn native_term_resize(
 #[tauri::command]
 #[allow(dead_code)] // registered in lib.rs (D Task 19)
 pub async fn native_term_detach(
+    app: AppHandle,
     state: State<'_, AppState>,
     session_id: Uuid,
 ) -> AppResult<()> {
@@ -239,29 +372,67 @@ pub async fn native_term_detach(
     session.reader_task.abort();
     session.render_task.abort();
     session.input_task.abort();
-    // Explicitly destroy the Wayland subsurface resources so the compositor
-    // removes the overlay immediately.  Just dropping the Arc may not flush
-    // the destroy requests in time, leaving a ghost overlay on screen.
+
+    // ---------------------------------------------------------------------
+    // Visual cleanup strategy
+    //
+    // Wayland subsurface destruction is double-buffered on the *parent*
+    // surface — meaning the destroy doesn't visually take effect until the
+    // parent (Tauri's webview wl_surface) commits a new frame.  Webkit only
+    // commits when DOM content changes, so the subsurface lingers as a
+    // ghost overlay after the React component unmounts.
+    //
+    // We work around this with two layered defences:
+    //   1.  Paint a buffer in the Synthia panel background colour, then
+    //       commit the *child* surface.  In desync mode, child commits
+    //       apply immediately — so the area instantly becomes the same
+    //       colour as the surrounding chrome, hiding the subsurface even
+    //       if its destruction never propagates.
+    //   2.  Best-effort destroy + parent_surface.commit() so the subsurface
+    //       is properly torn down when the compositor next composites.
+    // ---------------------------------------------------------------------
+    {
+        let mut r = session.renderer.lock();
+        r.paint_blank();
+        let _ = crate::native_term::subsurface::present_buffer(
+            &session.softbuffer,
+            &r.buffer,
+        );
+    }
     {
         let h = session.subsurface.lock();
-        // Attach a null buffer first so the compositor hides the surface
-        // content before we destroy it.  Without this, some compositors leave
-        // the last frame visible until the next parent commit.
+        // Move off-screen as belt-and-braces (queued on parent).
+        h.subsurface.set_position(-100000, -100000);
         h.child_surface.attach(None, 0, 0);
         h.child_surface.commit();
-        // Now destroy the subsurface role and the child wl_surface itself.
         h.subsurface.destroy();
         h.child_surface.destroy();
-        // Commit parent surface so compositor atomically removes the child.
-        // Without this the overlay can linger until next parent commit (which
-        // may never happen if Tauri isn't actively rendering).
+        // Commit the parent so the destroy + position queue actually apply.
+        // The parent_surface proxy was reconstructed from Tauri's surface,
+        // so this issues a commit on the same wl_surface Tauri owns — safe
+        // because Wayland coalesces commits and the next webview frame will
+        // override our state anyway.
         h.parent_surface.commit();
     }
     if let Some(conn) = crate::native_term::wayland_connection() {
         let _ = conn.flush();
-        // Roundtrip ensures the compositor has processed all destroy requests
-        // before we return to the caller (prevents ghost overlay races).
         let _ = conn.roundtrip();
+    }
+    // Final nudges to force the webview to commit a fresh parent buffer:
+    //   1. Window size cycle triggers xdg_surface reconfigure.
+    //   2. JS-injected DOM mutation (opacity flip) forces WebKit to repaint
+    //      and commit on the next animation frame.
+    if let Some(window) = app.get_webview_window("main") {
+        if let Ok(size) = window.outer_size() {
+            let w = size.width;
+            let h = size.height;
+            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w, h + 1)));
+            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w, h)));
+        }
+        let _ = window.eval(
+            "document.body.style.opacity='0.999';\
+             requestAnimationFrame(()=>{document.body.style.opacity='1';});",
+        );
     }
     let leased = session.leased;
     crate::commands::terminal::restore_from_native(&state.terminals, session_id, leased)?;
