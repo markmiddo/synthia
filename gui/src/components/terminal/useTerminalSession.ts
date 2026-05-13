@@ -71,8 +71,11 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
       term.loadAddon(new SearchAddon());
 
       term.open(containerRef.current);
-      // Defer fit to next paint so the container has its final dimensions.
+      // Belt-and-braces fit schedule: rAF for first paint, then two more
+      // timeouts to handle slow flex layout passes on Linux/COSMIC.
       requestAnimationFrame(() => fit.fit());
+      window.setTimeout(() => fit.fit(), 100);
+      window.setTimeout(() => fit.fit(), 300);
 
       onWinResize = () => fit.fit();
       window.addEventListener("resize", onWinResize);
@@ -151,6 +154,83 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
             onExit?.(event.payload);
           },
         );
+
+        // Custom Ctrl+V paste handler. xterm's default ignores Ctrl+V (Linux terminals
+        // reserve it for the running program). We override it for editor-like UX.
+        //
+        // Clipboard permission notes (Tauri / webkit2gtk):
+        //   - navigator.clipboard.readText() works after the window has focus.
+        //   - navigator.clipboard.read() (for image detection) may return a
+        //     NotAllowedError if the Tauri allowlist doesn't include clipboard-read;
+        //     we catch and assume text in that case.
+        //
+        // CSS :has() note: webkit2gtk >= 2.40 (GTK4 / GNOME 44+) supports :has().
+        // Pop!_OS ships webkit2gtk 2.44+, so Fix 1A is safe.
+        term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+          if (event.type !== "keydown") return true;
+
+          // Ctrl+V (no shift) — paste from clipboard, but forward raw ^V if the
+          // clipboard contains an image so the inner program (e.g. Claude Code)
+          // can call wl-paste itself.
+          if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "v") {
+            event.preventDefault();
+            (async () => {
+              try {
+                let hasImage = false;
+                try {
+                  const items = await navigator.clipboard.read();
+                  for (const item of items) {
+                    if (item.types.some((t) => t.startsWith("image/"))) {
+                      hasImage = true;
+                      break;
+                    }
+                  }
+                } catch {
+                  /* clipboard-read permission denied or unsupported — assume text */
+                }
+                if (hasImage) {
+                  // Forward raw 0x16 (^V) to PTY so the running app reads the image.
+                  await invoke("terminal_write", { sessionId: sessionMeta.id, data: "\x16" });
+                  return;
+                }
+                const text = await navigator.clipboard.readText();
+                if (text) {
+                  await invoke("terminal_write", { sessionId: sessionMeta.id, data: text });
+                }
+              } catch (e) {
+                console.error("[terminal] paste failed", e);
+              }
+            })();
+            return false;
+          }
+
+          // Ctrl+Shift+V — also paste (Linux convention). Always text path.
+          if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === "v") {
+            event.preventDefault();
+            (async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                if (text) await invoke("terminal_write", { sessionId: sessionMeta.id, data: text });
+              } catch (e) {
+                console.error("[terminal] paste failed", e);
+              }
+            })();
+            return false;
+          }
+
+          // Ctrl+C: copy selection if any, otherwise pass through as interrupt (^C).
+          if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "c") {
+            const sel = term.getSelection();
+            if (sel && sel.length > 0) {
+              event.preventDefault();
+              navigator.clipboard.writeText(sel).catch((e) => console.error("[terminal] copy failed", e));
+              term.clearSelection();
+              return false;
+            }
+          }
+
+          return true;
+        });
 
         // Keystroke coalescing: batch multiple onData callbacks that fire within
         // the same JS microtask queue drain into a single invoke call.

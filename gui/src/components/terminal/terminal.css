@@ -15,6 +15,13 @@
   font-display: swap;
 }
 
+/* Remove outer padding when the terminal panel is the direct child of main-content,
+   giving the terminal full bleed and preventing main-content from forcing scroll. */
+.main-content:has(> .terminal-panel) {
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
 .terminal-panel {
   display: flex;
   flex-direction: column;
@@ -170,4 +177,10 @@
 
 .terminal-empty button:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* Drag-and-drop visual indicator */
+.terminal-view-container.drag-over {
+  outline: 2px dashed #a5b4fc;
+  outline-offset: -4px;
 }
