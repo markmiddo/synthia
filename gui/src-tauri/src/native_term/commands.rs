@@ -42,8 +42,15 @@ pub async fn native_term_attach(
     let conn = match crate::native_term::wayland_connection() {
         Some(c) => c.clone(),
         None => {
-            let c = wayland_client::Connection::connect_to_env()
-                .map_err(|e| AppError::Terminal(format!("wayland connect: {e}")))?;
+            // Wrap Tauri's existing wl_display so we share the connection.
+            // SAFETY: the display ptr lives as long as the Tauri main window does.
+            // Caller must ensure attach is invoked while the window is alive.
+            let backend = unsafe {
+                wayland_backend::sys::client::Backend::from_foreign_display(
+                    display_ptr.as_ptr() as *mut _,
+                )
+            };
+            let c = wayland_client::Connection::from_backend(backend);
             crate::native_term::init_wayland_connection(c.clone());
             c
         }

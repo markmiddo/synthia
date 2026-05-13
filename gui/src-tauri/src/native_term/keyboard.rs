@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use wayland_client::{
-    globals::{registry_queue_init, GlobalListContents},
     protocol::{wl_keyboard, wl_registry, wl_seat},
     Connection, Dispatch, Proxy, QueueHandle, WEnum,
 };
@@ -19,22 +18,22 @@ use xkbcommon::xkb;
 ///
 /// Binds `wl_seat`, calls `get_keyboard()`, then dispatches events in a
 /// blocking loop. Returns when the compositor closes the connection.
+///
+/// Uses `conn.new_event_queue()` rather than `registry_queue_init` so that
+/// the shared (foreign-display) Connection is not re-initialised and the
+/// underlying `wl_display` is not double-registered with the compositor.
 #[allow(dead_code)] // wired up in commands.rs (D Task 17)
 pub fn run_keyboard_loop(
     conn: Connection,
     writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
 ) -> Result<(), String> {
-    let (globals, mut event_queue) = registry_queue_init::<KeyboardState>(&conn)
-        .map_err(|e| format!("registry_queue_init: {e}"))?;
+    let mut event_queue: wayland_client::EventQueue<KeyboardState> = conn.new_event_queue();
     let qh = event_queue.handle();
 
-    let seat: wl_seat::WlSeat = globals
-        .bind(&qh, 1..=8, ())
-        .map_err(|e| format!("bind wl_seat: {e}"))?;
-
-    // Request the keyboard object. The compositor will send us a Keymap event
-    // before any Key events arrive.
-    let _kb = seat.get_keyboard(&qh, ());
+    // Bind the global registry on this event queue.  The Dispatch impl below
+    // will receive Global events and bind wl_seat (and from that, wl_keyboard).
+    let display = conn.display();
+    let _registry = display.get_registry(&qh, ());
 
     let mut state = KeyboardState {
         xkb_ctx: xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
@@ -42,7 +41,18 @@ pub fn run_keyboard_loop(
         xkb_state: None,
         input: crate::native_term::input::InputHandler::new(),
         writer,
+        seat: None,
+        keyboard_obtained: false,
     };
+
+    // Initial roundtrip: compositor sends all current globals, we bind wl_seat
+    // and request get_keyboard.  A second roundtrip delivers the Keymap event.
+    event_queue
+        .roundtrip(&mut state)
+        .map_err(|e| format!("initial roundtrip: {e}"))?;
+    event_queue
+        .roundtrip(&mut state)
+        .map_err(|e| format!("keymap roundtrip: {e}"))?;
 
     loop {
         if event_queue.blocking_dispatch(&mut state).is_err() {
@@ -59,18 +69,40 @@ pub struct KeyboardState {
     xkb_state: Option<xkb::State>,
     input: crate::native_term::input::InputHandler,
     writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
+    /// The bound wl_seat (kept alive so the keyboard object isn't destroyed).
+    seat: Option<wl_seat::WlSeat>,
+    /// Set to true once `get_keyboard()` has been called.
+    keyboard_obtained: bool,
 }
 
-impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for KeyboardState {
+// ---------------------------------------------------------------------------
+// Dispatch impls
+// ---------------------------------------------------------------------------
+
+impl Dispatch<wl_registry::WlRegistry, ()> for KeyboardState {
     fn event(
-        _state: &mut Self,
-        _registry: &wl_registry::WlRegistry,
-        _event: <wl_registry::WlRegistry as Proxy>::Event,
-        _data: &GlobalListContents,
+        state: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: <wl_registry::WlRegistry as Proxy>::Event,
+        _data: &(),
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
-        // Dynamic registry events are not needed; globals were captured at init.
+        if let wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+        {
+            if interface == "wl_seat" {
+                let seat: wl_seat::WlSeat = registry.bind(name, version.min(8), qh, ());
+                if !state.keyboard_obtained {
+                    let _kb = seat.get_keyboard(qh, ());
+                    state.keyboard_obtained = true;
+                }
+                state.seat = Some(seat);
+            }
+        }
     }
 }
 
