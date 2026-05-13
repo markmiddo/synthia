@@ -24,15 +24,11 @@ pub async fn native_term_attach(
     session_id: Uuid,
     geom: TermGeom,
 ) -> AppResult<()> {
-    // Resolve Tauri main window
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| AppError::Terminal("no main window".into()))?;
-
-    // Extract parent surface
     let parent_ptr = crate::native_term::subsurface::parent_surface_from_tauri(&window)?;
 
-    // Acquire / cache shared Wayland connection
     let conn = match crate::native_term::wayland_connection() {
         Some(c) => c.clone(),
         None => {
@@ -43,19 +39,85 @@ pub async fn native_term_attach(
         }
     };
 
-    // Create subsurface (stage 2 — pipeline glue happens in D Task 14)
-    let _handle = crate::native_term::subsurface::create_subsurface(
+    let subsurface = crate::native_term::subsurface::create_subsurface(
         &conn, parent_ptr, geom.x, geom.y, geom.width, geom.height,
     )?;
+    let subsurface_arc = std::sync::Arc::new(parking_lot::Mutex::new(subsurface));
 
-    // Lease PTY from the existing terminal session
-    let _leased = crate::commands::terminal::lease_for_native(&state.terminals, session_id)?
+    let mut leased = crate::commands::terminal::lease_for_native(&state.terminals, session_id)?
         .ok_or_else(|| AppError::Terminal("session already leased or not spawned".into()))?;
 
-    // FIXME(D Task 14): wire reader → vte parser → grid mutation,
-    // wire grid dirty → renderer → softbuffer present (D Task 16),
-    // wire wl_keyboard events → input handler → leased.writer (D Task 17).
-    // Stage 1 of this task only proves attach succeeds end-to-end (compiles + invokable).
+    // Compute cell dims from font metrics (8x16 placeholder; D Task 16+ calibrates from cosmic-text).
+    let cell_w = 8u32;
+    let cell_h = 16u32;
+    let cols = (geom.width / cell_w).max(1) as usize;
+    let rows = (geom.height / cell_h).max(1) as usize;
 
+    let renderer = crate::native_term::renderer::Renderer::new(geom.width, geom.height, cell_w, cell_h, 13.0)?;
+    let renderer_arc = std::sync::Arc::new(parking_lot::Mutex::new(renderer));
+    let grid = std::sync::Arc::new(parking_lot::Mutex::new(crate::native_term::grid::Grid::new(rows, cols)));
+
+    // Take reader out of leased into a separate var so it can move into the spawn_blocking closure.
+    let mut reader = std::mem::replace(
+        &mut leased.reader,
+        Box::new(std::io::empty()) as Box<dyn std::io::Read + Send>,
+    );
+
+    // Reader task: PTY bytes → vte parser → grid mutation
+    let grid_for_reader = grid.clone();
+    let reader_task = tokio::task::spawn_blocking(move || {
+        use std::io::Read as _;
+        let mut parser = vte::Parser::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let mut g = grid_for_reader.lock();
+                    for &byte in &buf[..n] {
+                        parser.advance(&mut *g, byte);
+                    }
+                }
+            }
+        }
+    });
+
+    // Render task: 60fps poll on dirty flag, blit to renderer buffer.
+    // Stage 3 (D Task 16) presents to wl_surface via softbuffer.
+    let grid_for_render = grid.clone();
+    let renderer_for_render = renderer_arc.clone();
+    let render_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        loop {
+            interval.tick().await;
+            let dirty = {
+                let mut g = grid_for_render.lock();
+                if g.dirty { g.dirty = false; true } else { false }
+            };
+            if dirty {
+                let g = grid_for_render.lock();
+                let mut r = renderer_for_render.lock();
+                r.render_grid(&g);
+            }
+        }
+    });
+
+    // Input task: placeholder until D Task 17's Wayland keyboard binding lands.
+    let input_task = tokio::spawn(async move {
+        loop { tokio::time::sleep(std::time::Duration::from_secs(60)).await; }
+    });
+
+    let session = crate::native_term::NativeSession {
+        session_id,
+        subsurface: subsurface_arc,
+        renderer: renderer_arc,
+        grid,
+        leased,
+        reader_task,
+        render_task,
+        input_task,
+    };
+
+    state.native_terminals.sessions.lock().insert(session_id, session);
     Ok(())
 }

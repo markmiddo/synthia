@@ -26,6 +26,13 @@ static WAYLAND_CONNECTION: OnceLock<wayland_client::Connection> = OnceLock::new(
 #[allow(dead_code)] // populated by attach (D Task 14), drained by detach (D Task 18)
 pub struct NativeSession {
     pub session_id: Uuid,
+    pub subsurface: std::sync::Arc<parking_lot::Mutex<subsurface::SubsurfaceHandle>>,
+    pub renderer: std::sync::Arc<parking_lot::Mutex<renderer::Renderer>>,
+    pub grid: std::sync::Arc<parking_lot::Mutex<grid::Grid>>,
+    pub leased: crate::commands::terminal::LeasedPty,
+    pub reader_task: tokio::task::JoinHandle<()>,
+    pub render_task: tokio::task::JoinHandle<()>,
+    pub input_task: tokio::task::JoinHandle<()>,
 }
 
 #[derive(Default)]
