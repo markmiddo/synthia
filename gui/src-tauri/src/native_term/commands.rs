@@ -167,3 +167,58 @@ pub async fn native_term_attach(
     state.native_terminals.sessions.lock().insert(session_id, session);
     Ok(())
 }
+
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs (D Task 19)
+pub async fn native_term_resize(
+    state: State<'_, AppState>,
+    session_id: Uuid,
+    geom: TermGeom,
+) -> AppResult<()> {
+    let mut sessions = state.native_terminals.sessions.lock();
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| AppError::Terminal(format!("unknown native session {session_id}")))?;
+    {
+        let h = session.subsurface.lock();
+        h.subsurface.set_position(geom.x, geom.y);
+        h.child_surface.commit();
+    }
+    let cell_w = 8u32;
+    let cell_h = 16u32;
+    let cols = (geom.width / cell_w).max(1) as usize;
+    let rows = (geom.height / cell_h).max(1) as usize;
+    session.grid.lock().resize(rows, cols);
+    {
+        let mut r = session.renderer.lock();
+        r.width = geom.width;
+        r.height = geom.height;
+        r.buffer = vec![0u32; (geom.width * geom.height) as usize];
+    }
+    {
+        let mut sb = session.softbuffer.lock();
+        sb.surface.resize(
+            std::num::NonZeroU32::new(geom.width).ok_or_else(|| AppError::Terminal("zero w".into()))?,
+            std::num::NonZeroU32::new(geom.height).ok_or_else(|| AppError::Terminal("zero h".into()))?,
+        ).map_err(|e| AppError::Terminal(format!("sb resize: {e}")))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs (D Task 19)
+pub async fn native_term_detach(
+    state: State<'_, AppState>,
+    session_id: Uuid,
+) -> AppResult<()> {
+    let mut sessions = state.native_terminals.sessions.lock();
+    let session = sessions
+        .remove(&session_id)
+        .ok_or_else(|| AppError::Terminal(format!("unknown native session {session_id}")))?;
+    session.reader_task.abort();
+    session.render_task.abort();
+    session.input_task.abort();
+    let leased = session.leased;
+    crate::commands::terminal::restore_from_native(&state.terminals, session_id, leased)?;
+    Ok(())
+}
