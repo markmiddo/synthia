@@ -84,6 +84,44 @@ impl Grid {
         self.cursor_col += 1;
         self.dirty = true;
     }
+
+    /// Dispatch a CSI sequence. `params` are decoded numeric parameters (0 if absent).
+    pub fn csi_dispatch(&mut self, action: u8, params: &[u16]) {
+        let p = |i: usize, default: u16| -> u16 {
+            params.get(i).copied().filter(|&v| v != 0).unwrap_or(default)
+        };
+        match action {
+            b'H' | b'f' => {
+                // CUP: cursor position (1-based)
+                let row = (p(0, 1) as usize).saturating_sub(1).min(self.rows.saturating_sub(1));
+                let col = (p(1, 1) as usize).saturating_sub(1).min(self.cols.saturating_sub(1));
+                self.cursor_row = row;
+                self.cursor_col = col;
+            }
+            b'A' => {
+                // CUU
+                let n = p(0, 1) as usize;
+                self.cursor_row = self.cursor_row.saturating_sub(n);
+            }
+            b'B' => {
+                // CUD
+                let n = p(0, 1) as usize;
+                self.cursor_row = (self.cursor_row + n).min(self.rows.saturating_sub(1));
+            }
+            b'C' => {
+                // CUF
+                let n = p(0, 1) as usize;
+                self.cursor_col = (self.cursor_col + n).min(self.cols.saturating_sub(1));
+            }
+            b'D' => {
+                // CUB
+                let n = p(0, 1) as usize;
+                self.cursor_col = self.cursor_col.saturating_sub(n);
+            }
+            _ => { /* unhandled — silent for v1 */ }
+        }
+        self.dirty = true;
+    }
 }
 
 #[cfg(test)]
@@ -123,5 +161,54 @@ mod tests {
         g.dirty = false;
         g.apply_print('x');
         assert!(g.dirty);
+    }
+
+    #[test]
+    fn grid_csi_cup_moves_cursor() {
+        let mut g = Grid::new(10, 20);
+        // CSI 5;10H = cursor to row 5 col 10 (1-based)
+        g.csi_dispatch(b'H', &[5, 10]);
+        assert_eq!(g.cursor_row, 4);
+        assert_eq!(g.cursor_col, 9);
+    }
+
+    #[test]
+    fn grid_csi_cuf_advances_cursor() {
+        let mut g = Grid::new(5, 10);
+        g.cursor_col = 2;
+        g.csi_dispatch(b'C', &[3]);
+        assert_eq!(g.cursor_col, 5);
+    }
+
+    #[test]
+    fn grid_csi_cub_retreats_cursor() {
+        let mut g = Grid::new(5, 10);
+        g.cursor_col = 5;
+        g.csi_dispatch(b'D', &[2]);
+        assert_eq!(g.cursor_col, 3);
+    }
+
+    #[test]
+    fn grid_csi_cuu_moves_up() {
+        let mut g = Grid::new(5, 10);
+        g.cursor_row = 3;
+        g.csi_dispatch(b'A', &[2]);
+        assert_eq!(g.cursor_row, 1);
+    }
+
+    #[test]
+    fn grid_csi_cud_moves_down() {
+        let mut g = Grid::new(5, 10);
+        g.cursor_row = 1;
+        g.csi_dispatch(b'B', &[2]);
+        assert_eq!(g.cursor_row, 3);
+    }
+
+    #[test]
+    fn grid_csi_cup_clamps_to_bounds() {
+        let mut g = Grid::new(5, 5);
+        g.csi_dispatch(b'H', &[100, 100]);
+        assert_eq!(g.cursor_row, 4);
+        assert_eq!(g.cursor_col, 4);
     }
 }
