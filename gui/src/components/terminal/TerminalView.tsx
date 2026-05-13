@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useTerminalSession, type SessionMeta } from "./useTerminalSession";
 
 interface TerminalViewProps {
@@ -44,51 +45,46 @@ export function TerminalView(props: TerminalViewProps) {
     }
   }, [props.visible, session]);
 
-  // Drag-and-drop: insert shell-quoted file paths at the cursor.
-  // Note: standard browser File objects don't expose `.path`, but Tauri's
-  // webview injects it. If `.path` is undefined we fall back to `f.name`
-  // (still useful as a filename hint).
-  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragOver(false);
-    if (!session.sessionId) return;
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) return;
-    const paths = files
-      .map((f) => {
-        const p = (f as File & { path?: string }).path ?? f.name;
-        // Shell-quote: wrap in single quotes, escape inner single quotes.
-        return `'${p.replace(/'/g, "'\\''")}'`;
-      })
-      .join(" ");
-    invoke("terminal_write", { sessionId: session.sessionId, data: paths }).catch((err) =>
-      console.error("[terminal] drop write failed", err),
-    );
-  }
+  // Fix 2: File drag-and-drop via Tauri's OS-level DragDrop window event.
+  // HTML5 onDrop/onDragOver handlers don't fire in Tauri webviews because
+  // Tauri intercepts file drops at the OS level before they reach the DOM.
+  // We listen to the Tauri events emitted from lib.rs on_window_event instead.
+  useEffect(() => {
+    if (!props.visible) return;
+    let unlistenDrop: (() => void) | undefined;
+    let unlistenEnter: (() => void) | undefined;
+    let unlistenLeave: (() => void) | undefined;
 
-  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragOver(true);
-  }
+    listen<string[]>("synthia://file-drop", (event) => {
+      setDragOver(false);
+      if (!session.sessionId) return;
+      const quoted = event.payload
+        .map((p) => `'${p.replace(/'/g, "'\\''")}'`)
+        .join(" ");
+      invoke("terminal_write", { sessionId: session.sessionId, data: quoted }).catch((err) =>
+        console.error("[terminal] drop write failed", err),
+      );
+    }).then((u) => { unlistenDrop = u; });
 
-  function handleDragEnter(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragOver(true);
-  }
+    listen<void>("synthia://drag-enter", () => {
+      setDragOver(true);
+    }).then((u) => { unlistenEnter = u; });
 
-  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragOver(false);
-  }
+    listen<void>("synthia://drag-leave", () => {
+      setDragOver(false);
+    }).then((u) => { unlistenLeave = u; });
+
+    return () => {
+      unlistenDrop?.();
+      unlistenEnter?.();
+      unlistenLeave?.();
+    };
+  }, [props.visible, session.sessionId]);
 
   return (
     <div
       className={`terminal-view-container${dragOver ? " drag-over" : ""}`}
       style={{ display: props.visible ? "block" : "none" }}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
     >
       <div ref={containerRef} className="terminal-view" />
       {session.error && (

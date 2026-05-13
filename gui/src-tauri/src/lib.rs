@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use std::process::Command;
 use std::fs;
@@ -278,6 +278,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state::AppState::default())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             // Clean up any stale remote mode state from previous sessions
             let _ = fs::remove_file(get_runtime_dir().join("synthia-remote-mode"));
@@ -378,6 +379,21 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+                    let paths_str: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+                    let _ = window.emit("synthia://file-drop", paths_str);
+                }
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Enter { .. }) => {
+                    let _ = window.emit("synthia://drag-enter", ());
+                }
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Leave) => {
+                    let _ = window.emit("synthia://drag-leave", ());
+                }
+                _ => {}
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::lifecycle::get_status,

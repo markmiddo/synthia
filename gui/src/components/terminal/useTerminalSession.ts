@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { readText, writeText, readImage } from "@tauri-apps/plugin-clipboard-manager";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -106,6 +107,8 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
 
       termRef.current = term;
       fitRef.current = fit;
+      // Fix 3: write renderer name to the terminal screen so it's visible without DevTools.
+      term.write(`\x1b[2m[synthia: renderer=${rendererName}]\x1b[0m\r\n`);
 
       try {
         const sessionMeta = await invoke<SessionMeta>("terminal_spawn", { cwd, shell });
@@ -158,14 +161,10 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
         // Custom Ctrl+V paste handler. xterm's default ignores Ctrl+V (Linux terminals
         // reserve it for the running program). We override it for editor-like UX.
         //
-        // Clipboard permission notes (Tauri / webkit2gtk):
-        //   - navigator.clipboard.readText() works after the window has focus.
-        //   - navigator.clipboard.read() (for image detection) may return a
-        //     NotAllowedError if the Tauri allowlist doesn't include clipboard-read;
-        //     we catch and assume text in that case.
-        //
-        // CSS :has() note: webkit2gtk >= 2.40 (GTK4 / GNOME 44+) supports :has().
-        // Pop!_OS ships webkit2gtk 2.44+, so Fix 1A is safe.
+        // Clipboard notes: navigator.clipboard throws NotAllowedError in webkit2gtk
+        // because the webview hasn't been granted clipboard-read permission.
+        // We use the Tauri clipboard-manager plugin instead, which reads the OS
+        // clipboard directly without needing browser permission grants.
         term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
           if (event.type !== "keydown") return true;
 
@@ -176,29 +175,27 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
             event.preventDefault();
             (async () => {
               try {
+                // If the clipboard has an image, forward raw ^V to the inner
+                // app (Claude Code etc) which knows how to read images via wl-paste.
                 let hasImage = false;
                 try {
-                  const items = await navigator.clipboard.read();
-                  for (const item of items) {
-                    if (item.types.some((t) => t.startsWith("image/"))) {
-                      hasImage = true;
-                      break;
-                    }
-                  }
+                  const img = await readImage();
+                  hasImage = !!img;
                 } catch {
-                  /* clipboard-read permission denied or unsupported — assume text */
+                  /* no image or not supported */
                 }
                 if (hasImage) {
                   // Forward raw 0x16 (^V) to PTY so the running app reads the image.
                   await invoke("terminal_write", { sessionId: sessionMeta.id, data: "\x16" });
                   return;
                 }
-                const text = await navigator.clipboard.readText();
+                const text = await readText();
                 if (text) {
                   await invoke("terminal_write", { sessionId: sessionMeta.id, data: text });
                 }
               } catch (e) {
                 console.error("[terminal] paste failed", e);
+                term.write(`\r\n\x1b[31m[paste failed: ${String(e).slice(0, 100)}]\x1b[0m\r\n`);
               }
             })();
             return false;
@@ -209,10 +206,11 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
             event.preventDefault();
             (async () => {
               try {
-                const text = await navigator.clipboard.readText();
+                const text = await readText();
                 if (text) await invoke("terminal_write", { sessionId: sessionMeta.id, data: text });
               } catch (e) {
                 console.error("[terminal] paste failed", e);
+                term.write(`\r\n\x1b[31m[paste failed: ${String(e).slice(0, 100)}]\x1b[0m\r\n`);
               }
             })();
             return false;
@@ -223,7 +221,7 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
             const sel = term.getSelection();
             if (sel && sel.length > 0) {
               event.preventDefault();
-              navigator.clipboard.writeText(sel).catch((e) => console.error("[terminal] copy failed", e));
+              writeText(sel).catch((e) => console.error("[terminal] copy failed", e));
               term.clearSelection();
               return false;
             }
