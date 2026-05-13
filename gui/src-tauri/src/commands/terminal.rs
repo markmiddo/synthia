@@ -19,9 +19,10 @@
 use std::io::Read;
 use std::time::Duration;
 
+use base64::Engine;
 use chrono::Utc;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use tauri::{AppHandle, Emitter, State, ipc::Channel, ipc::InvokeResponseBody};
+use tauri::{AppHandle, Emitter, State, ipc::Channel};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -148,7 +149,7 @@ pub async fn terminal_attach(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: Uuid,
-    on_output: Channel<InvokeResponseBody>,
+    on_output: Channel<String>,
 ) -> AppResult<()> {
     let mut reader = {
         let mut guard = state.terminals.sessions.lock();
@@ -202,8 +203,10 @@ pub async fn terminal_attach(
                 batch.extend_from_slice(&more);
             }
 
-            // Send as raw bytes — JS receives an ArrayBuffer, zero encode/decode cost.
-            if on_output.send(InvokeResponseBody::Raw(batch)).is_err() {
+            // Send base64-encoded — Channel<String> serializes reliably across Tauri 2.x;
+            // raw binary via InvokeResponseBody::Raw was unreliable on this webkit build.
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&batch);
+            if on_output.send(encoded).is_err() {
                 break;
             }
         }

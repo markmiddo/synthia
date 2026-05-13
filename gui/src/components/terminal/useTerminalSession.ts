@@ -120,12 +120,12 @@ export function useTerminalSession(opts: UseTerminalSessionOptions): TerminalSes
         setSessionId(sessionMeta.id);
         setMeta(sessionMeta);
 
-        // Binary channel: Rust sends InvokeResponseBody::Raw → JS receives ArrayBuffer.
-        // Zero base64 overhead in both directions.
-        const outputChannel = new Channel<ArrayBuffer>();
-        outputChannel.onmessage = (buf: ArrayBuffer) => {
-          console.debug("[terminal] chunk", buf.byteLength);
-          term.write(new Uint8Array(buf));
+        // Channel<String> with base64 — proven reliable across Tauri 2.x webkit builds.
+        // Binary InvokeResponseBody::Raw was unreliable; JS received empty/undefined data.
+        const outputChannel = new Channel<string>();
+        outputChannel.onmessage = (encoded: string) => {
+          const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+          term.write(bytes);
         };
 
         // Optional write-timing diagnostics: set localStorage.SYNTHIA_TERM_DEBUG = '1'
