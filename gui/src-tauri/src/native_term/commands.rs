@@ -1,5 +1,6 @@
 //! Tauri commands for the native renderer.
 
+use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
@@ -29,6 +30,15 @@ pub async fn native_term_attach(
         .ok_or_else(|| AppError::Terminal("no main window".into()))?;
     let parent_ptr = crate::native_term::subsurface::parent_surface_from_tauri(&window)?;
 
+    // Extract the Wayland display pointer from the window's display handle.
+    let display_handle = window
+        .display_handle()
+        .map_err(|e| AppError::Terminal(format!("display_handle: {e}")))?;
+    let display_ptr = match display_handle.as_raw() {
+        RawDisplayHandle::Wayland(h) => h.display,
+        _ => return Err(AppError::Terminal("display not wayland".into())),
+    };
+
     let conn = match crate::native_term::wayland_connection() {
         Some(c) => c.clone(),
         None => {
@@ -43,6 +53,24 @@ pub async fn native_term_attach(
         &conn, parent_ptr, geom.x, geom.y, geom.width, geom.height,
     )?;
     let subsurface_arc = std::sync::Arc::new(parking_lot::Mutex::new(subsurface));
+
+    // Extract the child wl_surface pointer for softbuffer binding.
+    let child_surface_ptr = {
+        use wayland_client::Proxy as _;
+        let id = subsurface_arc.lock().child_surface.id();
+        // ObjectId::as_ptr() returns *mut wl_proxy (null if destroyed).
+        let raw = id.as_ptr();
+        std::ptr::NonNull::new(raw as *mut std::ffi::c_void)
+            .ok_or_else(|| AppError::Terminal("null child surface ptr".into()))?
+    };
+
+    let softbuffer_state = crate::native_term::subsurface::init_softbuffer(
+        display_ptr,
+        child_surface_ptr,
+        geom.width,
+        geom.height,
+    )?;
+    let softbuffer_arc = std::sync::Arc::new(parking_lot::Mutex::new(softbuffer_state));
 
     let mut leased = crate::commands::terminal::lease_for_native(&state.terminals, session_id)?
         .ok_or_else(|| AppError::Terminal("session already leased or not spawned".into()))?;
@@ -83,10 +111,10 @@ pub async fn native_term_attach(
     });
 
     // Render task: 60fps poll on dirty flag, blit to renderer buffer.
-    // Stage 3 (D Task 16) presents to wl_surface via softbuffer.
+    // D Task 16: presents pixel buffer to child wl_surface via softbuffer.
     let grid_for_render = grid.clone();
     let renderer_for_render = renderer_arc.clone();
-    let subsurface_for_render = subsurface_arc.clone();
+    let softbuffer_for_render = softbuffer_arc.clone();
     let render_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
         loop {
@@ -99,12 +127,9 @@ pub async fn native_term_attach(
                 let g = grid_for_render.lock();
                 let mut r = renderer_for_render.lock();
                 r.render_grid(&g);
-                // Stage 3 scaffold: damage + commit (real present in D Task 16).
                 let _ = crate::native_term::subsurface::present_buffer(
-                    &subsurface_for_render,
+                    &softbuffer_for_render,
                     &r.buffer,
-                    r.width,
-                    r.height,
                 );
             }
         }
@@ -118,6 +143,7 @@ pub async fn native_term_attach(
     let session = crate::native_term::NativeSession {
         session_id,
         subsurface: subsurface_arc,
+        softbuffer: softbuffer_arc,
         renderer: renderer_arc,
         grid,
         leased,

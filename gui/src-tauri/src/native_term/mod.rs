@@ -27,6 +27,9 @@ static WAYLAND_CONNECTION: OnceLock<wayland_client::Connection> = OnceLock::new(
 pub struct NativeSession {
     pub session_id: Uuid,
     pub subsurface: std::sync::Arc<parking_lot::Mutex<subsurface::SubsurfaceHandle>>,
+    /// Softbuffer context + surface bound to the child wl_surface (D Task 16).
+    pub softbuffer:
+        std::sync::Arc<parking_lot::Mutex<subsurface::SoftbufferState>>,
     pub renderer: std::sync::Arc<parking_lot::Mutex<renderer::Renderer>>,
     pub grid: std::sync::Arc<parking_lot::Mutex<grid::Grid>>,
     pub leased: crate::commands::terminal::LeasedPty,

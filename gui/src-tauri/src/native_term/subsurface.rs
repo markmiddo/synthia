@@ -6,7 +6,11 @@
 
 use std::ptr::NonNull;
 
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use raw_window_handle::{
+    DisplayHandle, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
+    WaylandDisplayHandle, WaylandWindowHandle, WindowHandle,
+};
+use softbuffer::{Context, Surface};
 use wayland_client::{
     globals::{registry_queue_init, GlobalListContents},
     protocol::{
@@ -190,21 +194,115 @@ pub fn create_subsurface(
     })
 }
 
-/// Present a buffer of u32 ARGB pixels to the subsurface.
+// ---------------------------------------------------------------------------
+// Softbuffer wrappers (D Task 16)
+// ---------------------------------------------------------------------------
+
+/// Minimal display handle wrapper satisfying [`HasDisplayHandle`].
+#[derive(Clone)]
+pub struct DummyDisplay {
+    raw: RawDisplayHandle,
+}
+
+// SAFETY: The underlying *mut wl_display pointer is valid and stable for
+// the lifetime of the Wayland Connection from which it was obtained.
+unsafe impl Send for DummyDisplay {}
+
+impl HasDisplayHandle for DummyDisplay {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, raw_window_handle::HandleError> {
+        Ok(unsafe { DisplayHandle::borrow_raw(self.raw) })
+    }
+}
+
+/// Minimal window handle wrapper satisfying [`HasWindowHandle`].
+#[derive(Clone)]
+pub struct DummyWindow {
+    raw: RawWindowHandle,
+}
+
+// SAFETY: The underlying *mut wl_proxy pointer is a valid, live child
+// wl_surface for the lifetime of the [`SubsurfaceHandle`] that owns it.
+unsafe impl Send for DummyWindow {}
+
+impl HasWindowHandle for DummyWindow {
+    fn window_handle(&self) -> Result<WindowHandle<'_>, raw_window_handle::HandleError> {
+        Ok(unsafe { WindowHandle::borrow_raw(self.raw) })
+    }
+}
+
+/// Holds the initialised softbuffer [`Context`] and [`Surface`] for the
+/// child wl_surface.  Stored in an `Arc<Mutex<SoftbufferState>>` and shared
+/// between the render task and the [`NativeSession`].
+#[allow(dead_code)] // populated in D Task 16; consumed in render task
+pub struct SoftbufferState {
+    pub context: Context<DummyDisplay>,
+    pub surface: Surface<DummyDisplay, DummyWindow>,
+}
+
+// SAFETY: Surface<DummyDisplay, DummyWindow> is Send (not Sync).  We gate
+// access behind a Mutex, so Sync is not required.  Context is Send+Sync.
+unsafe impl Send for SoftbufferState {}
+
+/// Initialise a softbuffer [`Context`] + [`Surface`] bound to a child
+/// wl_surface.
 ///
-/// D Task 15 stage: marks the surface damaged and commits — no actual buffer
-/// is attached yet. D Task 16 wires real softbuffer integration here.
-#[allow(dead_code)] // wired in D Task 14 render task; real impl in D Task 16
-pub fn present_buffer(
-    handle: &std::sync::Arc<parking_lot::Mutex<SubsurfaceHandle>>,
-    pixels: &[u32],
+/// `display_ptr` must be a valid `*mut wl_display` for the session's Wayland
+/// connection.  `surface_ptr` must be a valid `*mut wl_proxy` for the child
+/// [`WlSurface`] created by [`create_subsurface`].
+#[allow(dead_code)] // wired up in native_term_attach (D Task 16)
+pub fn init_softbuffer(
+    display_ptr: NonNull<std::ffi::c_void>,
+    surface_ptr: NonNull<std::ffi::c_void>,
     width: u32,
     height: u32,
+) -> AppResult<SoftbufferState> {
+    let display_raw =
+        RawDisplayHandle::Wayland(WaylandDisplayHandle::new(display_ptr));
+    let window_raw =
+        RawWindowHandle::Wayland(WaylandWindowHandle::new(surface_ptr));
+    let display = DummyDisplay { raw: display_raw };
+    let window = DummyWindow { raw: window_raw };
+
+    let context = Context::new(display)
+        .map_err(|e| AppError::Terminal(format!("softbuffer ctx: {e}")))?;
+    let mut surface = Surface::new(&context, window)
+        .map_err(|e| AppError::Terminal(format!("softbuffer surface: {e}")))?;
+    surface
+        .resize(
+            std::num::NonZeroU32::new(width)
+                .ok_or_else(|| AppError::Terminal("zero width".into()))?,
+            std::num::NonZeroU32::new(height)
+                .ok_or_else(|| AppError::Terminal("zero height".into()))?,
+        )
+        .map_err(|e| AppError::Terminal(format!("softbuffer resize: {e}")))?;
+
+    Ok(SoftbufferState { context, surface })
+}
+
+/// Present a buffer of u32 XRGB pixels to the child wl_surface via softbuffer.
+///
+/// D Task 16: real implementation — blits `pixels` into the softbuffer and
+/// calls `present()` which attaches a wl_buffer and commits the surface.
+#[allow(dead_code)] // wired in D Task 14 render task; signature updated in D Task 16
+pub fn present_buffer(
+    sb: &std::sync::Arc<parking_lot::Mutex<SoftbufferState>>,
+    pixels: &[u32],
 ) -> AppResult<()> {
-    let h = handle.lock();
-    h.child_surface.damage_buffer(0, 0, width as i32, height as i32);
-    h.child_surface.commit();
-    let _ = pixels; // consumed in D Task 16
+    let mut sb_guard = sb.lock();
+    let mut buf = sb_guard
+        .surface
+        .buffer_mut()
+        .map_err(|e| AppError::Terminal(format!("softbuffer buffer_mut: {e}")))?;
+    if buf.len() != pixels.len() {
+        return Err(AppError::Terminal(format!(
+            "softbuffer size mismatch: buf={} pixels={}",
+            buf.len(),
+            pixels.len(),
+        )));
+    }
+    buf.copy_from_slice(pixels);
+    buf.present()
+        .map_err(|e| AppError::Terminal(format!("softbuffer present: {e}")))?;
     Ok(())
 }
 
