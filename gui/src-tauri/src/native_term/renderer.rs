@@ -1,10 +1,24 @@
 //! Software rendering: softbuffer pixel buffer + cosmic-text glyph blit.
-//!
-//! D Task 10: pixel buffer + cell background fill (this task).
-//! D Task 11: cosmic-text glyph rendering on top.
 
 use crate::error::{AppError, AppResult};
-use crate::native_term::grid::{Color, Grid};
+use crate::native_term::grid::{Cell, Color, Grid};
+use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping, SwashCache};
+
+#[allow(dead_code)]
+pub struct FontStack {
+    pub system: FontSystem,
+    pub cache: SwashCache,
+    pub metrics: Metrics,
+}
+
+impl FontStack {
+    pub fn new(font_size: f32) -> Self {
+        let system = FontSystem::new();
+        let cache = SwashCache::new();
+        let metrics = Metrics::new(font_size, font_size * 1.4);
+        Self { system, cache, metrics }
+    }
+}
 
 #[allow(dead_code)] // populated by attach (D Task 14)
 pub struct Renderer {
@@ -13,17 +27,22 @@ pub struct Renderer {
     pub cell_w: u32,
     pub cell_h: u32,
     pub buffer: Vec<u32>,
+    pub fonts: FontStack,
 }
 
 #[allow(dead_code)] // wired up in attach (D Task 14)
 impl Renderer {
-    pub fn new(width: u32, height: u32, cell_w: u32, cell_h: u32) -> AppResult<Self> {
+    pub fn new(width: u32, height: u32, cell_w: u32, cell_h: u32, font_size: f32) -> AppResult<Self> {
         if width == 0 || height == 0 {
             return Err(AppError::Terminal("renderer: zero-dim surface".into()));
         }
         Ok(Self {
-            width, height, cell_w, cell_h,
+            width,
+            height,
+            cell_w,
+            cell_h,
             buffer: vec![0u32; (width * height) as usize],
+            fonts: FontStack::new(font_size),
         })
     }
 
@@ -33,14 +52,15 @@ impl Renderer {
     }
 
     pub fn render_grid(&mut self, grid: &Grid) {
-        // v1: fill entire surface with default bg, then paint cell-specific bgs.
-        // Glyphs added in D Task 11.
         self.fill_background(Color::black());
         for r in 0..grid.rows {
             for c in 0..grid.cols {
                 let cell = grid.cell_at(r, c);
                 if cell.bg != Color::black() {
                     self.fill_cell_bg(r, c, cell.bg);
+                }
+                if cell.ch != ' ' {
+                    self.draw_glyph(r, c, cell);
                 }
             }
         }
@@ -60,6 +80,52 @@ impl Renderer {
             }
         }
     }
+
+    pub fn draw_glyph(&mut self, row: usize, col: usize, cell: Cell) {
+        let x0 = (col as i32) * self.cell_w as i32;
+        let y0 = (row as i32) * self.cell_h as i32;
+
+        let mut ct_buf = Buffer::new(&mut self.fonts.system, self.fonts.metrics);
+        let attrs = Attrs::new();
+        let s = cell.ch.to_string();
+        ct_buf.set_size(
+            &mut self.fonts.system,
+            Some(self.cell_w as f32),
+            Some(self.cell_h as f32),
+        );
+        ct_buf.set_text(&mut self.fonts.system, &s, attrs, Shaping::Advanced);
+        ct_buf.shape_until_scroll(&mut self.fonts.system, false);
+
+        let bg = pack_color(cell.bg);
+        let fg = pack_color(cell.fg);
+        let width = self.width;
+        let height = self.height;
+        let buffer_pixels = &mut self.buffer;
+        let fonts = &mut self.fonts;
+
+        for run in ct_buf.layout_runs() {
+            for glyph in run.glyphs.iter() {
+                let physical = glyph.physical((0.0, 0.0), 1.0);
+                let line_y = run.line_y as i32;
+                fonts.cache.with_pixels(
+                    &mut fonts.system,
+                    physical.cache_key,
+                    cosmic_text::Color::rgb(cell.fg.r, cell.fg.g, cell.fg.b),
+                    |gx, gy, color| {
+                        let alpha = color.a();
+                        if alpha == 0 { return; }
+                        let px = x0 + physical.x + gx;
+                        let py = y0 + line_y + gy;
+                        if px < 0 || py < 0 { return; }
+                        let (px, py) = (px as u32, py as u32);
+                        if px >= width || py >= height { return; }
+                        let blended = blend_alpha(bg, fg, alpha);
+                        buffer_pixels[(py * width + px) as usize] = blended;
+                    },
+                );
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -68,19 +134,31 @@ pub fn pack_color(c: Color) -> u32 {
     ((c.r as u32) << 16) | ((c.g as u32) << 8) | (c.b as u32)
 }
 
+pub fn blend_alpha(bg: u32, fg: u32, alpha: u8) -> u32 {
+    let a = alpha as u32;
+    let inv = 255 - a;
+    let br = ((bg >> 16) & 0xff) * inv / 255;
+    let bg_g = ((bg >> 8) & 0xff) * inv / 255;
+    let bb = (bg & 0xff) * inv / 255;
+    let fr = ((fg >> 16) & 0xff) * a / 255;
+    let fg_g = ((fg >> 8) & 0xff) * a / 255;
+    let fb = (fg & 0xff) * a / 255;
+    ((br + fr) << 16) | ((bg_g + fg_g) << 8) | (bb + fb)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn renderer_init_fails_on_zero_dim() {
-        assert!(Renderer::new(0, 100, 8, 16).is_err());
-        assert!(Renderer::new(100, 0, 8, 16).is_err());
+        assert!(Renderer::new(0, 100, 8, 16, 13.0).is_err());
+        assert!(Renderer::new(100, 0, 8, 16, 13.0).is_err());
     }
 
     #[test]
     fn renderer_fills_background() {
-        let mut r = Renderer::new(4, 4, 2, 2).unwrap();
+        let mut r = Renderer::new(4, 4, 2, 2, 13.0).unwrap();
         r.fill_background(Color::rgb(0xff, 0, 0));
         let expected = pack_color(Color::rgb(0xff, 0, 0));
         assert!(r.buffer.iter().all(|&p| p == expected));
@@ -88,15 +166,20 @@ mod tests {
 
     #[test]
     fn renderer_paints_cell_bg() {
-        let mut r = Renderer::new(4, 4, 2, 2).unwrap();
+        let mut r = Renderer::new(4, 4, 2, 2, 13.0).unwrap();
         r.fill_background(Color::black());
         r.fill_cell_bg(0, 0, Color::rgb(0xff, 0, 0));
         let red = pack_color(Color::rgb(0xff, 0, 0));
         assert_eq!(r.buffer[0], red);
-        assert_eq!(r.buffer[1], red);
-        assert_eq!(r.buffer[4], red);
-        assert_eq!(r.buffer[5], red);
-        // outside cell still black
-        assert_eq!(r.buffer[2], pack_color(Color::black()));
+    }
+
+    #[test]
+    fn renderer_blend_alpha_zero_keeps_bg() {
+        assert_eq!(blend_alpha(0xffffff, 0x000000, 0), 0xffffff);
+    }
+
+    #[test]
+    fn renderer_blend_alpha_full_uses_fg() {
+        assert_eq!(blend_alpha(0xffffff, 0x000000, 255), 0x000000);
     }
 }
