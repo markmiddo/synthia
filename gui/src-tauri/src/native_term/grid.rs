@@ -118,7 +118,73 @@ impl Grid {
                 let n = p(0, 1) as usize;
                 self.cursor_col = self.cursor_col.saturating_sub(n);
             }
-            _ => { /* unhandled — silent for v1 */ }
+            b'm' => {
+                // SGR: select graphic rendition
+                if params.is_empty() || params == [0] {
+                    self.fg = Color::white();
+                    self.bg = Color::black();
+                    self.bold = false;
+                } else {
+                    for &p in params {
+                        match p {
+                            0 => { self.fg = Color::white(); self.bg = Color::black(); self.bold = false; }
+                            1 => self.bold = true,
+                            22 => self.bold = false,
+                            30 => self.fg = Color::black(),
+                            31 => self.fg = Color::rgb(0xfd, 0xa4, 0xaf),
+                            32 => self.fg = Color::rgb(0x86, 0xef, 0xac),
+                            33 => self.fg = Color::rgb(0xfd, 0xe6, 0x8a),
+                            34 => self.fg = Color::rgb(0xa5, 0xb4, 0xfc),
+                            35 => self.fg = Color::rgb(0xc4, 0xb5, 0xfd),
+                            36 => self.fg = Color::rgb(0x67, 0xe8, 0xf9),
+                            37 => self.fg = Color::white(),
+                            39 => self.fg = Color::white(),
+                            40 => self.bg = Color::black(),
+                            41 => self.bg = Color::rgb(0xfd, 0xa4, 0xaf),
+                            42 => self.bg = Color::rgb(0x86, 0xef, 0xac),
+                            43 => self.bg = Color::rgb(0xfd, 0xe6, 0x8a),
+                            44 => self.bg = Color::rgb(0xa5, 0xb4, 0xfc),
+                            45 => self.bg = Color::rgb(0xc4, 0xb5, 0xfd),
+                            46 => self.bg = Color::rgb(0x67, 0xe8, 0xf9),
+                            47 => self.bg = Color::white(),
+                            49 => self.bg = Color::black(),
+                            90..=97 => {
+                                self.fg = match p {
+                                    90 => Color::rgb(0x6b, 0x72, 0x80),
+                                    91 => Color::rgb(0xfb, 0x71, 0x85),
+                                    92 => Color::rgb(0x4a, 0xde, 0x80),
+                                    93 => Color::rgb(0xfa, 0xcc, 0x15),
+                                    94 => Color::rgb(0x81, 0x8c, 0xf8),
+                                    95 => Color::rgb(0xa7, 0x8b, 0xfa),
+                                    96 => Color::rgb(0x22, 0xd3, 0xee),
+                                    _  => Color::rgb(0xff, 0xff, 0xff),
+                                };
+                            }
+                            _ => { /* unhandled SGR — silent */ }
+                        }
+                    }
+                }
+            }
+            b'J' => {
+                // ED: erase display. param 2 = entire screen.
+                let n = params.first().copied().unwrap_or(0);
+                if n == 2 {
+                    let blank = Cell { ch: ' ', fg: self.fg, bg: self.bg, bold: false };
+                    self.cells.iter_mut().for_each(|c| *c = blank);
+                }
+            }
+            b'K' => {
+                // EL: erase in line. param 2 = entire line.
+                let n = params.first().copied().unwrap_or(0);
+                if n == 2 {
+                    let blank = Cell { ch: ' ', fg: self.fg, bg: self.bg, bold: false };
+                    let row = self.cursor_row;
+                    for c in 0..self.cols {
+                        self.cells[row * self.cols + c] = blank;
+                    }
+                }
+            }
+            _ => { /* unhandled — silent */ }
         }
         self.dirty = true;
     }
@@ -210,5 +276,54 @@ mod tests {
         g.csi_dispatch(b'H', &[100, 100]);
         assert_eq!(g.cursor_row, 4);
         assert_eq!(g.cursor_col, 4);
+    }
+
+    #[test]
+    fn grid_csi_sgr_red_fg() {
+        let mut g = Grid::new(2, 5);
+        g.csi_dispatch(b'm', &[31]);
+        g.apply_print('R');
+        assert_eq!(g.cell_at(0, 0).fg, Color::rgb(0xfd, 0xa4, 0xaf));
+    }
+
+    #[test]
+    fn grid_csi_sgr_reset() {
+        let mut g = Grid::new(2, 5);
+        g.csi_dispatch(b'm', &[31]);
+        g.csi_dispatch(b'm', &[0]);
+        g.apply_print('X');
+        assert_eq!(g.cell_at(0, 0).fg, Color::white());
+        assert!(!g.cell_at(0, 0).bold);
+    }
+
+    #[test]
+    fn grid_csi_sgr_bold() {
+        let mut g = Grid::new(2, 5);
+        g.csi_dispatch(b'm', &[1]);
+        g.apply_print('B');
+        assert!(g.cell_at(0, 0).bold);
+    }
+
+    #[test]
+    fn grid_csi_ed_clears_screen() {
+        let mut g = Grid::new(2, 3);
+        g.apply_print('a'); g.apply_print('b'); g.apply_print('c');
+        g.csi_dispatch(b'J', &[2]);
+        for r in 0..g.rows {
+            for c in 0..g.cols {
+                assert_eq!(g.cell_at(r, c).ch, ' ');
+            }
+        }
+    }
+
+    #[test]
+    fn grid_csi_el_clears_line() {
+        let mut g = Grid::new(2, 3);
+        g.apply_print('a'); g.apply_print('b'); g.apply_print('c');
+        g.cursor_row = 0; g.cursor_col = 0;
+        g.csi_dispatch(b'K', &[2]);
+        for c in 0..g.cols {
+            assert_eq!(g.cell_at(0, c).ch, ' ');
+        }
     }
 }
