@@ -36,7 +36,9 @@ parking_lot = "0.12"
 base64 = "0.22"
 wayland-client = "0.31"
 wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-protocols = { version = "0.31", features = ["client", "staging"] }
 softbuffer = { version = "0.4", default-features = false, features = ["wayland"] }
 cosmic-text = "0.12"
 vte = "0.13"
+xkbcommon = "0.7"
 raw-window-handle = "0.6"
