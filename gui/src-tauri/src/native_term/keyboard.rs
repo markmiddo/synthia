@@ -4,7 +4,6 @@
 //! own EventQueue + KeyboardState. Translates wl_keyboard events into PTY
 //! byte sequences via the existing InputHandler.
 
-use std::io::Read as _;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -137,27 +136,52 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for KeyboardState {
             } => {
                 // Convert the OwnedFd into a File so we can read from it.
                 // OwnedFd implements From for File; this transfers ownership.
-                let mut file = std::fs::File::from(fd);
-
-                // The keymap is a null-terminated XKB text string of `size` bytes.
-                let read_len = (size as usize).saturating_sub(1);
-                let mut buf = vec![0u8; read_len];
-                if file.read_exact(&mut buf).is_ok() {
-                    if let Ok(s) = std::str::from_utf8(&buf) {
-                        let keymap = xkb::Keymap::new_from_string(
-                            &state.xkb_ctx,
-                            s.to_string(),
-                            xkb::KEYMAP_FORMAT_TEXT_V1,
-                            xkb::KEYMAP_COMPILE_NO_FLAGS,
-                        );
-                        if let Some(km) = keymap {
-                            state.xkb_state = Some(xkb::State::new(&km));
-                            state.keymap = Some(km);
+                eprintln!("[native-term-kb] Keymap arrived, size={size}");
+                // Wayland gives us a memory-mapped fd. Reading via File::read_exact
+                // does NOT work because the fd is not a regular file (no seek/read).
+                // We must mmap it instead.
+                use std::os::fd::AsRawFd;
+                let raw_fd = fd.as_raw_fd();
+                let map_size = size as usize;
+                let map_ptr = unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        map_size,
+                        libc::PROT_READ,
+                        libc::MAP_PRIVATE,
+                        raw_fd,
+                        0,
+                    )
+                };
+                if map_ptr == libc::MAP_FAILED {
+                    let err = std::io::Error::last_os_error();
+                    eprintln!("[native-term-kb] mmap FAILED: {err}");
+                } else {
+                    let bytes = unsafe { std::slice::from_raw_parts(map_ptr as *const u8, map_size.saturating_sub(1)) };
+                    match std::str::from_utf8(bytes) {
+                        Ok(s) => {
+                            eprintln!("[native-term-kb] keymap parsed, {} chars", s.len());
+                            let keymap = xkb::Keymap::new_from_string(
+                                &state.xkb_ctx,
+                                s.to_string(),
+                                xkb::KEYMAP_FORMAT_TEXT_V1,
+                                xkb::KEYMAP_COMPILE_NO_FLAGS,
+                            );
+                            match keymap {
+                                Some(km) => {
+                                    eprintln!("[native-term-kb] xkb keymap loaded OK");
+                                    state.xkb_state = Some(xkb::State::new(&km));
+                                    state.keymap = Some(km);
+                                }
+                                None => eprintln!("[native-term-kb] xkb keymap NEW_FROM_STRING returned None"),
+                            }
                         }
+                        Err(e) => eprintln!("[native-term-kb] utf8 FAILED: {e}"),
                     }
+                    unsafe { libc::munmap(map_ptr, map_size) };
                 }
-                // File is dropped here, closing the fd — safe now that we've
-                // read what we need.
+                // OwnedFd dropped here closes the underlying fd.
+                drop(fd);
             }
 
             wl_keyboard::Event::Key {
@@ -165,6 +189,8 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for KeyboardState {
                 state: WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
             } => {
+                let xkb_present = state.xkb_state.is_some();
+                eprintln!("[native-term-kb] key={key} xkb_state_loaded={xkb_present}");
                 if let Some(xkb_state) = &state.xkb_state {
                     // evdev keycodes are offset by 8 vs XKB keycodes.
                     let keycode = xkb::Keycode::new(key + 8);
@@ -172,9 +198,13 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for KeyboardState {
                     let utf8 = xkb_state.key_get_utf8(keycode);
                     let utf8_char = utf8.chars().next();
                     let bytes = state.input.keysym_to_bytes(keysym, utf8_char);
+                    eprintln!("[native-term-kb] keysym={keysym:?} utf8={utf8:?} bytes={bytes:?}");
                     if !bytes.is_empty() {
                         let mut w = state.writer.lock();
-                        let _ = w.write_all(&bytes);
+                        match w.write_all(&bytes) {
+                            Ok(_) => eprintln!("[native-term-kb] wrote {} bytes to PTY", bytes.len()),
+                            Err(e) => eprintln!("[native-term-kb] write FAILED: {e}"),
+                        }
                         let _ = w.flush();
                     }
                 }

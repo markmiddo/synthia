@@ -4510,6 +4510,7 @@ dependencies = [
  "feed-rs",
  "image 0.24.9",
  "ipnet",
+ "libc",
  "memmap2 0.9.10",
  "notify",
  "parking_lot",

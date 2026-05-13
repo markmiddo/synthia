@@ -2,7 +2,7 @@
 
 use crate::error::{AppError, AppResult};
 use crate::native_term::grid::{Cell, Color, Grid};
-use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping, SwashCache};
+use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache};
 
 #[allow(dead_code)]
 pub struct FontStack {
@@ -11,9 +11,22 @@ pub struct FontStack {
     pub metrics: Metrics,
 }
 
+/// Bundled Commit Mono OTF — loaded into cosmic-text's FontSystem so glyphs
+/// render at the correct advance width instead of falling back to DejaVu/system
+/// fonts which produce inter-character gaps.
+const COMMIT_MONO_400: &[u8] = include_bytes!(
+    "../../../src/assets/fonts/CommitMono-400-Regular.otf"
+);
+
+/// The CSS/PostScript family name for the bundled font.
+const COMMIT_MONO_FAMILY: &str = "Commit Mono";
+
 impl FontStack {
     pub fn new(font_size: f32) -> Self {
-        let system = FontSystem::new();
+        let mut system = FontSystem::new();
+        // Load the bundled OTF so cosmic-text uses Commit Mono instead of
+        // whatever monospace font the system happens to provide.
+        system.db_mut().load_font_data(COMMIT_MONO_400.to_vec());
         let cache = SwashCache::new();
         let metrics = Metrics::new(font_size, font_size * 1.4);
         Self { system, cache, metrics }
@@ -86,7 +99,7 @@ impl Renderer {
         let y0 = (row as i32) * self.cell_h as i32;
 
         let mut ct_buf = Buffer::new(&mut self.fonts.system, self.fonts.metrics);
-        let attrs = Attrs::new();
+        let attrs = Attrs::new().family(Family::Name(COMMIT_MONO_FAMILY));
         let s = cell.ch.to_string();
         ct_buf.set_size(
             &mut self.fonts.system,
@@ -159,7 +172,7 @@ pub fn measure_cell(system: &mut FontSystem, font_size: f32) -> (u32, u32) {
     let metrics = Metrics::new(font_size, font_size * 1.4);
     let mut buffer = Buffer::new(system, metrics);
     buffer.set_size(system, Some(1024.0), Some(metrics.line_height));
-    buffer.set_text(system, "M", Attrs::new(), Shaping::Advanced);
+    buffer.set_text(system, "M", Attrs::new().family(Family::Name(COMMIT_MONO_FAMILY)), Shaping::Advanced);
     buffer.shape_until_scroll(system, false);
     // Fallback: ~0.6em for a typical monospace face.
     let mut advance: f32 = font_size * 0.6;
