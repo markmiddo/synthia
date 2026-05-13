@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
+/// Serialize native_term_show / native_term_hide so a rapid tab toggle
+/// (hide fires before the previous show finished inserting the session
+/// into the backend map) can't cause state loss.  Each call chains onto
+/// the previous one so show.observe → hide.run order is preserved even
+/// when React fires both within a few milliseconds.
+let lastNativeTermOp: Promise<unknown> = Promise.resolve();
+function chain<T>(op: () => Promise<T>): Promise<T> {
+  const next = lastNativeTermOp.then(op, op);
+  lastNativeTermOp = next.catch(() => {});
+  return next;
+}
+
 interface NativeTerminalViewProps {
   visible: boolean;
 }
@@ -34,14 +46,11 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
   // shell state, scrollback, and any running command.
   useEffect(() => {
     if (!visible) {
-      // Hide path: tell backend to move subsurface off-screen + paint blank.
-      invoke("native_term_hide").catch(() => {});
+      chain(() => invoke("native_term_hide")).catch(() => {});
       return;
     }
     if (!containerRef.current) return;
     let cancelled = false;
-    // Wait for layout: getBoundingClientRect after mount can return 0×0
-    // for one frame.  rAF + a fallback timeout cover both cases.
     const showWhenReady = () => {
       if (cancelled) return;
       const geom = computeGeom();
@@ -49,20 +58,18 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
         requestAnimationFrame(showWhenReady);
         return;
       }
-      invoke<string>("native_term_show", { geom })
+      chain(() => invoke<string>("native_term_show", { geom }))
         .then((id) => {
-          sessionRef.current = id;
+          if (!cancelled) sessionRef.current = id as string;
         })
         .catch((e) => setError(String(e)));
     };
     requestAnimationFrame(showWhenReady);
     return () => {
       cancelled = true;
-      // On unmount (section change), hide the persistent terminal so the
-      // subsurface clears off-screen and the next section's content shows.
-      // The PTY + render loop stay alive so a return to Terminal restores
-      // the same shell state.
-      invoke("native_term_hide").catch(() => {});
+      // Chained after show so hide runs only when the session is fully
+      // registered in the backend — fixes the state-loss race.
+      chain(() => invoke("native_term_hide")).catch(() => {});
     };
   }, [visible, computeGeom]);
 
@@ -84,9 +91,9 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
         return;
       }
       last = geom;
-      // native_term_show is idempotent — reuses persistent session and just
-      // repositions/resizes when one already exists.
-      invoke("native_term_show", { geom }).catch(() => {});
+      // native_term_show is idempotent — reuses active or persistent
+      // session and just repositions/resizes when one already exists.
+      chain(() => invoke("native_term_show", { geom })).catch(() => {});
     };
     const observer = new ResizeObserver(reposition);
     if (containerRef.current) observer.observe(containerRef.current);

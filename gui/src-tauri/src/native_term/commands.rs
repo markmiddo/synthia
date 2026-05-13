@@ -424,18 +424,41 @@ pub async fn native_term_hide(
     };
     let Some(session) = session else { return Ok(()) };
 
-    // Abort the show-bound tasks.  reader_task survives — it drains the PTY
-    // into the grid even while hidden, so output from background commands
-    // is captured.
-    session.render_task.abort();
-    session.input_task.abort();
+    // Destructure first.  Move grid + leased + writer + reader_task into
+    // the persistent slot *before* doing any teardown — otherwise a
+    // rapid hide→show race (user double-clicks tabs) can have `show`
+    // observe an empty persistent and fall through to a fresh spawn,
+    // losing the user's shell state.
+    let crate::native_term::NativeSession {
+        session_id,
+        subsurface,
+        softbuffer: _softbuffer,
+        renderer: _renderer,
+        grid,
+        leased,
+        writer,
+        reader_task,
+        render_task,
+        input_task,
+    } = session;
 
-    // Tear the subsurface down.  desync commit on the child applies the
-    // null-buffer immediately; destroy queues parent state which the
-    // webview's natural commit (triggered by the React unmount + DOM
-    // mutation that called us) will apply on its next frame.
+    // 1. Write persistent state FIRST (covers the race window).
+    *state.native_terminals.persistent.lock() =
+        Some(crate::native_term::PersistentNativeState {
+            session_id,
+            grid,
+            leased,
+            writer,
+            reader_task,
+        });
+
+    // 2. Now tear down the show-bound pieces.  render/input tasks abort
+    //    immediately; subsurface destroy queues parent state for the next
+    //    webview commit.
+    render_task.abort();
+    input_task.abort();
     {
-        let h = session.subsurface.lock();
+        let h = subsurface.lock();
         h.subsurface.set_position(-100000, -100000);
         h.child_surface.attach(None, 0, 0);
         h.child_surface.commit();
@@ -459,25 +482,6 @@ pub async fn native_term_hide(
              requestAnimationFrame(()=>{document.body.style.opacity='1';});",
         );
     }
-
-    // Dropping `softbuffer_arc` here when sessions removes the session
-    // releases the wl_buffer (already replaced by null attach above).
-    let crate::native_term::NativeSession {
-        session_id,
-        grid,
-        leased,
-        writer,
-        reader_task,
-        ..
-    } = session;
-    *state.native_terminals.persistent.lock() =
-        Some(crate::native_term::PersistentNativeState {
-            session_id,
-            grid,
-            leased,
-            writer,
-            reader_task,
-        });
     Ok(())
 }
 
