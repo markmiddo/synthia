@@ -82,11 +82,12 @@ pub async fn native_term_attach(
     let mut leased = crate::commands::terminal::lease_for_native(&state.terminals, session_id)?
         .ok_or_else(|| AppError::Terminal("session already leased or not spawned".into()))?;
 
-    // Measure cell dims from cosmic-text actual glyph metrics.
-    let mut probe_system = cosmic_text::FontSystem::new();
-    let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(&mut probe_system, 13.5);
-    let cols = (geom.width / cell_w).max(1) as usize;
-    let rows = (geom.height / cell_h).max(1) as usize;
+    // Measure cell dims via ab_glyph (no FontSystem needed).
+    let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(13.5);
+    let usable_w = geom.width.saturating_sub(crate::native_term::renderer::PADDING_X * 2);
+    let usable_h = geom.height.saturating_sub(crate::native_term::renderer::PADDING_Y * 2);
+    let cols = (usable_w / cell_w).max(1) as usize;
+    let rows = (usable_h / cell_h).max(1) as usize;
 
     eprintln!("[native-term] attach geom = ({}, {}) {}x{}", geom.x, geom.y, geom.width, geom.height);
     eprintln!("[native-term] cell_w={cell_w} cell_h={cell_h} cols={cols} rows={rows}");
@@ -199,10 +200,11 @@ pub async fn native_term_resize(
         h.subsurface.set_position(geom.x, geom.y);
         h.child_surface.commit();
     }
-    let mut probe_system = cosmic_text::FontSystem::new();
-    let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(&mut probe_system, 13.5);
-    let cols = (geom.width / cell_w).max(1) as usize;
-    let rows = (geom.height / cell_h).max(1) as usize;
+    let (cell_w, cell_h) = crate::native_term::renderer::measure_cell(13.5);
+    let usable_w = geom.width.saturating_sub(crate::native_term::renderer::PADDING_X * 2);
+    let usable_h = geom.height.saturating_sub(crate::native_term::renderer::PADDING_Y * 2);
+    let cols = (usable_w / cell_w).max(1) as usize;
+    let rows = (usable_h / cell_h).max(1) as usize;
     session.grid.lock().resize(rows, cols);
     // Propagate new size to PTY child so bash/vim re-wrap at the new width.
     let _ = crate::commands::terminal::set_pty_size(
@@ -242,8 +244,24 @@ pub async fn native_term_detach(
     // the destroy requests in time, leaving a ghost overlay on screen.
     {
         let h = session.subsurface.lock();
+        // Attach a null buffer first so the compositor hides the surface
+        // content before we destroy it.  Without this, some compositors leave
+        // the last frame visible until the next parent commit.
+        h.child_surface.attach(None, 0, 0);
+        h.child_surface.commit();
+        // Now destroy the subsurface role and the child wl_surface itself.
         h.subsurface.destroy();
         h.child_surface.destroy();
+        // Commit parent surface so compositor atomically removes the child.
+        // Without this the overlay can linger until next parent commit (which
+        // may never happen if Tauri isn't actively rendering).
+        h.parent_surface.commit();
+    }
+    if let Some(conn) = crate::native_term::wayland_connection() {
+        let _ = conn.flush();
+        // Roundtrip ensures the compositor has processed all destroy requests
+        // before we return to the caller (prevents ghost overlay races).
+        let _ = conn.roundtrip();
     }
     let leased = session.leased;
     crate::commands::terminal::restore_from_native(&state.terminals, session_id, leased)?;

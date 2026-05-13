@@ -223,11 +223,10 @@ impl vte::Perform for Grid {
             }
             b'\r' => { self.cursor_col = 0; self.dirty = true; }
             0x08 => {
+                // Move cursor left only — do NOT erase the cell.  Shells like
+                // bash emit `\b ' ' \b` for visual erase, and TUIs use \b for
+                // cursor positioning without erase.  Blanking here breaks both.
                 self.cursor_col = self.cursor_col.saturating_sub(1);
-                let idx = self.cursor_row * self.cols + self.cursor_col;
-                if idx < self.cells.len() {
-                    self.cells[idx] = Cell { ch: ' ', fg: self.fg, bg: self.bg, bold: false };
-                }
                 self.dirty = true;
             }
             0x07 => { /* bell — ignore */ }

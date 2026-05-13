@@ -1,39 +1,79 @@
-//! Software rendering: softbuffer pixel buffer + cosmic-text glyph blit.
+//! Software rendering: softbuffer pixel buffer + ab_glyph direct rasterization.
+//!
+//! Replaces the previous cosmic-text Buffer-per-cell approach.  ab_glyph goes
+//! straight to the glyph rasterizer (no layout engine), which gives pixel-perfect
+//! monospace advance widths for Commit Mono without any cosmic-text layout padding.
+
+use ab_glyph::{Font as _, FontRef, PxScale, ScaleFont as _};
 
 use crate::error::{AppError, AppResult};
 use crate::native_term::grid::{Cell, Color, Grid};
-use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache};
 
-#[allow(dead_code)]
-pub struct FontStack {
-    pub system: FontSystem,
-    pub cache: SwashCache,
-    pub metrics: Metrics,
-}
-
-/// Bundled Commit Mono OTF — loaded into cosmic-text's FontSystem so glyphs
-/// render at the correct advance width instead of falling back to DejaVu/system
-/// fonts which produce inter-character gaps.
+/// Bundled Commit Mono OTF — embedded at compile time.
 const COMMIT_MONO_400: &[u8] = include_bytes!(
     "../../../src/assets/fonts/CommitMono-400-Regular.otf"
 );
 
-/// The CSS/PostScript family name for the bundled font.
-const COMMIT_MONO_FAMILY: &str = "Commit Mono";
+/// Inner padding (px) — gives the terminal text room to breathe.
+pub const PADDING_X: u32 = 14;
+pub const PADDING_Y: u32 = 10;
+
+// ---------------------------------------------------------------------------
+// FontStack
+// ---------------------------------------------------------------------------
+
+pub struct FontStack {
+    /// Parsed font face (zero-copy borrow of the static slice above).
+    pub face: FontRef<'static>,
+    /// Pixel scale derived from the requested point size.
+    pub scale: PxScale,
+    /// Ascent in pixels at the current scale (baseline offset from cell top).
+    pub ascent: f32,
+}
 
 impl FontStack {
     pub fn new(font_size: f32) -> Self {
-        let mut system = FontSystem::new();
-        // Load the bundled OTF so cosmic-text uses Commit Mono instead of
-        // whatever monospace font the system happens to provide.
-        system.db_mut().load_font_data(COMMIT_MONO_400.to_vec());
-        let cache = SwashCache::new();
-        let metrics = Metrics::new(font_size, font_size * 1.4);
-        Self { system, cache, metrics }
+        let face =
+            FontRef::try_from_slice(COMMIT_MONO_400).expect("Commit Mono embedded bytes valid");
+        // Convert points to pixels at 96 DPI: px = pt * 96 / 72 = pt * 4/3.
+        let scale = PxScale::from(font_size * 4.0 / 3.0);
+        let scaled = face.as_scaled(scale);
+        let ascent = scaled.ascent();
+        Self { face, scale, ascent }
+    }
+
+    /// Horizontal advance (cell width) in whole pixels — h_advance for 'M'.
+    pub fn advance(&self) -> u32 {
+        let scaled = self.face.as_scaled(self.scale);
+        scaled.h_advance(self.face.glyph_id('M')).ceil() as u32
+    }
+
+    /// Line height in whole pixels: ascent − descent + line_gap.
+    pub fn line_height(&self) -> u32 {
+        let scaled = self.face.as_scaled(self.scale);
+        (scaled.ascent() - scaled.descent() + scaled.line_gap()).ceil() as u32
     }
 }
 
-#[allow(dead_code)] // populated by attach (D Task 14)
+// ---------------------------------------------------------------------------
+// Measure helper (public — used by commands.rs)
+// ---------------------------------------------------------------------------
+
+/// Return `(cell_width_px, line_height_px)` for a monospace font at `font_size`
+/// (points, 96 DPI).  No FontSystem needed — pure ab_glyph metrics.
+pub fn measure_cell(font_size: f32) -> (u32, u32) {
+    let stack = FontStack::new(font_size);
+    let w = stack.advance();
+    let h = stack.line_height();
+    eprintln!("[native-term] measure_cell w={w} h={h}");
+    (w.max(1), h.max(1))
+}
+
+// ---------------------------------------------------------------------------
+// Renderer
+// ---------------------------------------------------------------------------
+
+#[allow(dead_code)] // populated by attach
 pub struct Renderer {
     pub width: u32,
     pub height: u32,
@@ -43,9 +83,15 @@ pub struct Renderer {
     pub fonts: FontStack,
 }
 
-#[allow(dead_code)] // wired up in attach (D Task 14)
+#[allow(dead_code)] // wired up in attach
 impl Renderer {
-    pub fn new(width: u32, height: u32, cell_w: u32, cell_h: u32, font_size: f32) -> AppResult<Self> {
+    pub fn new(
+        width: u32,
+        height: u32,
+        cell_w: u32,
+        cell_h: u32,
+        font_size: f32,
+    ) -> AppResult<Self> {
         if width == 0 || height == 0 {
             return Err(AppError::Terminal("renderer: zero-dim surface".into()));
         }
@@ -81,75 +127,76 @@ impl Renderer {
 
     pub fn fill_cell_bg(&mut self, row: usize, col: usize, color: Color) {
         let pixel = pack_color(color);
-        let x0 = (col as u32) * self.cell_w;
-        let y0 = (row as u32) * self.cell_h;
+        let x0 = (col as u32) * self.cell_w + PADDING_X;
+        let y0 = (row as u32) * self.cell_h + PADDING_Y;
         for dy in 0..self.cell_h {
             let y = y0 + dy;
-            if y >= self.height { break; }
+            if y >= self.height {
+                break;
+            }
             for dx in 0..self.cell_w {
                 let x = x0 + dx;
-                if x >= self.width { break; }
+                if x >= self.width {
+                    break;
+                }
                 self.buffer[(y * self.width + x) as usize] = pixel;
             }
         }
     }
 
+    /// Rasterize one character directly via ab_glyph, anchored at cell origin.
+    /// No layout engine — the glyph is placed at `(x0, baseline_y)` directly,
+    /// so Commit Mono's fixed advance gives gap-free monospace rendering.
     pub fn draw_glyph(&mut self, row: usize, col: usize, cell: Cell) {
-        let x0 = (col as i32) * self.cell_w as i32;
-        let y0 = (row as i32) * self.cell_h as i32;
+        if cell.ch == ' ' {
+            return;
+        }
+        let x0 = (col as i32) * self.cell_w as i32 + PADDING_X as i32;
+        let y0 = (row as i32) * self.cell_h as i32 + PADDING_Y as i32;
+        let baseline_y = y0 + self.fonts.ascent.ceil() as i32;
 
-        let mut ct_buf = Buffer::new(&mut self.fonts.system, self.fonts.metrics);
-        let attrs = Attrs::new().family(Family::Name(COMMIT_MONO_FAMILY));
-        let s = cell.ch.to_string();
-        ct_buf.set_size(
-            &mut self.fonts.system,
-            Some(self.cell_w as f32),
-            Some(self.cell_h as f32),
+        let scaled = self.fonts.face.as_scaled(self.fonts.scale);
+        let gid = scaled.font().glyph_id(cell.ch);
+        let glyph = gid.with_scale_and_position(
+            self.fonts.scale,
+            ab_glyph::point(x0 as f32, baseline_y as f32),
         );
-        ct_buf.set_text(&mut self.fonts.system, &s, attrs, Shaping::Advanced);
-        ct_buf.shape_until_scroll(&mut self.fonts.system, false);
 
-        let bg = pack_color(cell.bg);
-        let fg = pack_color(cell.fg);
-        let width = self.width;
-        let height = self.height;
-        let buffer_pixels = &mut self.buffer;
-        let fonts = &mut self.fonts;
-
-        for run in ct_buf.layout_runs() {
-            for glyph in run.glyphs.iter() {
-                let physical = glyph.physical((0.0, 0.0), 1.0);
-                let line_y = run.line_y as i32;
-                fonts.cache.with_pixels(
-                    &mut fonts.system,
-                    physical.cache_key,
-                    cosmic_text::Color::rgb(cell.fg.r, cell.fg.g, cell.fg.b),
-                    |gx, gy, color| {
-                        let alpha = color.a();
-                        if alpha == 0 { return; }
-                        // Do not add physical.x here — that is the glyph's
-                        // advance/layout position relative to the buffer origin,
-                        // which would push it past the cell's left edge and cause
-                        // inter-character gaps ("m a r k" instead of "mark").
-                        // The glyph pixels in the callback are already relative to
-                        // the glyph's own top-left, so we only need the cell origin.
-                        let px = x0 + gx;
-                        let py = y0 + line_y + gy;
-                        if px < 0 || py < 0 { return; }
-                        let (px, py) = (px as u32, py as u32);
-                        if px >= width || py >= height { return; }
-                        let blended = blend_alpha(bg, fg, alpha);
-                        buffer_pixels[(py * width + px) as usize] = blended;
-                    },
-                );
-            }
+        if let Some(outlined) = scaled.font().outline_glyph(glyph) {
+            let bg = pack_color(cell.bg);
+            let fg = pack_color(cell.fg);
+            let width = self.width;
+            let height = self.height;
+            let buf = &mut self.buffer;
+            let bb = outlined.px_bounds();
+            outlined.draw(|gx, gy, alpha| {
+                // gx, gy are relative to the bounding-box min corner.
+                let px = bb.min.x as i32 + gx as i32;
+                let py = bb.min.y as i32 + gy as i32;
+                if px < 0 || py < 0 {
+                    return;
+                }
+                let (px, py) = (px as u32, py as u32);
+                if px >= width || py >= height {
+                    return;
+                }
+                let alpha_byte = (alpha * 255.0) as u8;
+                if alpha_byte == 0 {
+                    return;
+                }
+                buf[(py * width + px) as usize] = blend_alpha(bg, fg, alpha_byte);
+            });
         }
     }
 }
 
+// ---------------------------------------------------------------------------
+// Pixel helpers
+// ---------------------------------------------------------------------------
+
 #[allow(dead_code)]
 pub fn pack_color(c: Color) -> u32 {
-    // softbuffer expects 0xRRGGBB packed, alpha ignored.
+    // softbuffer expects 0x00RRGGBB.
     ((c.r as u32) << 16) | ((c.g as u32) << 8) | (c.b as u32)
 }
 
@@ -165,28 +212,9 @@ pub fn blend_alpha(bg: u32, fg: u32, alpha: u8) -> u32 {
     ((br + fr) << 16) | ((bg_g + fg_g) << 8) | (bb + fb)
 }
 
-/// Measure cell dimensions for a monospace font at the given size.
-/// Returns `(advance_width_px, line_height_px)`, both ceil'd to whole pixels.
-/// Uses cosmic-text to shape the letter 'M' and read its glyph advance width.
-pub fn measure_cell(system: &mut FontSystem, font_size: f32) -> (u32, u32) {
-    let metrics = Metrics::new(font_size, font_size * 1.4);
-    let mut buffer = Buffer::new(system, metrics);
-    buffer.set_size(system, Some(1024.0), Some(metrics.line_height));
-    buffer.set_text(system, "M", Attrs::new().family(Family::Name(COMMIT_MONO_FAMILY)), Shaping::Advanced);
-    buffer.shape_until_scroll(system, false);
-    // Fallback: ~0.6em for a typical monospace face.
-    let mut advance: f32 = font_size * 0.6;
-    for run in buffer.layout_runs() {
-        for g in run.glyphs.iter() {
-            if g.w > advance {
-                advance = g.w;
-            }
-        }
-    }
-    let cell_w = advance.ceil() as u32;
-    let cell_h = metrics.line_height.ceil() as u32;
-    (cell_w.max(1), cell_h.max(1))
-}
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -208,11 +236,20 @@ mod tests {
 
     #[test]
     fn renderer_paints_cell_bg() {
-        let mut r = Renderer::new(4, 4, 2, 2, 13.0).unwrap();
+        // Buffer must be large enough to reach the padded cell origin.
+        // cell (0,0) starts at (PADDING_X, PADDING_Y) = (14, 10).
+        // Use a 64×64 surface with cell_w=8, cell_h=16.
+        let w = 64u32;
+        let h = 64u32;
+        let cw = 8u32;
+        let ch = 16u32;
+        let mut r = Renderer::new(w, h, cw, ch, 13.0).unwrap();
         r.fill_background(Color::black());
         r.fill_cell_bg(0, 0, Color::rgb(0xff, 0, 0));
         let red = pack_color(Color::rgb(0xff, 0, 0));
-        assert_eq!(r.buffer[0], red);
+        // First pixel of cell (0,0) is at (PADDING_X, PADDING_Y).
+        let idx = (PADDING_Y * w + PADDING_X) as usize;
+        assert_eq!(r.buffer[idx], red);
     }
 
     #[test]
@@ -223,5 +260,21 @@ mod tests {
     #[test]
     fn renderer_blend_alpha_full_uses_fg() {
         assert_eq!(blend_alpha(0xffffff, 0x000000, 255), 0x000000);
+    }
+
+    #[test]
+    fn measure_cell_returns_nonzero() {
+        let (w, h) = measure_cell(13.5);
+        assert!(w > 0);
+        assert!(h > 0);
+    }
+
+    #[test]
+    fn font_stack_advance_reasonable_for_commit_mono() {
+        // Commit Mono at 13.5pt / 96 DPI → px_size ≈ 18px.
+        // Monospace advance is typically 50–60 % of em, so ~9–11 px.
+        let stack = FontStack::new(13.5);
+        let adv = stack.advance();
+        assert!((7..=20).contains(&adv), "advance {adv} out of expected range 7–20");
     }
 }

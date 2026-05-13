@@ -29,6 +29,9 @@ use crate::error::{AppError, AppResult};
 pub struct SubsurfaceHandle {
     pub child_surface: WlSurface,
     pub subsurface: WlSubsurface,
+    /// Tauri's parent wl_surface — kept so detach can commit it to atomically
+    /// remove the destroyed subsurface from screen.
+    pub parent_surface: WlSurface,
     pub width: u32,
     pub height: u32,
     pub x: i32,
@@ -187,6 +190,7 @@ pub fn create_subsurface(
     Ok(SubsurfaceHandle {
         child_surface,
         subsurface,
+        parent_surface,
         width,
         height,
         x,
