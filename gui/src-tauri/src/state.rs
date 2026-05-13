@@ -11,7 +11,8 @@ use serde::Serialize;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::commands::native_term::NativeTermRegistry;
+use crate::commands::native_term::FakeEmbedRegistry;
+use crate::native_term::NativeTermRegistry;
 use crate::commands::usage::UsageStats;
 
 #[derive(Default)]
@@ -27,8 +28,11 @@ pub struct AppState {
     /// PTY session registry; read via `terminal_*` commands starting in Task 3.
     #[allow(dead_code)] // wired up in commands/terminal.rs
     pub terminals: TerminalRegistry,
-    /// Native-embed (fake-embed) Wezterm sessions, keyed by UUID string.
+    /// Native Wayland-subsurface terminal sessions (new renderer path).
+    #[allow(dead_code)] // wired up in native_term commands (D Task 13+)
     pub native_terminals: NativeTermRegistry,
+    /// Fake-embed Wezterm sessions (older path, will be removed in v2).
+    pub fake_embed_terminals: FakeEmbedRegistry,
 }
 
 #[derive(Clone, Debug)]

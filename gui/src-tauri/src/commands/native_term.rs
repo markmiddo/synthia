@@ -43,13 +43,13 @@ pub struct NativeTermSession {
 }
 
 // ---------------------------------------------------------------------------
-// State extension — stored in AppState.native_terminals
+// State extension — stored in AppState.fake_embed_terminals
 // ---------------------------------------------------------------------------
 
 /// Newtype wrapper so we can store the map in `AppState` without touching the
 /// existing `TerminalRegistry`.
 #[derive(Default)]
-pub struct NativeTermRegistry {
+pub struct FakeEmbedRegistry {
     pub sessions: Mutex<HashMap<String, NativeTermSession>>,
 }
 
@@ -209,7 +209,7 @@ pub async fn native_term_spawn(
     };
 
     state
-        .native_terminals
+        .fake_embed_terminals
         .sessions
         .lock()
         .insert(session_id.clone(), session);
@@ -230,7 +230,7 @@ pub async fn native_term_reposition(
         ));
     }
 
-    let mut sessions = state.native_terminals.sessions.lock();
+    let mut sessions = state.fake_embed_terminals.sessions.lock();
     let session = sessions.get_mut(&native_session_id).ok_or_else(|| {
         AppError::Terminal(format!("unknown native session {native_session_id}"))
     })?;
@@ -259,7 +259,7 @@ pub async fn native_term_kill(
     native_session_id: String,
 ) -> AppResult<()> {
     let session = state
-        .native_terminals
+        .fake_embed_terminals
         .sessions
         .lock()
         .remove(&native_session_id)
@@ -302,8 +302,8 @@ mod tests {
     }
 
     #[test]
-    fn native_term_registry_starts_empty() {
-        let reg = NativeTermRegistry::default();
+    fn fake_embed_registry_starts_empty() {
+        let reg = FakeEmbedRegistry::default();
         assert!(reg.sessions.lock().is_empty());
     }
 

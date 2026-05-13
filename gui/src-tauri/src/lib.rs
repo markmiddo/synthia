@@ -17,6 +17,7 @@ mod state;
 mod config;
 mod yaml_writer;
 mod commands;
+mod native_term;
 
 /// Get the Synthia project root directory.
 /// Resolves from the executable path (gui/src-tauri/target/release/synthia-gui)
