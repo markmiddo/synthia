@@ -28,15 +28,14 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
   const computeGeom = useCallback((): TermGeom | null => {
     if (!containerRef.current) return null;
     const rect = containerRef.current.getBoundingClientRect();
-    // Wayland subsurface positions are in surface-local pixels. On HiDPI
-    // compositors (devicePixelRatio > 1) the webview surface is already
-    // physical-pixel-sized, so we must scale CSS pixel coords up.
-    const dpr = window.devicePixelRatio || 1;
+    // Wayland subsurface positions are in logical pixels on this setup.
+    // The compositor handles DPI scaling internally — do NOT multiply by
+    // devicePixelRatio here or the position/size will be double-counted.
     return {
-      x: Math.round(rect.left * dpr),
-      y: Math.round(rect.top * dpr),
-      width: Math.max(1, Math.round(rect.width * dpr)),
-      height: Math.max(1, Math.round(rect.height * dpr)),
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(rect.height)),
     };
   }, []);
 
@@ -70,6 +69,18 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
       }
     };
   }, [visible, computeGeom]);
+
+  // Detach + kill when component becomes hidden (mode toggle or section switch)
+  // without unmounting (e.g. when parent keeps both renderers in the tree).
+  useEffect(() => {
+    if (visible) return; // only act when transitioning to hidden
+    if (!sessionRef.current) return;
+    const id = sessionRef.current;
+    sessionRef.current = null;
+    invoke("native_term_detach", { sessionId: id })
+      .catch(() => {})
+      .then(() => invoke("terminal_kill", { sessionId: id }).catch(() => {}));
+  }, [visible]);
 
   // Reposition on resize / move
   useEffect(() => {

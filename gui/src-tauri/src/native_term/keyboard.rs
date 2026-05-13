@@ -128,6 +128,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for KeyboardState {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
+        eprintln!("[native-term-kb] event: {event:?}");
         match event {
             wl_keyboard::Event::Keymap {
                 format: WEnum::Value(wl_keyboard::KeymapFormat::XkbV1),

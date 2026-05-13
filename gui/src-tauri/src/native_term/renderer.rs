@@ -114,7 +114,13 @@ impl Renderer {
                     |gx, gy, color| {
                         let alpha = color.a();
                         if alpha == 0 { return; }
-                        let px = x0 + physical.x + gx;
+                        // Do not add physical.x here — that is the glyph's
+                        // advance/layout position relative to the buffer origin,
+                        // which would push it past the cell's left edge and cause
+                        // inter-character gaps ("m a r k" instead of "mark").
+                        // The glyph pixels in the callback are already relative to
+                        // the glyph's own top-left, so we only need the cell origin.
+                        let px = x0 + gx;
                         let py = y0 + line_y + gy;
                         if px < 0 || py < 0 { return; }
                         let (px, py) = (px as u32, py as u32);

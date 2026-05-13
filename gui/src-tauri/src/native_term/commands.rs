@@ -237,6 +237,14 @@ pub async fn native_term_detach(
     session.reader_task.abort();
     session.render_task.abort();
     session.input_task.abort();
+    // Explicitly destroy the Wayland subsurface resources so the compositor
+    // removes the overlay immediately.  Just dropping the Arc may not flush
+    // the destroy requests in time, leaving a ghost overlay on screen.
+    {
+        let h = session.subsurface.lock();
+        h.subsurface.destroy();
+        h.child_surface.destroy();
+    }
     let leased = session.leased;
     crate::commands::terminal::restore_from_native(&state.terminals, session_id, leased)?;
     Ok(())
