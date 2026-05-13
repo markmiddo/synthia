@@ -86,6 +86,7 @@ pub async fn native_term_attach(
     // Stage 3 (D Task 16) presents to wl_surface via softbuffer.
     let grid_for_render = grid.clone();
     let renderer_for_render = renderer_arc.clone();
+    let subsurface_for_render = subsurface_arc.clone();
     let render_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
         loop {
@@ -98,6 +99,13 @@ pub async fn native_term_attach(
                 let g = grid_for_render.lock();
                 let mut r = renderer_for_render.lock();
                 r.render_grid(&g);
+                // Stage 3 scaffold: damage + commit (real present in D Task 16).
+                let _ = crate::native_term::subsurface::present_buffer(
+                    &subsurface_for_render,
+                    &r.buffer,
+                    r.width,
+                    r.height,
+                );
             }
         }
     });

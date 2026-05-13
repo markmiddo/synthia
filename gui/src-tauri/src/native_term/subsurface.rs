@@ -190,6 +190,24 @@ pub fn create_subsurface(
     })
 }
 
+/// Present a buffer of u32 ARGB pixels to the subsurface.
+///
+/// D Task 15 stage: marks the surface damaged and commits — no actual buffer
+/// is attached yet. D Task 16 wires real softbuffer integration here.
+#[allow(dead_code)] // wired in D Task 14 render task; real impl in D Task 16
+pub fn present_buffer(
+    handle: &std::sync::Arc<parking_lot::Mutex<SubsurfaceHandle>>,
+    pixels: &[u32],
+    width: u32,
+    height: u32,
+) -> AppResult<()> {
+    let h = handle.lock();
+    h.child_surface.damage_buffer(0, 0, width as i32, height as i32);
+    h.child_surface.commit();
+    let _ = pixels; // consumed in D Task 16
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
