@@ -486,7 +486,10 @@ pub fn run() {
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_kill,
-            commands::terminal::terminal_list
+            commands::terminal::terminal_list,
+            commands::native_term::native_term_spawn,
+            commands::native_term::native_term_reposition,
+            commands::native_term::native_term_kill
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

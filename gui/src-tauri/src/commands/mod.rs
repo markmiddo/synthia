@@ -10,6 +10,7 @@ pub mod inbox;
 pub mod journal;
 pub mod lifecycle;
 pub mod memory;
+pub mod native_term;
 pub mod neuralguard;
 pub mod news;
 pub mod notes;

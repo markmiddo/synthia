@@ -1,8 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
+import { NativeTerminalView } from "./NativeTerminalView";
 import { TerminalTabs } from "./TerminalTabs";
 import { TerminalView } from "./TerminalView";
 import { onSpawnRequest, type SpawnRequest } from "./spawnRequest";
 import type { SessionMeta } from "./useTerminalSession";
+
+type TerminalMode = "xterm" | "native";
+
+const STORAGE_KEY = "synthia.terminal.mode";
+
+function loadMode(): TerminalMode {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    if (v === "native" || v === "xterm") return v;
+  } catch {
+    // ignore
+  }
+  return "xterm";
+}
+
+function saveMode(mode: TerminalMode) {
+  try {
+    localStorage.setItem(STORAGE_KEY, mode);
+  } catch {
+    // ignore
+  }
+}
 
 interface Tab {
   uiId: string;
@@ -23,6 +46,12 @@ interface TerminalPanelProps {
 export function TerminalPanel({ visible }: TerminalPanelProps) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [mode, setMode] = useState<TerminalMode>(loadMode);
+
+  const handleModeToggle = (next: TerminalMode) => {
+    setMode(next);
+    saveMode(next);
+  };
 
   const newShell = useCallback((req?: SpawnRequest) => {
     const tab: Tab = {
@@ -95,37 +124,94 @@ export function TerminalPanel({ visible }: TerminalPanelProps) {
 
   return (
     <div className="terminal-panel">
-      {tabs.length > 0 && (
-        <TerminalTabs
-          tabs={tabs.map((t) => ({ uiId: t.uiId, title: t.title }))}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onClose={closeTab}
-          onNewShell={() => newShell()}
-          onNewClaude={newClaude}
-        />
-      )}
-      {tabs.length === 0 ? (
-        <div className="terminal-empty">
-          <div>No terminals</div>
-          <div className="actions">
-            <button onClick={() => newShell()}>+ New</button>
-            <button className="claude" onClick={newClaude}>
-              + Claude
-            </button>
-          </div>
-        </div>
+      {/* Mode toggle header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "4px 8px",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            fontSize: "11px",
+            color: "rgba(255,255,255,0.4)",
+            marginRight: "2px",
+          }}
+        >
+          Renderer:
+        </span>
+        <button
+          onClick={() => handleModeToggle("xterm")}
+          style={{
+            fontSize: "11px",
+            padding: "2px 8px",
+            border: "none",
+            borderRadius: "3px",
+            cursor: "pointer",
+            background: mode === "xterm" ? "rgba(99,102,241,0.7)" : "rgba(255,255,255,0.06)",
+            color: mode === "xterm" ? "#fff" : "rgba(255,255,255,0.5)",
+          }}
+        >
+          xterm.js
+        </button>
+        <button
+          onClick={() => handleModeToggle("native")}
+          style={{
+            fontSize: "11px",
+            padding: "2px 8px",
+            border: "none",
+            borderRadius: "3px",
+            cursor: "pointer",
+            background: mode === "native" ? "rgba(99,102,241,0.7)" : "rgba(255,255,255,0.06)",
+            color: mode === "native" ? "#fff" : "rgba(255,255,255,0.5)",
+          }}
+        >
+          Native (beta)
+        </button>
+      </div>
+
+      {/* Native mode: single Wezterm overlay */}
+      {mode === "native" ? (
+        <NativeTerminalView visible={visible} />
       ) : (
-        tabs.map((t) => (
-          <TerminalView
-            key={t.uiId}
-            cwd={t.cwd}
-            shell={t.shell}
-            initialCommand={t.initialCommand}
-            visible={visible && t.uiId === activeId}
-            onMeta={(m) => onMeta(t.uiId, m)}
-          />
-        ))
+        <>
+          {tabs.length > 0 && (
+            <TerminalTabs
+              tabs={tabs.map((t) => ({ uiId: t.uiId, title: t.title }))}
+              activeId={activeId}
+              onSelect={setActiveId}
+              onClose={closeTab}
+              onNewShell={() => newShell()}
+              onNewClaude={newClaude}
+            />
+          )}
+          {tabs.length === 0 ? (
+            <div className="terminal-empty">
+              <div>No terminals</div>
+              <div className="actions">
+                <button onClick={() => newShell()}>+ New</button>
+                <button className="claude" onClick={newClaude}>
+                  + Claude
+                </button>
+              </div>
+            </div>
+          ) : (
+            tabs.map((t) => (
+              <TerminalView
+                key={t.uiId}
+                cwd={t.cwd}
+                shell={t.shell}
+                initialCommand={t.initialCommand}
+                visible={visible && t.uiId === activeId}
+                onMeta={(m) => onMeta(t.uiId, m)}
+              />
+            ))
+          )}
+        </>
       )}
     </div>
   );
