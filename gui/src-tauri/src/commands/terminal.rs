@@ -291,6 +291,56 @@ pub async fn terminal_list(state: State<'_, AppState>) -> AppResult<Vec<SessionM
     Ok(state.terminals.list())
 }
 
+/// PTY handles leased to the native renderer. Returns `Some` on first call, `None` on subsequent calls.
+// wired up in native_term/commands.rs (D Task 13)
+#[allow(dead_code)]
+pub struct LeasedPty {
+    pub reader: Box<dyn std::io::Read + Send>,
+    pub writer: Box<dyn std::io::Write + Send>,
+}
+
+/// Take the reader and writer out of a session so the native renderer can own them.
+/// Leaves the master, child, and meta in place so `terminal_kill` still works.
+/// Returns `Ok(Some(LeasedPty))` on first call; `Ok(None)` if already leased.
+// wired up in native_term/commands.rs (D Task 13)
+#[allow(dead_code)]
+pub fn lease_for_native(
+    registry: &crate::state::TerminalRegistry,
+    session_id: Uuid,
+) -> AppResult<Option<LeasedPty>> {
+    let mut guard = registry.sessions.lock();
+    let session = guard
+        .get_mut(&session_id)
+        .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
+    let Some(reader) = session.pending_reader.take() else {
+        return Ok(None);
+    };
+    // Replace writer with a sink — the real one moves to LeasedPty.
+    let real_writer = std::mem::replace(
+        &mut session.writer,
+        Box::new(std::io::sink()),
+    );
+    Ok(Some(LeasedPty { reader, writer: real_writer }))
+}
+
+/// Restore a previously-leased reader+writer back into the session.
+/// Used on detach so subsequent xterm.js attaches still work.
+// wired up in native_term/commands.rs (D Task 13)
+#[allow(dead_code)]
+pub fn restore_from_native(
+    registry: &crate::state::TerminalRegistry,
+    session_id: Uuid,
+    leased: LeasedPty,
+) -> AppResult<()> {
+    let mut guard = registry.sessions.lock();
+    let session = guard
+        .get_mut(&session_id)
+        .ok_or_else(|| AppError::Terminal(format!("unknown session {session_id}")))?;
+    session.pending_reader = Some(leased.reader);
+    session.writer = leased.writer;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,5 +423,82 @@ mod tests {
     fn terminal_list_empty_initially() {
         let reg = crate::state::TerminalRegistry::default();
         assert!(reg.list().is_empty());
+    }
+
+    #[test]
+    fn lease_takes_reader_and_writer() {
+        use crate::state::TerminalRegistry;
+        use crate::state::PtySession;
+        use chrono::Utc;
+        use uuid::Uuid;
+
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+        let mut cmd = CommandBuilder::new("/bin/sleep");
+        cmd.arg("60");
+        let child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+        let writer = pair.master.take_writer().unwrap();
+        let reader = pair.master.try_clone_reader().unwrap();
+
+        let reg = TerminalRegistry::default();
+        let id = Uuid::new_v4();
+        reg.sessions.lock().insert(id, PtySession {
+            master: pair.master,
+            writer,
+            child,
+            reader_task: None,
+            pending_reader: Some(reader),
+            meta: crate::state::SessionMeta {
+                id, cwd: "/tmp".into(), shell: "/bin/sleep".into(),
+                title: "sleep".into(), created_at: Utc::now(),
+            },
+        });
+
+        let leased = lease_for_native(&reg, id).unwrap();
+        assert!(leased.is_some(), "lease should return reader + writer for fresh session");
+        // Session entry stays in registry (so kill still works) but writer/reader fields are emptied.
+        let guard = reg.sessions.lock();
+        let session = guard.get(&id).unwrap();
+        assert!(session.pending_reader.is_none(), "lease consumes pending_reader");
+    }
+
+    #[test]
+    fn lease_returns_none_when_already_leased() {
+        use crate::state::TerminalRegistry;
+        use crate::state::PtySession;
+        use chrono::Utc;
+        use uuid::Uuid;
+
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+        let mut cmd = CommandBuilder::new("/bin/sleep");
+        cmd.arg("60");
+        let child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+        let writer = pair.master.take_writer().unwrap();
+        let reader = pair.master.try_clone_reader().unwrap();
+
+        let reg = TerminalRegistry::default();
+        let id = Uuid::new_v4();
+        reg.sessions.lock().insert(id, PtySession {
+            master: pair.master,
+            writer,
+            child,
+            reader_task: None,
+            pending_reader: Some(reader),
+            meta: crate::state::SessionMeta {
+                id, cwd: "/tmp".into(), shell: "/bin/sleep".into(),
+                title: "sleep".into(), created_at: Utc::now(),
+            },
+        });
+
+        let _first = lease_for_native(&reg, id).unwrap();
+        let second = lease_for_native(&reg, id).unwrap();
+        assert!(second.is_none(), "second lease must return None — already leased");
     }
 }
