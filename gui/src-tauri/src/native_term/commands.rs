@@ -135,9 +135,21 @@ pub async fn native_term_attach(
         }
     });
 
-    // Input task: placeholder until D Task 17's Wayland keyboard binding lands.
-    let input_task = tokio::spawn(async move {
-        loop { tokio::time::sleep(std::time::Duration::from_secs(60)).await; }
+    // Input task (D Task 17): move the PTY writer into a shared Arc so the
+    // keyboard event loop can write to it without borrowing `leased`.
+    let writer_owned: Box<dyn std::io::Write + Send> = std::mem::replace(
+        &mut leased.writer,
+        Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>,
+    );
+    let writer_arc = std::sync::Arc::new(parking_lot::Mutex::new(writer_owned));
+    let writer_for_input = writer_arc.clone();
+    let conn_for_input = conn.clone();
+    let input_task = tokio::task::spawn_blocking(move || {
+        if let Err(e) =
+            crate::native_term::keyboard::run_keyboard_loop(conn_for_input, writer_for_input)
+        {
+            eprintln!("[native-term] keyboard loop ended: {e}");
+        }
     });
 
     let session = crate::native_term::NativeSession {

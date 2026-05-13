@@ -16,6 +16,7 @@ use uuid::Uuid;
 pub mod commands;
 pub mod grid;
 pub mod input;
+pub mod keyboard;
 pub mod renderer;
 pub mod subsurface;
 
