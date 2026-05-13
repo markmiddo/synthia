@@ -35,5 +35,6 @@ portable-pty = "0.8"
 parking_lot = "0.12"
 base64 = "0.22"
 wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
 vte = "0.13"
 raw-window-handle = "0.6"
