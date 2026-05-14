@@ -360,6 +360,7 @@ pub async fn native_term_close_tab(
     // Kill the PTY child entirely so the shell process exits.
     let _ = crate::commands::terminal::kill_pty_session(&state.terminals, tab_id);
     state.native_terminals.tab_order.lock().retain(|id| *id != tab_id);
+    state.native_terminals.custom_titles.lock().remove(&tab_id);
     Ok(())
 }
 
@@ -373,16 +374,23 @@ pub async fn native_term_list_tabs(
     let active_id = state.native_terminals.sessions.lock().keys().next().copied();
     let order = state.native_terminals.tab_order.lock().clone();
     let terms = state.terminals.sessions.lock();
+    let custom = state.native_terminals.custom_titles.lock();
     let mut out = Vec::with_capacity(order.len());
-    for id in order {
-        let title = terms
-            .get(&id)
-            .map(|s| s.meta.title.clone())
-            .unwrap_or_else(|| "shell".to_string());
+    for (idx, id) in order.iter().enumerate() {
+        let title = custom.get(id).cloned().unwrap_or_else(|| {
+            // Fall back to PTY meta title if it has been customised by the
+            // shell (e.g. via OSC 0); otherwise use a stable "Terminal N"
+            // label so the user always sees a sensible name.
+            terms
+                .get(id)
+                .map(|s| s.meta.title.clone())
+                .filter(|t| !t.is_empty() && t != "shell")
+                .unwrap_or_else(|| format!("Terminal {}", idx + 1))
+        });
         out.push(TabInfo {
-            id,
+            id: *id,
             title,
-            is_active: Some(id) == active_id,
+            is_active: Some(*id) == active_id,
         });
     }
     Ok(out)
