@@ -427,6 +427,8 @@ function App() {
   const [currentSection, setCurrentSection] = useState<Section>("agents");
   const [terminalTabs, setTerminalTabs] = useState<{ id: string; title: string; is_active: boolean }[]>([]);
   const [activeTerminalTabId, setActiveTerminalTabId] = useState<string | null>(null);
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState<string>("");
   const [voiceView, setVoiceView] = useState<VoiceView>("main");
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
@@ -725,6 +727,30 @@ function App() {
       // ignore
     }
   }, []);
+
+  const commitRename = useCallback(async () => {
+    if (!renamingTabId) return;
+    const next = renameDraft.trim();
+    const tabId = renamingTabId;
+    setRenamingTabId(null);
+    if (!next) return;
+    try {
+      await invoke("native_term_rename_tab", { tabId, title: next });
+      const tabs = await invoke<{ id: string; title: string; is_active: boolean }[]>(
+        "native_term_list_tabs",
+      );
+      setTerminalTabs(tabs);
+    } catch (err) {
+      console.error("rename failed", err);
+    }
+  }, [renamingTabId, renameDraft]);
+
+  const openTabContextMenu = useCallback(
+    (_tabId: string, _x: number, _y: number) => {
+      // populated in Task 5 (right-click popover)
+    },
+    [],
+  );
 
   // Listen for keyboard shortcuts emitted by the native Wayland keyboard
   // loop (Ctrl+Shift+W close, Ctrl+Shift+T new, Ctrl+(Shift+)Tab cycle).
@@ -2405,31 +2431,68 @@ function App() {
           </button>
           {currentSection === "terminal" && (
             <div className="terminal-tab-sublist">
-              {terminalTabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className={`terminal-tab-subitem${tab.is_active ? " active" : ""}`}
-                  onClick={() => handleTerminalSwitchTab(tab.id)}
-                  title={tab.title}
-                >
-                  <span className="terminal-tab-subitem-bullet">›</span>
-                  <span className="terminal-tab-subitem-title">
-                    {tab.title.split(/\s*·\s*/).pop() || tab.title}
-                  </span>
-                  {terminalTabs.length > 1 && (
-                    <button
-                      className="terminal-tab-subitem-close"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleTerminalCloseTab(tab.id);
-                      }}
-                      aria-label="close tab"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
+              {terminalTabs.map((tab) => {
+                const isRenaming = renamingTabId === tab.id;
+                return (
+                  <div
+                    key={tab.id}
+                    className={`terminal-tab-subitem${tab.is_active ? " active" : ""}`}
+                    onClick={() => {
+                      if (isRenaming) return;
+                      handleTerminalSwitchTab(tab.id);
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setRenameDraft(tab.title);
+                      setRenamingTabId(tab.id);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      openTabContextMenu(tab.id, e.clientX, e.clientY);
+                    }}
+                    title={tab.title}
+                  >
+                    <span className="terminal-tab-subitem-bullet">›</span>
+                    {isRenaming ? (
+                      <input
+                        className="terminal-tab-subitem-input"
+                        autoFocus
+                        value={renameDraft}
+                        maxLength={40}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void commitRename();
+                          }
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setRenamingTabId(null);
+                          }
+                        }}
+                        onBlur={() => void commitRename()}
+                      />
+                    ) : (
+                      <span className="terminal-tab-subitem-title">
+                        {tab.title.split(/\s*·\s*/).pop() || tab.title}
+                      </span>
+                    )}
+                    {!isRenaming && terminalTabs.length > 1 && (
+                      <button
+                        className="terminal-tab-subitem-close"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTerminalCloseTab(tab.id);
+                        }}
+                        aria-label="close tab"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               <button
                 className="terminal-tab-subitem-new"
                 onClick={handleTerminalNewTab}
