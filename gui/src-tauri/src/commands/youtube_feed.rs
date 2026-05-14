@@ -39,7 +39,7 @@ pub struct VideoItem {
     pub published: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChannelEntry {
     pub name: String,
     pub id: String,
@@ -149,6 +149,70 @@ fn cached_or_empty() -> Vec<VideoItem> {
         }
     }
     Vec::new()
+}
+
+fn invalidate_cache() {
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = None;
+    }
+}
+
+fn rewrite_channels(channels: &[ChannelEntry]) -> Result<(), String> {
+    let path = synthia_config_path();
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let pairs: Vec<(String, String)> = channels
+        .iter()
+        .map(|c| (c.name.clone(), c.id.clone()))
+        .collect();
+    let updated = crate::yaml_writer::write_youtube_channels(&existing, &pairs);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, updated).map_err(|e| e.to_string())?;
+    invalidate_cache();
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs (Task C)
+pub async fn list_youtube_channels() -> Vec<ChannelEntry> {
+    read_channels_from_yaml(&synthia_config_path())
+}
+
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs (Task C)
+pub async fn add_youtube_channel(
+    name: String,
+    id: String,
+) -> Result<Vec<ChannelEntry>, String> {
+    let name = name.trim().to_string();
+    let id = id.trim().to_string();
+    if name.is_empty() {
+        return Err("name cannot be empty".into());
+    }
+    if !id.starts_with("UC") || id.len() < 20 {
+        return Err("id must be a YouTube channel id starting with UC".into());
+    }
+    let mut current = read_channels_from_yaml(&synthia_config_path());
+    if current.iter().any(|c| c.id == id) {
+        return Err("channel already in list".into());
+    }
+    current.push(ChannelEntry { name, id });
+    rewrite_channels(&current)?;
+    Ok(current)
+}
+
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs (Task C)
+pub async fn remove_youtube_channel(id: String) -> Result<Vec<ChannelEntry>, String> {
+    let mut current = read_channels_from_yaml(&synthia_config_path());
+    let before = current.len();
+    current.retain(|c| c.id != id);
+    if current.len() == before {
+        return Err("channel id not found".into());
+    }
+    rewrite_channels(&current)?;
+    Ok(current)
 }
 
 #[cfg(test)]
