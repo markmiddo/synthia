@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
@@ -425,6 +425,8 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [currentSection, setCurrentSection] = useState<Section>("agents");
+  const [terminalTabs, setTerminalTabs] = useState<{ id: string; title: string; is_active: boolean }[]>([]);
+  const [activeTerminalTabId, setActiveTerminalTabId] = useState<string | null>(null);
   const [voiceView, setVoiceView] = useState<VoiceView>("main");
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
@@ -645,6 +647,125 @@ function App() {
       loadGithubIssues(true);
     }
   }, [githubConfigOpen]);
+
+  // Terminal tab list — poll every 500ms while on terminal section so the
+  // sidebar sub-items stay in sync with backend state (new tabs, closes,
+  // active changes from PTY exits, etc).
+  useEffect(() => {
+    if (currentSection !== "terminal") return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const list = await invoke<{ id: string; title: string; is_active: boolean }[]>(
+          "native_term_list_tabs",
+        );
+        if (cancelled) return;
+        setTerminalTabs(list);
+        const active = list.find((t) => t.is_active);
+        if (active) setActiveTerminalTabId(active.id);
+        else if (list.length > 0) setActiveTerminalTabId(list[list.length - 1].id);
+      } catch {
+        // ignore
+      }
+    };
+    refresh();
+    const t = window.setInterval(refresh, 500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [currentSection]);
+
+  const handleTerminalNewTab = useCallback(async () => {
+    const el = document.querySelector(".native-terminal-pane");
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) return;
+    const geom = {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(rect.height)),
+    };
+    try {
+      const id = await invoke<string>("native_term_new_tab", { geom });
+      setActiveTerminalTabId(id);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleTerminalSwitchTab = useCallback(
+    async (tabId: string) => {
+      if (tabId === activeTerminalTabId) return;
+      const el = document.querySelector(".native-terminal-pane");
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) return;
+      const geom = {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.max(1, Math.round(rect.width)),
+        height: Math.max(1, Math.round(rect.height)),
+      };
+      try {
+        await invoke<string>("native_term_show", { tabId, geom });
+        setActiveTerminalTabId(tabId);
+      } catch {
+        // ignore
+      }
+    },
+    [activeTerminalTabId],
+  );
+
+  const handleTerminalCloseTab = useCallback(async (tabId: string) => {
+    try {
+      await invoke("native_term_close_tab", { tabId });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Listen for keyboard shortcuts emitted by the native Wayland keyboard
+  // loop (Ctrl+Shift+W close, Ctrl+Shift+T new, Ctrl+(Shift+)Tab cycle).
+  useEffect(() => {
+    if (currentSection !== "terminal") return;
+    const setup = async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const unlistens = await Promise.all([
+        listen("terminal-close-active-tab", () => {
+          if (activeTerminalTabId) {
+            void handleTerminalCloseTab(activeTerminalTabId);
+          }
+        }),
+        listen("terminal-new-tab", () => {
+          void handleTerminalNewTab();
+        }),
+        listen<string>("terminal-cycle-tab", (e) => {
+          const dir = e.payload === "prev" ? -1 : 1;
+          const idx = terminalTabs.findIndex((t) => t.id === activeTerminalTabId);
+          if (idx === -1 || terminalTabs.length < 2) return;
+          const nextIdx = (idx + dir + terminalTabs.length) % terminalTabs.length;
+          void handleTerminalSwitchTab(terminalTabs[nextIdx].id);
+        }),
+      ]);
+      return () => unlistens.forEach((u) => u());
+    };
+    let cleanup: (() => void) | undefined;
+    setup().then((c) => {
+      cleanup = c;
+    });
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [
+    currentSection,
+    activeTerminalTabId,
+    terminalTabs,
+    handleTerminalCloseTab,
+    handleTerminalNewTab,
+    handleTerminalSwitchTab,
+  ]);
 
   // Active agents polling
   useEffect(() => {
@@ -2282,6 +2403,41 @@ function App() {
             <span className="nav-item-icon">▸_</span>
             Terminal
           </button>
+          {currentSection === "terminal" && (
+            <div className="terminal-tab-sublist">
+              {terminalTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={`terminal-tab-subitem${tab.is_active ? " active" : ""}`}
+                  onClick={() => handleTerminalSwitchTab(tab.id)}
+                  title={tab.title}
+                >
+                  <span className="terminal-tab-subitem-bullet">›</span>
+                  <span className="terminal-tab-subitem-title">
+                    {tab.title.split(/\s*·\s*/).pop() || tab.title}
+                  </span>
+                  {terminalTabs.length > 1 && (
+                    <button
+                      className="terminal-tab-subitem-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTerminalCloseTab(tab.id);
+                      }}
+                      aria-label="close tab"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                className="terminal-tab-subitem-new"
+                onClick={handleTerminalNewTab}
+              >
+                New tab
+              </button>
+            </div>
+          )}
           <button
             className={`nav-item ${currentSection === "agents" ? "active" : ""}`}
             onClick={() => setCurrentSection("agents")}

@@ -14,37 +14,57 @@ const COMMIT_MONO_400: &[u8] = include_bytes!(
     "../../../src/assets/fonts/CommitMono-400-Regular.otf"
 );
 
+/// Bundled JetBrains Mono — used as the FIRST fallback because its block
+/// elements (U+2580–U+259F) and box-drawing glyphs (U+2500–U+257F) are
+/// drawn to fill the cell exactly, which TUI apps like OpenCode and Claude
+/// Code rely on for their banner art and input borders.  Commit Mono lacks
+/// these or draws them with gaps.
+const JETBRAINS_MONO: &[u8] = include_bytes!(
+    "../../../src/assets/fonts/JetBrainsMono-Regular.ttf"
+);
+
 /// Candidate paths for fallback fonts that cover the Unicode glyphs Commit
-/// Mono lacks (box-drawing, geometric shapes, braille, arrows — used by
-/// Claude Code, ripgrep, fzf, vim, etc).  We probe them in order at startup
-/// and use the first one that exists.
+/// Mono lacks.  We probe them all at startup and load every one that exists,
+/// then try each per-glyph in order until one provides a non-`.notdef`
+/// glyph for the requested character.
+///
+/// Why multiple: DejaVu Sans Mono covers box-drawing + braille but lacks
+/// U+23F5 ⏵ (Claude Code's "bypass permissions" arrow) and other geometric
+/// glyphs.  Noto Sans Symbols2 covers the geometric block but lacks some of
+/// DejaVu's Latin extensions.  Combining gives near-complete coverage.
 const FALLBACK_FONT_CANDIDATES: &[&str] = &[
+    "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
     "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
     "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
 ];
 
-fn load_fallback_font() -> Option<FontArc> {
-    // Cache the result — FontStack::new is called for every measure_cell as
-    // well as the actual renderer, and re-reading the 700 KB+ file on every
-    // call would noticeably stall the show path.
+fn load_fallback_fonts() -> Vec<FontArc> {
     use std::sync::OnceLock;
-    static CACHE: OnceLock<Option<FontArc>> = OnceLock::new();
+    static CACHE: OnceLock<Vec<FontArc>> = OnceLock::new();
     CACHE
         .get_or_init(|| {
+            let mut fonts = Vec::new();
+            // JetBrains Mono is bundled (always available) — block elements,
+            // box-drawing, and braille all draw to fill the cell properly.
+            if let Ok(font) = FontArc::try_from_vec(JETBRAINS_MONO.to_vec()) {
+                eprintln!("[native-term] fallback font loaded: bundled JetBrains Mono");
+                fonts.push(font);
+            }
             for path in FALLBACK_FONT_CANDIDATES {
                 if let Ok(bytes) = std::fs::read(path) {
                     if let Ok(font) = FontArc::try_from_vec(bytes) {
                         eprintln!("[native-term] fallback font loaded: {path}");
-                        return Some(font);
+                        fonts.push(font);
                     }
                 }
             }
-            eprintln!(
-                "[native-term] no fallback font found — non-ASCII glyphs may be missing"
-            );
-            None
+            if fonts.is_empty() {
+                eprintln!(
+                    "[native-term] no fallback fonts found — non-ASCII glyphs may be missing"
+                );
+            }
+            fonts
         })
         .clone()
 }
@@ -60,8 +80,9 @@ pub const PADDING_Y: u32 = 10;
 pub struct FontStack {
     /// Parsed primary face (zero-copy borrow of the static Commit Mono slice).
     pub face: FontRef<'static>,
-    /// Optional fallback for glyphs Commit Mono lacks (box-drawing, etc).
-    pub fallback: Option<FontArc>,
+    /// Ordered fallback chain.  draw_glyph tries each per-glyph until one
+    /// provides a non-`.notdef` shape.
+    pub fallbacks: Vec<FontArc>,
     /// Pixel scale derived from the requested point size.
     pub scale: PxScale,
     /// Ascent in pixels at the current scale (baseline offset from cell top).
@@ -72,12 +93,11 @@ impl FontStack {
     pub fn new(font_size: f32) -> Self {
         let face =
             FontRef::try_from_slice(COMMIT_MONO_400).expect("Commit Mono embedded bytes valid");
-        // Convert points to pixels at 96 DPI: px = pt * 96 / 72 = pt * 4/3.
         let scale = PxScale::from(font_size * 4.0 / 3.0);
         let scaled = face.as_scaled(scale);
         let ascent = scaled.ascent();
-        let fallback = load_fallback_font();
-        Self { face, fallback, scale, ascent }
+        let fallbacks = load_fallback_fonts();
+        Self { face, fallbacks, scale, ascent }
     }
 
     /// Horizontal advance (cell width) in whole pixels — h_advance for 'M'.
@@ -153,10 +173,19 @@ impl Renderer {
 
     pub fn render_grid(&mut self, grid: &Grid, cursor_visible: bool) {
         self.fill_background(Color::black());
+        // Pre-compute normalised selection so each cell can check membership.
+        let sel_norm = grid.selection.map(crate::native_term::grid::normalize_selection);
         for r in 0..grid.rows {
             for c in 0..grid.cols {
                 let cell = grid.cell_at(r, c);
-                if cell.bg != Color::black() {
+                let in_selection = match sel_norm {
+                    Some(((r0, c0), (r1, c1))) => cell_in_range(r, c, r0, c0, r1, c1, grid.cols),
+                    None => false,
+                };
+                if in_selection {
+                    // Translucent cyan tint over selection.
+                    self.fill_cell_bg(r, c, Color::rgb(0x12, 0x4a, 0x57));
+                } else if cell.bg != Color::black() {
                     self.fill_cell_bg(r, c, cell.bg);
                 }
                 if cell.ch != ' ' {
@@ -237,16 +266,17 @@ impl Renderer {
             self.rasterize_with_primary(cell, x0, baseline_y, primary_gid);
             return;
         }
-        // Primary lacks the glyph — try fallback if available.
-        if let Some(fallback) = self.fonts.fallback.clone() {
-            let fb_gid = fallback.glyph_id(cell.ch);
+        // Primary lacks the glyph — walk the fallback chain.
+        let fallbacks = self.fonts.fallbacks.clone();
+        for fb in &fallbacks {
+            let fb_gid = fb.glyph_id(cell.ch);
             if fb_gid.0 != 0 {
-                self.rasterize_with_fallback(cell, x0, baseline_y, fb_gid, &fallback);
+                self.rasterize_with_fallback(cell, x0, baseline_y, fb_gid, fb);
                 return;
             }
         }
-        // Both failed — render Commit Mono's notdef so at least *something*
-        // shows where the character would have gone.
+        // Nothing in the chain has the glyph — render Commit Mono's notdef
+        // so at least *something* shows where the character would have gone.
         self.rasterize_with_primary(cell, x0, baseline_y, primary_gid);
     }
 
@@ -327,6 +357,31 @@ impl Renderer {
 // ---------------------------------------------------------------------------
 
 #[allow(dead_code)]
+/// Inclusive cell-in-selection test treating the range as row-major.
+fn cell_in_range(
+    r: usize,
+    c: usize,
+    r0: usize,
+    c0: usize,
+    r1: usize,
+    c1: usize,
+    _cols: usize,
+) -> bool {
+    if r < r0 || r > r1 {
+        return false;
+    }
+    if r0 == r1 {
+        return c >= c0 && c <= c1;
+    }
+    if r == r0 {
+        return c >= c0;
+    }
+    if r == r1 {
+        return c <= c1;
+    }
+    true
+}
+
 pub fn pack_color(c: Color) -> u32 {
     // softbuffer expects 0x00RRGGBB.
     ((c.r as u32) << 16) | ((c.g as u32) << 8) | (c.b as u32)

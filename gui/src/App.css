@@ -1329,9 +1329,120 @@
   color: #e2e8f0;
 }
 
+.nav-item:focus,
+.nav-item:focus-visible,
+.nav-item:active {
+  outline: none;
+  box-shadow: none;
+}
+
 .nav-item.active {
   background: rgba(6, 182, 212, 0.15);
   color: #06b6d4;
+}
+
+/* Terminal tab sub-list — minimal, flat, no boxes. */
+.terminal-tab-sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 2px 12px 6px 32px;
+  padding: 0;
+}
+
+.terminal-tab-subitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: rgba(226, 232, 240, 0.45);
+  font-family: "Commit Mono", ui-monospace, Menlo, monospace;
+  transition: color 0.12s;
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
+  border-left: 2px solid transparent;
+}
+
+.terminal-tab-subitem:hover {
+  color: #e2e8f0;
+}
+
+.terminal-tab-subitem.active {
+  color: #22d3ee;
+  border-left-color: #22d3ee;
+}
+
+.terminal-tab-subitem-bullet { display: none; }
+
+.terminal-tab-subitem-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-tab-subitem-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 3px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.terminal-tab-subitem:hover .terminal-tab-subitem-close {
+  opacity: 1;
+}
+
+.terminal-tab-subitem-close:hover {
+  color: #fca5a5;
+}
+
+/* "+ New tab" — quiet text link, no border. */
+.terminal-tab-subitem-new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.30);
+  cursor: pointer;
+  padding: 4px 6px 4px 10px;
+  font-size: 11px;
+  font-family: "Commit Mono", ui-monospace, Menlo, monospace;
+  margin-top: 2px;
+  text-align: left;
+  transition: color 0.12s;
+}
+
+.terminal-tab-subitem-new::before {
+  content: "+";
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.terminal-tab-subitem-new:hover {
+  color: #22d3ee;
+}
+
+.terminal-tab-subitem-new:focus,
+.terminal-tab-subitem-new:focus-visible,
+.terminal-tab-subitem-close:focus,
+.terminal-tab-subitem-close:focus-visible {
+  outline: none;
 }
 
 .nav-item-icon {

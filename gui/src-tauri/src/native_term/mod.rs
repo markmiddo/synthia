@@ -24,6 +24,66 @@ pub mod subsurface;
 /// Cached once at first attach; reused for every native session.
 static WAYLAND_CONNECTION: OnceLock<wayland_client::Connection> = OnceLock::new();
 
+/// Single global slot pointing at the currently-visible tab's PTY writer.
+/// The keyboard event loop reads from this on every keystroke so we don't
+/// have to spawn (and try to abort) a new wl_keyboard listener per tab —
+/// stale listeners couldn't be reliably stopped (spawn_blocking can't
+/// cancel mid-blocking-dispatch) and accumulated, causing every keystroke
+/// to be duplicated N times.  One global listener + a swappable writer
+/// slot eliminates the duplication entirely.
+pub type WriterSlot =
+    std::sync::Arc<Mutex<Option<std::sync::Arc<Mutex<Box<dyn std::io::Write + Send>>>>>>;
+static ACTIVE_WRITER: OnceLock<WriterSlot> = OnceLock::new();
+static KEYBOARD_TASK_SPAWNED: OnceLock<()> = OnceLock::new();
+
+/// Information needed by the global pointer handler to translate Wayland
+/// surface-local coordinates into a grid cell + apply selection updates.
+#[derive(Clone)]
+pub struct ActiveSurfaceInfo {
+    pub grid: std::sync::Arc<Mutex<grid::Grid>>,
+    pub cell_w: u32,
+    pub cell_h: u32,
+    pub padding_x: u32,
+    pub padding_y: u32,
+}
+
+pub type ActiveSurfaceSlot = std::sync::Arc<Mutex<Option<ActiveSurfaceInfo>>>;
+static ACTIVE_SURFACE: OnceLock<ActiveSurfaceSlot> = OnceLock::new();
+
+pub fn active_surface_slot() -> ActiveSurfaceSlot {
+    ACTIVE_SURFACE
+        .get_or_init(|| std::sync::Arc::new(Mutex::new(None)))
+        .clone()
+}
+
+pub fn set_active_surface(info: Option<ActiveSurfaceInfo>) {
+    *active_surface_slot().lock() = info;
+}
+
+pub fn active_writer_slot() -> WriterSlot {
+    ACTIVE_WRITER
+        .get_or_init(|| std::sync::Arc::new(Mutex::new(None)))
+        .clone()
+}
+
+pub fn set_active_writer(
+    writer: Option<std::sync::Arc<Mutex<Box<dyn std::io::Write + Send>>>>,
+) {
+    *active_writer_slot().lock() = writer;
+}
+
+pub fn ensure_keyboard_task(conn: wayland_client::Connection, app: tauri::AppHandle) {
+    if KEYBOARD_TASK_SPAWNED.set(()).is_err() {
+        return; // already spawned
+    }
+    let slot = active_writer_slot();
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = keyboard::run_keyboard_loop(conn, slot, app) {
+            eprintln!("[native-term] keyboard loop ended: {e}");
+        }
+    });
+}
+
 #[allow(dead_code)] // populated by attach (D Task 14), drained by detach (D Task 18)
 pub struct NativeSession {
     pub session_id: Uuid,
@@ -61,9 +121,13 @@ pub struct PersistentNativeState {
 pub struct NativeTermRegistry {
     #[allow(dead_code)] // wired up in commands.rs (D Task 13)
     pub sessions: Mutex<HashMap<Uuid, NativeSession>>,
-    /// Hidden persistent state.  When `Some`, contains the grid + PTY of
-    /// a terminal that's been hidden but kept alive for a future `show`.
-    pub persistent: Mutex<Option<PersistentNativeState>>,
+    /// Hidden persistent state keyed by session id.  Each terminal tab
+    /// that isn't currently the visible one lives here — PTY + grid +
+    /// reader_task keep running so background output is preserved.
+    pub persistent: Mutex<HashMap<Uuid, PersistentNativeState>>,
+    /// Insertion order of tabs (active + persistent) for stable tab strip
+    /// rendering across show/hide cycles.
+    pub tab_order: Mutex<Vec<Uuid>>,
 }
 
 #[allow(dead_code)] // wired up in commands.rs (D Task 13)

@@ -4,6 +4,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
+use std::io::Write as _;
 use std::process::Command;
 use std::fs;
 use std::path::PathBuf;
@@ -385,7 +386,29 @@ pub fn run() {
             match event {
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     let paths_str: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-                    let _ = window.emit("synthia://file-drop", paths_str);
+                    let _ = window.emit("synthia://file-drop", paths_str.clone());
+
+                    // If a native terminal tab is active, also write the
+                    // dropped paths into its PTY (single-quoted + space-
+                    // separated) so the user can drop a file onto the
+                    // terminal and have its path appear at the prompt.
+                    let slot = crate::native_term::active_writer_slot();
+                    let writer_opt = slot.lock().clone();
+                    if let Some(writer) = writer_opt {
+                        let mut buf = String::new();
+                        for (i, p) in paths_str.iter().enumerate() {
+                            if i > 0 { buf.push(' '); }
+                            // Single-quote and escape any embedded single quotes.
+                            buf.push('\'');
+                            buf.push_str(&p.replace('\'', "'\\''"));
+                            buf.push('\'');
+                        }
+                        if !buf.is_empty() {
+                            let mut w = writer.lock();
+                            let _ = w.write_all(buf.as_bytes());
+                            let _ = w.flush();
+                        }
+                    }
                 }
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Enter { .. }) => {
                     let _ = window.emit("synthia://drag-enter", ());
@@ -495,7 +518,10 @@ pub fn run() {
             crate::native_term::commands::native_term_resize,
             crate::native_term::commands::native_term_detach,
             crate::native_term::commands::native_term_show,
-            crate::native_term::commands::native_term_hide
+            crate::native_term::commands::native_term_hide,
+            crate::native_term::commands::native_term_new_tab,
+            crate::native_term::commands::native_term_close_tab,
+            crate::native_term::commands::native_term_list_tabs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

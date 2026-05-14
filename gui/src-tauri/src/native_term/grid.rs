@@ -10,11 +10,47 @@ pub struct Color {
     pub b: u8,
 }
 
+/// Standard xterm 256-color palette.
+///   0..=15  → 16 named ANSI colours (rough match to our 16-colour ramp)
+///  16..=231 → 6×6×6 RGB cube
+/// 232..=255 → 24 grayscale levels
+pub fn palette_256(idx: u8) -> Color {
+    match idx {
+        0 => Color::rgb(0x00, 0x00, 0x00),
+        1 => Color::rgb(0xfd, 0xa4, 0xaf),
+        2 => Color::rgb(0x86, 0xef, 0xac),
+        3 => Color::rgb(0xfd, 0xe6, 0x8a),
+        4 => Color::rgb(0xa5, 0xb4, 0xfc),
+        5 => Color::rgb(0xc4, 0xb5, 0xfd),
+        6 => Color::rgb(0x67, 0xe8, 0xf9),
+        7 => Color::rgb(0xe6, 0xe6, 0xfa),
+        8 => Color::rgb(0x6b, 0x72, 0x80),
+        9 => Color::rgb(0xfb, 0x71, 0x85),
+        10 => Color::rgb(0x4a, 0xde, 0x80),
+        11 => Color::rgb(0xfa, 0xcc, 0x15),
+        12 => Color::rgb(0x81, 0x8c, 0xf8),
+        13 => Color::rgb(0xa7, 0x8b, 0xfa),
+        14 => Color::rgb(0x22, 0xd3, 0xee),
+        15 => Color::rgb(0xff, 0xff, 0xff),
+        16..=231 => {
+            let v = idx - 16;
+            let r = v / 36;
+            let g = (v % 36) / 6;
+            let b = v % 6;
+            const STEPS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+            Color::rgb(STEPS[r as usize], STEPS[g as usize], STEPS[b as usize])
+        }
+        _ => {
+            let level = 8 + (idx - 232) * 10;
+            Color::rgb(level, level, level)
+        }
+    }
+}
+
 impl Color {
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self { Self { r, g, b } }
-    /// Synthia panel background.  Matches `body` in `App.css` (`#0a0b14`)
-    /// so the native terminal blends into the surrounding chrome instead of
-    /// looking like a popup overlay.
+    /// Synthia chrome background (`#0a0b14`, matches `body` in App.css).
+    /// Native subsurface blends seamlessly with the surrounding window.
     pub const fn black() -> Self { Self::rgb(0x0a, 0x0b, 0x14) }
     pub const fn white() -> Self { Self::rgb(0xe6, 0xe6, 0xfa) }
 }
@@ -45,6 +81,64 @@ pub struct Grid {
     pub bg: Color,
     pub bold: bool,
     pub dirty: bool,
+    /// Mouse selection in cell coordinates; renderer highlights cells in
+    /// `[anchor, head]` (inclusive, normalised at extract time).
+    pub selection: Option<Selection>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Selection {
+    pub anchor: (usize, usize),
+    pub head: (usize, usize),
+}
+
+impl Grid {
+    /// Return selection text in row-major order, joining rows with `\n`.
+    /// Returns None if no selection.
+    pub fn selection_text(&self) -> Option<String> {
+        let sel = self.selection?;
+        let ((r0, c0), (r1, c1)) = normalize_selection(sel);
+        let mut out = String::new();
+        for r in r0..=r1 {
+            let (lo, hi) = if r0 == r1 {
+                (c0, c1.min(self.cols.saturating_sub(1)))
+            } else if r == r0 {
+                (c0, self.cols.saturating_sub(1))
+            } else if r == r1 {
+                (0, c1.min(self.cols.saturating_sub(1)))
+            } else {
+                (0, self.cols.saturating_sub(1))
+            };
+            let mut row_text = String::new();
+            for c in lo..=hi {
+                if c < self.cols {
+                    row_text.push(self.cells[r * self.cols + c].ch);
+                }
+            }
+            // Trim trailing whitespace per row so rectangular sweeps over
+            // mostly-empty rows don't produce a wall of spaces.
+            while row_text.ends_with(' ') {
+                row_text.pop();
+            }
+            out.push_str(&row_text);
+            if r < r1 {
+                out.push('\n');
+            }
+        }
+        Some(out)
+    }
+}
+
+/// Normalise selection so first coord is top-left and second is bottom-right
+/// in row-major order.
+pub fn normalize_selection(sel: Selection) -> ((usize, usize), (usize, usize)) {
+    let a = sel.anchor;
+    let b = sel.head;
+    if a.0 < b.0 || (a.0 == b.0 && a.1 <= b.1) {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }
 
 #[allow(dead_code)] // wired up in renderer (D Task 10) and vte performer (D Task 7)
@@ -56,6 +150,7 @@ impl Grid {
             cursor_row: 0, cursor_col: 0,
             fg: Color::white(), bg: Color::black(), bold: false,
             dirty: true,
+            selection: None,
         }
     }
 
@@ -122,15 +217,23 @@ impl Grid {
                 self.cursor_col = self.cursor_col.saturating_sub(n);
             }
             b'm' => {
-                // SGR: select graphic rendition
+                // SGR: select graphic rendition.  Parse stateful sequences
+                // (38;5;n palette / 38;2;r;g;b truecolor) by indexed
+                // iteration with skip-ahead instead of plain `for`.
                 if params.is_empty() || params == [0] {
                     self.fg = Color::white();
                     self.bg = Color::black();
                     self.bold = false;
                 } else {
-                    for &p in params {
+                    let mut i = 0;
+                    while i < params.len() {
+                        let p = params[i];
                         match p {
-                            0 => { self.fg = Color::white(); self.bg = Color::black(); self.bold = false; }
+                            0 => {
+                                self.fg = Color::white();
+                                self.bg = Color::black();
+                                self.bold = false;
+                            }
                             1 => self.bold = true,
                             22 => self.bold = false,
                             30 => self.fg = Color::black(),
@@ -141,6 +244,26 @@ impl Grid {
                             35 => self.fg = Color::rgb(0xc4, 0xb5, 0xfd),
                             36 => self.fg = Color::rgb(0x67, 0xe8, 0xf9),
                             37 => self.fg = Color::white(),
+                            38 => {
+                                // 38;5;n palette OR 38;2;r;g;b truecolor.
+                                if i + 1 < params.len() {
+                                    let mode = params[i + 1];
+                                    if mode == 5 && i + 2 < params.len() {
+                                        self.fg = palette_256(params[i + 2] as u8);
+                                        i += 3;
+                                        continue;
+                                    }
+                                    if mode == 2 && i + 4 < params.len() {
+                                        self.fg = Color::rgb(
+                                            params[i + 2] as u8,
+                                            params[i + 3] as u8,
+                                            params[i + 4] as u8,
+                                        );
+                                        i += 5;
+                                        continue;
+                                    }
+                                }
+                            }
                             39 => self.fg = Color::white(),
                             40 => self.bg = Color::black(),
                             41 => self.bg = Color::rgb(0xfd, 0xa4, 0xaf),
@@ -150,6 +273,26 @@ impl Grid {
                             45 => self.bg = Color::rgb(0xc4, 0xb5, 0xfd),
                             46 => self.bg = Color::rgb(0x67, 0xe8, 0xf9),
                             47 => self.bg = Color::white(),
+                            48 => {
+                                // 48;5;n palette OR 48;2;r;g;b truecolor.
+                                if i + 1 < params.len() {
+                                    let mode = params[i + 1];
+                                    if mode == 5 && i + 2 < params.len() {
+                                        self.bg = palette_256(params[i + 2] as u8);
+                                        i += 3;
+                                        continue;
+                                    }
+                                    if mode == 2 && i + 4 < params.len() {
+                                        self.bg = Color::rgb(
+                                            params[i + 2] as u8,
+                                            params[i + 3] as u8,
+                                            params[i + 4] as u8,
+                                        );
+                                        i += 5;
+                                        continue;
+                                    }
+                                }
+                            }
                             49 => self.bg = Color::black(),
                             90..=97 => {
                                 self.fg = match p {
@@ -160,11 +303,12 @@ impl Grid {
                                     94 => Color::rgb(0x81, 0x8c, 0xf8),
                                     95 => Color::rgb(0xa7, 0x8b, 0xfa),
                                     96 => Color::rgb(0x22, 0xd3, 0xee),
-                                    _  => Color::rgb(0xff, 0xff, 0xff),
+                                    _ => Color::rgb(0xff, 0xff, 0xff),
                                 };
                             }
                             _ => { /* unhandled SGR — silent */ }
                         }
+                        i += 1;
                     }
                 }
             }

@@ -297,6 +297,24 @@ pub async fn terminal_list(state: State<'_, AppState>) -> AppResult<Vec<SessionM
     Ok(state.terminals.list())
 }
 
+/// Internal helper: kill the PTY for the given session id, ignoring missing
+/// sessions.  Used by `native_term_close_tab` so closing a tab also reaps
+/// the underlying shell process.
+#[allow(dead_code)]
+pub fn kill_pty_session(
+    registry: &crate::state::TerminalRegistry,
+    session_id: Uuid,
+) -> AppResult<()> {
+    let mut guard = registry.sessions.lock();
+    if let Some(mut session) = guard.remove(&session_id) {
+        let _ = session.child.kill();
+        if let Some(t) = session.reader_task.take() {
+            t.abort();
+        }
+    }
+    Ok(())
+}
+
 /// PTY handles leased to the native renderer. Returns `Some` on first call, `None` on subsequent calls.
 // wired up in native_term/commands.rs (D Task 13)
 #[allow(dead_code)]

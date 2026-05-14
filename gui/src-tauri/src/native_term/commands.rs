@@ -160,22 +160,31 @@ pub async fn native_term_attach(
         }
     });
 
-    // Input task (D Task 17): move the PTY writer into a shared Arc so the
-    // keyboard event loop can write to it without borrowing `leased`.
+    // Take the PTY writer out of `leased` and stash it in an Arc that the
+    // global keyboard task can swap to as the active writer slot when this
+    // session becomes the visible tab.
     let writer_owned: Box<dyn std::io::Write + Send> = std::mem::replace(
         &mut leased.writer,
         Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>,
     );
     let writer_arc = std::sync::Arc::new(parking_lot::Mutex::new(writer_owned));
-    let writer_for_input = writer_arc.clone();
-    let conn_for_input = conn.clone();
-    let input_task = tokio::task::spawn_blocking(move || {
-        if let Err(e) =
-            crate::native_term::keyboard::run_keyboard_loop(conn_for_input, writer_for_input)
-        {
-            eprintln!("[native-term] keyboard loop ended: {e}");
-        }
-    });
+
+    // Spawn the global wl_keyboard listener once.  Subsequent calls are no-ops.
+    crate::native_term::ensure_keyboard_task(conn.clone(), app.clone());
+    // Make this session the active typing + pointer target.
+    crate::native_term::set_active_writer(Some(writer_arc.clone()));
+    crate::native_term::set_active_surface(Some(crate::native_term::ActiveSurfaceInfo {
+        grid: grid.clone(),
+        cell_w,
+        cell_h,
+        padding_x: crate::native_term::renderer::PADDING_X,
+        padding_y: crate::native_term::renderer::PADDING_Y,
+    }));
+
+    // Dummy task to satisfy NativeSession.input_task — the real keyboard
+    // loop is global now (see `ensure_keyboard_task`).  This handle is
+    // never aborted to anything meaningful.
+    let input_task = tokio::spawn(async {});
 
     let session = crate::native_term::NativeSession {
         session_id,
@@ -194,41 +203,259 @@ pub async fn native_term_attach(
     Ok(())
 }
 
-/// Show the persistent terminal at the given rect.  On first call it spawns
-/// a PTY and creates the subsurface; on subsequent calls (e.g. after the
-/// user navigates away and back) it reuses the preserved grid + PTY +
-/// reader task and rebuilds only the subsurface / softbuffer / render
-/// pipeline.  The returned `Uuid` identifies the session.
+#[derive(Serialize)]
+pub struct TabInfo {
+    pub id: Uuid,
+    pub title: String,
+    pub is_active: bool,
+}
+
+/// Show the requested terminal tab at the given rect.  Semantics:
+///   - `tab_id == None`: show the currently-active tab if there is one,
+///     otherwise the most recently-added persistent tab, otherwise spawn
+///     a fresh PTY as the first tab.
+///   - `tab_id == Some(id)`: switch to that tab.  Hides the current active
+///     tab (moves it to persistent) and restores `id` from persistent
+///     into a new active session.
 #[tauri::command]
 #[allow(dead_code)] // registered in lib.rs
 pub async fn native_term_show(
     app: AppHandle,
     state: State<'_, AppState>,
+    tab_id: Option<Uuid>,
     geom: TermGeom,
 ) -> AppResult<Uuid> {
-    // Already-active session: just reposition + resize.
-    {
-        let existing = state.native_terminals.sessions.lock();
-        if let Some((id, _)) = existing.iter().next() {
-            let id = *id;
-            drop(existing);
+    // Resolve the target tab id.
+    let target = tab_id.or_else(|| {
+        let active = state.native_terminals.sessions.lock().keys().next().copied();
+        if active.is_some() {
+            return active;
+        }
+        state.native_terminals.tab_order.lock().last().copied()
+    });
+
+    // Fast path: target already active → just reposition.
+    if let Some(id) = target {
+        let is_active = state.native_terminals.sessions.lock().contains_key(&id);
+        if is_active {
             return reposition_active_session(&state, id, geom);
         }
     }
 
-    // Hidden persistent state available?  Re-attach the subsurface using
-    // the preserved grid + writer + reader_task + PTY lease.
-    let persistent = state.native_terminals.persistent.lock().take();
-    if let Some(p) = persistent {
-        return attach_from_persistent(app, state, p, geom).await;
+    // Need to mutate active set.  First, move the current active tab
+    // (if any) into persistent so its subsurface goes away before we
+    // create the new one.
+    let current = state.native_terminals.sessions.lock().keys().next().copied();
+    if let Some(active_id) = current {
+        hide_active_to_persistent(&state, active_id, &app)?;
     }
 
-    // No persistent state — spawn a fresh PTY and full session.
+    // Restore target from persistent if present.
+    if let Some(id) = target {
+        let p = state.native_terminals.persistent.lock().remove(&id);
+        if let Some(p) = p {
+            return attach_from_persistent(app, state, p, geom).await;
+        }
+    }
+
+    // Cold path: no persistent entry, no active.  Spawn a new tab.
     let meta =
         crate::commands::terminal::spawn_pty_session_inline(&state.terminals, None, None)?;
     let session_id = meta.id;
     native_term_attach(app, state.clone(), session_id, geom).await?;
+    {
+        let mut order = state.native_terminals.tab_order.lock();
+        if !order.contains(&session_id) {
+            order.push(session_id);
+        }
+    }
     Ok(session_id)
+}
+
+/// Spawn a new PTY in a new tab and make it the active visible tab.  The
+/// previously-active tab (if any) is moved into the persistent map so the
+/// user can switch back to it later.
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs
+pub async fn native_term_new_tab(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    geom: TermGeom,
+) -> AppResult<Uuid> {
+    let current = state.native_terminals.sessions.lock().keys().next().copied();
+    if let Some(active_id) = current {
+        hide_active_to_persistent(&state, active_id, &app)?;
+    }
+    let meta =
+        crate::commands::terminal::spawn_pty_session_inline(&state.terminals, None, None)?;
+    let session_id = meta.id;
+    native_term_attach(app, state.clone(), session_id, geom).await?;
+    {
+        let mut order = state.native_terminals.tab_order.lock();
+        order.push(session_id);
+    }
+    Ok(session_id)
+}
+
+/// Close the given tab.  Tears down the subsurface (if active), kills the
+/// PTY, and removes the tab from the order list.
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs
+pub async fn native_term_close_tab(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tab_id: Uuid,
+) -> AppResult<()> {
+    // If active, destroy subsurface first.
+    let active = {
+        let mut sessions = state.native_terminals.sessions.lock();
+        sessions.remove(&tab_id)
+    };
+    if let Some(session) = active {
+        // Closing the active tab — make sure the keyboard slot doesn't
+        // keep pointing at a freed writer.
+        crate::native_term::set_active_writer(None);
+    crate::native_term::set_active_surface(None);
+        let crate::native_term::NativeSession {
+            subsurface,
+            render_task,
+            input_task,
+            reader_task,
+            leased,
+            ..
+        } = session;
+        render_task.abort();
+        input_task.abort();
+        reader_task.abort();
+        {
+            let h = subsurface.lock();
+            h.subsurface.set_position(-100000, -100000);
+            h.child_surface.attach(None, 0, 0);
+            h.child_surface.commit();
+            h.subsurface.destroy();
+            h.child_surface.destroy();
+            h.parent_surface.commit();
+        }
+        drop(leased);
+        if let Some(window) = app.get_webview_window("main") {
+            if let Ok(size) = window.outer_size() {
+                let w = size.width;
+                let h = size.height;
+                let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w, h + 1)));
+                let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w, h)));
+            }
+            let _ = window.eval(
+                "document.body.style.opacity='0.999';\
+                 requestAnimationFrame(()=>{document.body.style.opacity='1';});",
+            );
+        }
+    } else {
+        // Not active — drop from persistent and kill PTY.
+        let p = state.native_terminals.persistent.lock().remove(&tab_id);
+        if let Some(p) = p {
+            p.reader_task.abort();
+            drop(p.leased);
+        }
+    }
+    // Kill the PTY child entirely so the shell process exits.
+    let _ = crate::commands::terminal::kill_pty_session(&state.terminals, tab_id);
+    state.native_terminals.tab_order.lock().retain(|id| *id != tab_id);
+    Ok(())
+}
+
+/// List all known tabs (active + persistent), in insertion order, with a
+/// flag marking which one is currently the visible/active tab.
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs
+pub async fn native_term_list_tabs(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<TabInfo>> {
+    let active_id = state.native_terminals.sessions.lock().keys().next().copied();
+    let order = state.native_terminals.tab_order.lock().clone();
+    let terms = state.terminals.sessions.lock();
+    let mut out = Vec::with_capacity(order.len());
+    for id in order {
+        let title = terms
+            .get(&id)
+            .map(|s| s.meta.title.clone())
+            .unwrap_or_else(|| "shell".to_string());
+        out.push(TabInfo {
+            id,
+            title,
+            is_active: Some(id) == active_id,
+        });
+    }
+    Ok(out)
+}
+
+/// Move the currently-active tab into the persistent map.  Used by both
+/// `show` (when switching tabs) and `new_tab` (when bumping the previous
+/// active out of the way).
+fn hide_active_to_persistent(
+    state: &State<'_, AppState>,
+    active_id: Uuid,
+    app: &AppHandle,
+) -> AppResult<()> {
+    let session = state.native_terminals.sessions.lock().remove(&active_id);
+    let Some(session) = session else { return Ok(()) };
+    // Detach the writer slot — the keyboard task will drop keystrokes
+    // until the next show repoints it at a tab.  Prevents typing into a
+    // hidden terminal during the navigation gap.
+    crate::native_term::set_active_writer(None);
+    crate::native_term::set_active_surface(None);
+
+    let crate::native_term::NativeSession {
+        session_id,
+        subsurface,
+        softbuffer: _,
+        renderer: _,
+        grid,
+        leased,
+        writer,
+        reader_task,
+        render_task,
+        input_task,
+    } = session;
+
+    state.native_terminals.persistent.lock().insert(
+        session_id,
+        crate::native_term::PersistentNativeState {
+            session_id,
+            grid,
+            leased,
+            writer,
+            reader_task,
+        },
+    );
+
+    render_task.abort();
+    input_task.abort();
+    {
+        let h = subsurface.lock();
+        h.subsurface.set_position(-100000, -100000);
+        h.child_surface.attach(None, 0, 0);
+        h.child_surface.commit();
+        h.subsurface.destroy();
+        h.child_surface.destroy();
+        h.parent_surface.commit();
+    }
+    if let Some(conn) = crate::native_term::wayland_connection() {
+        let _ = conn.flush();
+        let _ = conn.roundtrip();
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        if let Ok(size) = window.outer_size() {
+            let w = size.width;
+            let h = size.height;
+            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w, h + 1)));
+            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w, h)));
+        }
+        let _ = window.eval(
+            "document.body.style.opacity='0.999';\
+             requestAnimationFrame(()=>{document.body.style.opacity='1';});",
+        );
+    }
+    Ok(())
 }
 
 fn reposition_active_session(
@@ -369,15 +596,18 @@ async fn attach_from_persistent(
         }
     });
 
-    let writer_for_input = p.writer.clone();
-    let conn_for_input = conn.clone();
-    let input_task = tokio::task::spawn_blocking(move || {
-        if let Err(e) =
-            crate::native_term::keyboard::run_keyboard_loop(conn_for_input, writer_for_input)
-        {
-            eprintln!("[native-term] keyboard loop ended: {e}");
-        }
-    });
+    // Use the global keyboard listener.  Just point the active-writer slot
+    // at this session so keystrokes go to its PTY.
+    crate::native_term::ensure_keyboard_task(conn.clone(), app.clone());
+    crate::native_term::set_active_writer(Some(p.writer.clone()));
+    crate::native_term::set_active_surface(Some(crate::native_term::ActiveSurfaceInfo {
+        grid: p.grid.clone(),
+        cell_w,
+        cell_h,
+        padding_x: crate::native_term::renderer::PADDING_X,
+        padding_y: crate::native_term::renderer::PADDING_Y,
+    }));
+    let input_task = tokio::spawn(async {});
 
     let session = crate::native_term::NativeSession {
         session_id: p.session_id,
@@ -423,6 +653,8 @@ pub async fn native_term_hide(
         sessions.remove(&id)
     };
     let Some(session) = session else { return Ok(()) };
+    crate::native_term::set_active_writer(None);
+    crate::native_term::set_active_surface(None);
 
     // Destructure first.  Move grid + leased + writer + reader_task into
     // the persistent slot *before* doing any teardown — otherwise a
@@ -443,14 +675,16 @@ pub async fn native_term_hide(
     } = session;
 
     // 1. Write persistent state FIRST (covers the race window).
-    *state.native_terminals.persistent.lock() =
-        Some(crate::native_term::PersistentNativeState {
+    state.native_terminals.persistent.lock().insert(
+        session_id,
+        crate::native_term::PersistentNativeState {
             session_id,
             grid,
             leased,
             writer,
             reader_task,
-        });
+        },
+    );
 
     // 2. Now tear down the show-bound pieces.  render/input tasks abort
     //    immediately; subsurface destroy queues parent state for the next

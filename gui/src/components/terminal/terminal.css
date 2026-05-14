@@ -15,8 +15,10 @@
   font-display: swap;
 }
 
-/* Remove outer padding when the terminal panel is the direct child of main-content,
-   giving the terminal full bleed and preventing main-content from forcing scroll. */
+/* Restore the same content padding every other section uses so the
+   terminal panel sits inside the content area, never clipping under
+   the window title bar.  Bottom padding stays at 0 — the status bar
+   already provides the visual base. */
 .main-content:has(> .terminal-panel) {
   padding: 0 !important;
   overflow: hidden !important;
@@ -26,11 +28,123 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* Match Synthia panel chrome (`body` background in App.css) so the
-     native subsurface blends seamlessly with the surrounding app. */
   background: #0a0b14;
-  padding: 0;
+  /* Insets that anchor the terminal inside the content area:
+     - top 106 px clears the title bar + leaves visual room over Synthia
+     - left 66 px puts comfortable space between panel and sidebar
+     - right 16 px gives a matching right margin
+     - bottom 0 — the status bar caps the area naturally */
+  padding: 106px 16px 0 66px;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
   box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Wezterm-style tab strip across the top of the terminal panel. */
+.native-term-tabstrip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  flex-shrink: 0;
+  user-select: none;
+  background: #14172a;
+  border: 1px solid rgba(34, 211, 238, 0.30);
+  border-bottom-width: 2px;
+  border-bottom-color: #22d3ee;
+  min-height: 38px;
+  box-sizing: border-box;
+}
+
+.native-term-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
+  font-family: "Commit Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.native-term-tab:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.native-term-tab.active {
+  background: #0a0b14;
+  color: #22d3ee;
+  border-color: rgba(34, 211, 238, 0.25);
+}
+
+.native-term-tab-title {
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.native-term-tab-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  line-height: 1;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.native-term-tab-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.native-term-tab-new {
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px solid rgba(34, 211, 238, 0.20);
+  color: #22d3ee;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  width: 28px;
+  height: 26px;
+  margin-left: 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.12s;
+}
+
+.native-term-tab-new:hover {
+  background: rgba(34, 211, 238, 0.18);
+  color: #67e8f9;
+}
+
+.native-term-tab-new:focus,
+.native-term-tab-new:focus-visible,
+.native-term-tab-close:focus,
+.native-term-tab-close:focus-visible {
+  outline: none;
 }
 
 .terminal-tabs {

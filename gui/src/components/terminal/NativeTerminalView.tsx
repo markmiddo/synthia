@@ -15,6 +15,8 @@ function chain<T>(op: () => Promise<T>): Promise<T> {
 
 interface NativeTerminalViewProps {
   visible: boolean;
+  /** When set, show that specific tab; null/undefined defaults to last active. */
+  activeTabId?: string | null;
 }
 
 interface TermGeom {
@@ -24,7 +26,7 @@ interface TermGeom {
   height: number;
 }
 
-export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
+export function NativeTerminalView({ visible, activeTabId }: NativeTerminalViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,24 +53,39 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
     }
     if (!containerRef.current) return;
     let cancelled = false;
-    const showWhenReady = () => {
-      if (cancelled) return;
-      const geom = computeGeom();
-      if (!geom || geom.width <= 1 || geom.height <= 1) {
-        requestAnimationFrame(showWhenReady);
-        return;
-      }
-      chain(() => invoke<string>("native_term_show", { geom }))
-        .then((id) => {
-          if (!cancelled) sessionRef.current = id as string;
-        })
-        .catch((e) => setError(String(e)));
-    };
-    requestAnimationFrame(showWhenReady);
+    // Register show into the chain SYNCHRONOUSLY at mount time — the
+    // rAF wait for layout happens *inside* the chained promise, so a
+    // hide queued by useEffect cleanup (when the user clicks another
+    // tab fast) always runs after show in the same chain order.
+    chain(
+      () =>
+        new Promise<string>((resolve, reject) => {
+          const tryShow = () => {
+            if (cancelled) {
+              reject(new Error("cancelled"));
+              return;
+            }
+            const geom = computeGeom();
+            if (!geom || geom.width <= 1 || geom.height <= 1) {
+              requestAnimationFrame(tryShow);
+              return;
+            }
+            invoke<string>("native_term_show", { tabId: activeTabId ?? null, geom }).then(
+              resolve,
+              reject,
+            );
+          };
+          tryShow();
+        }),
+    )
+      .then((id) => {
+        if (!cancelled) sessionRef.current = id as string;
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
     return () => {
       cancelled = true;
-      // Chained after show so hide runs only when the session is fully
-      // registered in the backend — fixes the state-loss race.
       chain(() => invoke("native_term_hide")).catch(() => {});
     };
   }, [visible, computeGeom]);
@@ -93,7 +110,9 @@ export function NativeTerminalView({ visible }: NativeTerminalViewProps) {
       last = geom;
       // native_term_show is idempotent — reuses active or persistent
       // session and just repositions/resizes when one already exists.
-      chain(() => invoke("native_term_show", { geom })).catch(() => {});
+      chain(() => invoke("native_term_show", { tabId: activeTabId ?? null, geom })).catch(
+        () => {},
+      );
     };
     const observer = new ResizeObserver(reposition);
     if (containerRef.current) observer.observe(containerRef.current);
