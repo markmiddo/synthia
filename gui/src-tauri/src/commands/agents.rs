@@ -1380,8 +1380,8 @@ pub fn list_active_agents() -> Vec<AgentInfo> {
         let current_task = state.detail.clone().filter(|s| !s.is_empty());
 
         let role = "Background Agent".to_string();
-        let role_icon = "\u{2699}".to_string();
-        let name = format!("bg-{}", &worker.short);
+        let role_icon = "\u{1F977}".to_string(); // 🥷 ninja — works in stealth
+        let name = agent_name_for(&worker.short).to_string();
 
         agents.push(AgentInfo {
             pid: worker.pid,
