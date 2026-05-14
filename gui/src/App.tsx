@@ -2531,13 +2531,6 @@ function App() {
             </div>
           )}
           <button
-            className={`nav-item ${currentSection === "shortcuts" ? "active" : ""}`}
-            onClick={() => setCurrentSection("shortcuts")}
-          >
-            <span className="nav-item-icon">&#9000;</span>
-            Shortcuts
-          </button>
-          <button
             className={`nav-item ${currentSection === "agents" ? "active" : ""}`}
             onClick={() => setCurrentSection("agents")}
           >
@@ -2586,6 +2579,13 @@ function App() {
           >
             <span className="nav-item-icon">&#128218;</span>
             Memory
+          </button>
+          <button
+            className={`nav-item ${currentSection === "shortcuts" ? "active" : ""}`}
+            onClick={() => setCurrentSection("shortcuts")}
+          >
+            <span className="nav-item-icon">&#9000;</span>
+            Shortcuts
           </button>
           <button
             className={`nav-item ${currentSection === "config" ? "active" : ""}`}
