@@ -3589,6 +3589,10 @@
   flex-wrap: wrap;
 }
 
+.config-layout-single {
+  display: block;
+}
+
 .config-panel {
   flex: 1;
   min-width: 300px;

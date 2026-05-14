@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
 import { JournalPanel } from "./components/JournalPanel";
 import { ShortcutsPanel } from "./components/ShortcutsPanel";
+import { Accordion } from "./components/Accordion";
 import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import { requestTerminal } from "./components/terminal/spawnRequest";
 import "./App.css";
@@ -3762,172 +3763,163 @@ function App() {
 
         {/* Synthia Tab */}
         {configTab === "synthia" && (
-          <div className="config-layout">
-            <div className="config-panel">
-              <div className="config-panel-title">Synthia Settings</div>
+          <div className="config-layout-single">
+            {synthiaConfig ? (
+              <>
+                <div className="config-panel-title">Synthia Settings</div>
 
-              {synthiaConfig ? (
-                <>
-                  <div className="config-group">
-                    <div className="config-group-title">Processing Mode</div>
-
-                    <div className="config-toggle-row">
-                      <span>Speech-to-Text</span>
-                      <div className="config-toggle-group">
-                        <button
-                          className={`config-toggle-btn ${!synthiaConfig.use_local_stt ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_stt", false)}
-                        >
-                          Cloud
-                        </button>
-                        <button
-                          className={`config-toggle-btn ${synthiaConfig.use_local_stt ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_stt", true)}
-                        >
-                          Local
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="config-toggle-row">
-                      <span>AI Assistant</span>
-                      <div className="config-toggle-group">
-                        <button
-                          className={`config-toggle-btn ${!synthiaConfig.use_local_llm ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_llm", false)}
-                        >
-                          Cloud
-                        </button>
-                        <button
-                          className={`config-toggle-btn ${synthiaConfig.use_local_llm ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_llm", true)}
-                        >
-                          Local
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="config-toggle-row">
-                      <span>Text-to-Speech</span>
-                      <div className="config-toggle-group">
-                        <button
-                          className={`config-toggle-btn ${!synthiaConfig.use_local_tts ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_tts", false)}
-                        >
-                          Cloud
-                        </button>
-                        <button
-                          className={`config-toggle-btn ${synthiaConfig.use_local_tts ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_tts", true)}
-                        >
-                          Local
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="config-group">
-                    <div className="config-group-title">Models</div>
-
-                    <div className="config-field">
-                      <label>Local STT Model</label>
-                      <select
-                        value={synthiaConfig.local_stt_model}
-                        onChange={(e) => updateConfig("local_stt_model", e.target.value)}
+                <Accordion title="Processing Mode">
+                  <div className="config-toggle-row">
+                    <span>Speech-to-Text</span>
+                    <div className="config-toggle-group">
+                      <button
+                        className={`config-toggle-btn ${!synthiaConfig.use_local_stt ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_stt", false)}
                       >
-                        <option value="tiny">Tiny (fastest)</option>
-                        <option value="base">Base</option>
-                        <option value="small">Small</option>
-                        <option value="medium">Medium</option>
-                        <option value="large">Large (best)</option>
-                      </select>
-                    </div>
-
-                    <div className="config-field">
-                      <label>Local LLM Model</label>
-                      <input
-                        type="text"
-                        value={synthiaConfig.local_llm_model}
-                        onChange={(e) => updateConfig("local_llm_model", e.target.value)}
-                        placeholder="e.g., qwen2.5:7b-instruct-q4_0"
-                      />
-                    </div>
-
-                    <div className="config-field">
-                      <label>Cloud Assistant Model</label>
-                      <input
-                        type="text"
-                        value={synthiaConfig.assistant_model}
-                        onChange={(e) => updateConfig("assistant_model", e.target.value)}
-                        placeholder="e.g., claude-sonnet-4-20250514"
-                      />
+                        Cloud
+                      </button>
+                      <button
+                        className={`config-toggle-btn ${synthiaConfig.use_local_stt ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_stt", true)}
+                      >
+                        Local
+                      </button>
                     </div>
                   </div>
 
-                  <div className="config-group">
-                    <div className="config-group-title">Other Settings</div>
-
-                    <div className="config-field">
-                      <label>TTS Speed</label>
-                      <input
-                        type="number"
-                        value={synthiaConfig.tts_speed}
-                        onChange={(e) => updateConfig("tts_speed", parseFloat(e.target.value) || 1.0)}
-                        step="0.1"
-                        min="0.5"
-                        max="2.0"
-                      />
-                    </div>
-
-                    <div className="config-field">
-                      <label>Conversation Memory</label>
-                      <input
-                        type="number"
-                        value={synthiaConfig.conversation_memory}
-                        onChange={(e) => updateConfig("conversation_memory", parseInt(e.target.value) || 10)}
-                        min="1"
-                        max="50"
-                      />
-                    </div>
-
-                    <div className="config-checkbox-row">
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={synthiaConfig.show_notifications}
-                          onChange={(e) => updateConfig("show_notifications", e.target.checked)}
-                        />
-                        Show notifications
-                      </label>
-                    </div>
-
-                    <div className="config-checkbox-row">
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={synthiaConfig.play_sound_on_record}
-                          onChange={(e) => updateConfig("play_sound_on_record", e.target.checked)}
-                        />
-                        Play sound when recording
-                      </label>
+                  <div className="config-toggle-row">
+                    <span>AI Assistant</span>
+                    <div className="config-toggle-group">
+                      <button
+                        className={`config-toggle-btn ${!synthiaConfig.use_local_llm ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_llm", false)}
+                      >
+                        Cloud
+                      </button>
+                      <button
+                        className={`config-toggle-btn ${synthiaConfig.use_local_llm ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_llm", true)}
+                      >
+                        Local
+                      </button>
                     </div>
                   </div>
 
-                  <button
-                    className={`config-save-btn ${configSaved ? "saved" : ""}`}
-                    onClick={handleSaveConfig}
-                    disabled={configSaving}
-                  >
-                    {configSaving ? "Saving..." : configSaved ? "Saved!" : "Save Settings"}
-                  </button>
-                </>
-              ) : (
-                <div className="config-loading">Loading...</div>
-              )}
-            </div>
+                  <div className="config-toggle-row">
+                    <span>Text-to-Speech</span>
+                    <div className="config-toggle-group">
+                      <button
+                        className={`config-toggle-btn ${!synthiaConfig.use_local_tts ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_tts", false)}
+                      >
+                        Cloud
+                      </button>
+                      <button
+                        className={`config-toggle-btn ${synthiaConfig.use_local_tts ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_tts", true)}
+                      >
+                        Local
+                      </button>
+                    </div>
+                  </div>
+                </Accordion>
 
-            <div className="config-panel">
-              <div className="config-panel-title">Worktree Repositories</div>
+                <Accordion title="Models">
+                  <div className="config-field">
+                    <label>Local STT Model</label>
+                    <select
+                      value={synthiaConfig.local_stt_model}
+                      onChange={(e) => updateConfig("local_stt_model", e.target.value)}
+                    >
+                      <option value="tiny">Tiny (fastest)</option>
+                      <option value="base">Base</option>
+                      <option value="small">Small</option>
+                      <option value="medium">Medium</option>
+                      <option value="large">Large (best)</option>
+                    </select>
+                  </div>
+
+                  <div className="config-field">
+                    <label>Local LLM Model</label>
+                    <input
+                      type="text"
+                      value={synthiaConfig.local_llm_model}
+                      onChange={(e) => updateConfig("local_llm_model", e.target.value)}
+                      placeholder="e.g., qwen2.5:7b-instruct-q4_0"
+                    />
+                  </div>
+
+                  <div className="config-field">
+                    <label>Cloud Assistant Model</label>
+                    <input
+                      type="text"
+                      value={synthiaConfig.assistant_model}
+                      onChange={(e) => updateConfig("assistant_model", e.target.value)}
+                      placeholder="e.g., claude-sonnet-4-20250514"
+                    />
+                  </div>
+                </Accordion>
+
+                <Accordion title="Other Settings">
+                  <div className="config-field">
+                    <label>TTS Speed</label>
+                    <input
+                      type="number"
+                      value={synthiaConfig.tts_speed}
+                      onChange={(e) => updateConfig("tts_speed", parseFloat(e.target.value) || 1.0)}
+                      step="0.1"
+                      min="0.5"
+                      max="2.0"
+                    />
+                  </div>
+
+                  <div className="config-field">
+                    <label>Conversation Memory</label>
+                    <input
+                      type="number"
+                      value={synthiaConfig.conversation_memory}
+                      onChange={(e) => updateConfig("conversation_memory", parseInt(e.target.value) || 10)}
+                      min="1"
+                      max="50"
+                    />
+                  </div>
+
+                  <div className="config-checkbox-row">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={synthiaConfig.show_notifications}
+                        onChange={(e) => updateConfig("show_notifications", e.target.checked)}
+                      />
+                      Show notifications
+                    </label>
+                  </div>
+
+                  <div className="config-checkbox-row">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={synthiaConfig.play_sound_on_record}
+                        onChange={(e) => updateConfig("play_sound_on_record", e.target.checked)}
+                      />
+                      Play sound when recording
+                    </label>
+                  </div>
+                </Accordion>
+
+                <button
+                  className={`config-save-btn ${configSaved ? "saved" : ""}`}
+                  onClick={handleSaveConfig}
+                  disabled={configSaving}
+                >
+                  {configSaving ? "Saving..." : configSaved ? "Saved!" : "Save Settings"}
+                </button>
+              </>
+            ) : (
+              <div className="config-loading">Loading...</div>
+            )}
+
+            <Accordion title="Worktree Repositories" badge={`${worktreeRepos.length}`}>
               <p className="config-description">
                 Git repositories to scan for worktrees in the Worktrees tab.
               </p>
@@ -3960,7 +3952,7 @@ function App() {
                   ))
                 )}
               </div>
-            </div>
+            </Accordion>
           </div>
         )}
 
