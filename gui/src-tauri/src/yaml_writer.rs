@@ -260,7 +260,6 @@ pub fn write_worktrees_repos(repos: &[String]) -> String {
 /// config file IF no `youtube:` top-level key already exists. Returns the
 /// input unchanged when the section is already present — this is one-shot
 /// seeding, never an overwrite.
-#[allow(dead_code)] // call site lands in Task 17
 pub fn append_youtube_channels(existing: &str, channels: &[(String, String)]) -> String {
     let already_present = existing.lines().any(|line| {
         let is_top_level = !line.starts_with(|c: char| c.is_whitespace());
@@ -298,7 +297,6 @@ pub fn append_youtube_channels(existing: &str, channels: &[(String, String)]) ->
     out
 }
 
-#[allow(dead_code)] // used by append_youtube_channels (call site lands in Task 17)
 fn yaml_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }

@@ -150,6 +150,50 @@ pub(crate) fn get_config_path() -> PathBuf {
     PathBuf::from(home).join(".config/synthia/config.yaml")
 }
 
+/// One-shot seeding: when the Synthia config has no `youtube:` key, copy the
+/// channel list from the morning skill's `config.json` (if it exists). Skipped
+/// silently on any I/O error — the rotator will simply show nothing until the
+/// user adds channels manually.
+fn seed_youtube_channels() {
+    let cfg_path = get_config_path();
+    let existing = std::fs::read_to_string(&cfg_path).unwrap_or_default();
+    if existing.lines().any(|l| {
+        !l.starts_with(|c: char| c.is_whitespace()) && l.trim_start().starts_with("youtube:")
+    }) {
+        return;
+    }
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let morning_path = PathBuf::from(home).join(".claude/skills/morning/config.json");
+    let raw = std::fs::read_to_string(&morning_path).unwrap_or_default();
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let channels: Vec<(String, String)> = parsed
+        .get("youtube")
+        .and_then(|y| y.get("channels"))
+        .and_then(|c| c.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let name = item.get("name")?.as_str()?.to_string();
+                    let id = item.get("id")?.as_str()?.to_string();
+                    Some((name, id))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let updated = crate::yaml_writer::append_youtube_channels(&existing, &channels);
+    if updated != existing {
+        if let Some(parent) = cfg_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&cfg_path, updated);
+    }
+}
+
 pub(crate) fn get_runtime_state_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/synthia/runtime.json")
@@ -282,6 +326,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            seed_youtube_channels();
+
             // Clean up any stale remote mode state from previous sessions
             let _ = fs::remove_file(get_runtime_dir().join("synthia-remote-mode"));
             let _ = Command::new("pkill")
@@ -493,7 +539,7 @@ pub fn run() {
             commands::notes::delete_note,
             commands::usage::get_usage_stats,
             commands::weather::get_weather,
-            commands::news::get_ai_news,
+            commands::youtube_feed::get_youtube_videos,
             commands::notes::get_pinned_note,
             commands::notes::save_pinned_note,
             commands::github::get_github_config,
