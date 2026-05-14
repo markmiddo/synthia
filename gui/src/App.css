@@ -1,3 +1,5 @@
+@import "./components/terminal/terminal.css";
+
 @font-face {
   font-family: 'Ethnocentric';
   src: url('./assets/fonts/Ethnocentric-Regular.otf') format('opentype');
@@ -1162,11 +1164,44 @@
 }
 
 .sidebar-logo {
-  font-family: 'Good Timing', 'Orbitron', sans-serif;
-  font-size: 1.4rem;
-  color: #06b6d4;
-  letter-spacing: 0.2em;
-  text-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+
+.sidebar-logo-mark {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(103, 232, 249, 0.35));
+}
+
+.sidebar-logo-mark .bar {
+  transform-origin: center;
+  animation: synthia-bar-pulse 1.8s ease-in-out infinite;
+}
+.sidebar-logo-mark .bar-1 { animation-delay: 0s; }
+.sidebar-logo-mark .bar-2 { animation-delay: 0.15s; }
+.sidebar-logo-mark .bar-3 { animation-delay: 0.3s; }
+.sidebar-logo-mark .bar-4 { animation-delay: 0.45s; }
+
+@keyframes synthia-bar-pulse {
+  0%, 100% { transform: scaleY(1); }
+  50%       { transform: scaleY(0.55); }
+}
+
+.sidebar-logo-text {
+  font-family: "Commit Mono", ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.22em;
+  background: linear-gradient(135deg, #67e8f9 0%, #c4b5fd 50%, #f472b6 100%);
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 12px rgba(103, 232, 249, 0.15);
 }
 
 .sidebar-footer {
@@ -1294,9 +1329,120 @@
   color: #e2e8f0;
 }
 
+.nav-item:focus,
+.nav-item:focus-visible,
+.nav-item:active {
+  outline: none;
+  box-shadow: none;
+}
+
 .nav-item.active {
   background: rgba(6, 182, 212, 0.15);
   color: #06b6d4;
+}
+
+/* Terminal tab sub-list — minimal, flat, no boxes. */
+.terminal-tab-sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 2px 12px 6px 32px;
+  padding: 0;
+}
+
+.terminal-tab-subitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: rgba(226, 232, 240, 0.45);
+  font-family: "Commit Mono", ui-monospace, Menlo, monospace;
+  transition: color 0.12s;
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
+  border-left: 2px solid transparent;
+}
+
+.terminal-tab-subitem:hover {
+  color: #e2e8f0;
+}
+
+.terminal-tab-subitem.active {
+  color: #22d3ee;
+  border-left-color: #22d3ee;
+}
+
+.terminal-tab-subitem-bullet { display: none; }
+
+.terminal-tab-subitem-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-tab-subitem-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 3px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.terminal-tab-subitem:hover .terminal-tab-subitem-close {
+  opacity: 1;
+}
+
+.terminal-tab-subitem-close:hover {
+  color: #fca5a5;
+}
+
+/* "+ New tab" — quiet text link, no border. */
+.terminal-tab-subitem-new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.30);
+  cursor: pointer;
+  padding: 4px 6px 4px 10px;
+  font-size: 11px;
+  font-family: "Commit Mono", ui-monospace, Menlo, monospace;
+  margin-top: 2px;
+  text-align: left;
+  transition: color 0.12s;
+}
+
+.terminal-tab-subitem-new::before {
+  content: "+";
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.terminal-tab-subitem-new:hover {
+  color: #22d3ee;
+}
+
+.terminal-tab-subitem-new:focus,
+.terminal-tab-subitem-new:focus-visible,
+.terminal-tab-subitem-close:focus,
+.terminal-tab-subitem-close:focus-visible {
+  outline: none;
 }
 
 .nav-item-icon {
@@ -3443,6 +3589,10 @@
   flex-wrap: wrap;
 }
 
+.config-layout-single {
+  display: block;
+}
+
 .config-panel {
   flex: 1;
   min-width: 300px;
@@ -4751,10 +4901,11 @@
   color: var(--text-muted, #aaa);
   border: 1px solid var(--border, #333);
 }
-.kind-claude   { color: #d4a373; border-color: #d4a37340; }
-.kind-opencode { color: #7dd3fc; border-color: #7dd3fc40; }
-.kind-kimi     { color: #c4b5fd; border-color: #c4b5fd40; }
-.kind-codex    { color: #86efac; border-color: #86efac40; }
+.kind-claude    { color: #d4a373; border-color: #d4a37340; }
+.kind-claude-bg { color: #c084fc; border-color: #c084fc40; }
+.kind-opencode  { color: #7dd3fc; border-color: #7dd3fc40; }
+.kind-kimi      { color: #c4b5fd; border-color: #c4b5fd40; }
+.kind-codex     { color: #86efac; border-color: #86efac40; }
 
 .agent-risk {
   font-size: 0.95em;
@@ -5316,4 +5467,132 @@
   border-bottom-color: #06b6d4;
   color: #06b6d4;
   font-weight: 600;
+}
+
+.terminal-tab-subitem-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #22d3ee;
+  color: #22d3ee;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+  outline: none;
+}
+
+.terminal-tab-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 140px;
+  background: #11151c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-tab-context-item {
+  background: transparent;
+  border: none;
+  color: rgba(226, 232, 240, 0.85);
+  padding: 6px 14px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.terminal-tab-context-item:hover {
+  background: rgba(34, 211, 238, 0.10);
+  color: #22d3ee;
+}
+
+.config-channel-add {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr auto;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.config-channel-add input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: #e2e8f0;
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.config-channel-add input:focus {
+  border-color: #22d3ee;
+  outline: none;
+}
+
+.config-channel-add button {
+  background: #22d3ee;
+  color: #11151c;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.config-channel-add button:hover {
+  background: #67e8f9;
+}
+
+.config-channel-error {
+  color: #f87171;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.config-channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-channel-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  align-items: center;
+}
+
+.config-channel-name {
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.config-channel-id {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  color: rgba(255, 255, 255, 0.40);
+  font-size: 11px;
+}
+
+.config-channel-remove {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.40);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.config-channel-remove:hover {
+  color: #f87171;
+}
+
+.config-channel-empty {
+  color: rgba(255, 255, 255, 0.30);
+  font-style: italic;
+  padding: 8px 10px;
 }

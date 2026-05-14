@@ -1,8 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
 import { JournalPanel } from "./components/JournalPanel";
+import { ShortcutsPanel } from "./components/ShortcutsPanel";
+import { Accordion } from "./components/Accordion";
+import { TerminalPanel } from "./components/terminal/TerminalPanel";
+import { requestTerminal } from "./components/terminal/spawnRequest";
 import "./App.css";
 type Status = "stopped" | "running" | "recording" | "thinking";
 
@@ -73,11 +77,12 @@ interface WeatherSnapshot {
   error: string | null;
 }
 
-interface NewsItem {
+interface VideoItem {
   title: string;
-  link: string;
+  channel_name: string;
+  video_url: string;
+  thumbnail_url: string | null;
   published: string | null;
-  source: string;
 }
 
 interface AgentInfo {
@@ -395,7 +400,7 @@ interface GitHubIssuesResponse {
   error: string | null;
 }
 
-type Section = "worktrees" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github";
+type Section = "worktrees" | "terminal" | "shortcuts" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github";
 
 interface KnowledgeMeta {
   pinned: string[];
@@ -423,6 +428,15 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [currentSection, setCurrentSection] = useState<Section>("agents");
+  const [terminalTabs, setTerminalTabs] = useState<{ id: string; title: string; is_active: boolean }[]>([]);
+  const [activeTerminalTabId, setActiveTerminalTabId] = useState<string | null>(null);
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState<string>("");
+  const [tabMenu, setTabMenu] = useState<{
+    tabId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [voiceView, setVoiceView] = useState<VoiceView>("main");
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
@@ -446,6 +460,10 @@ function App() {
   // Config state
   const [synthiaConfig, setSynthiaConfig] = useState<SynthiaConfig | null>(null);
   const [worktreeRepos, setWorktreeRepos] = useState<string[]>([]);
+  const [youtubeChannels, setYoutubeChannels] = useState<{ name: string; id: string }[]>([]);
+  const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelUrl, setNewChannelUrl] = useState("");
+  const [channelError, setChannelError] = useState<string | null>(null);
   const [newRepoPath, setNewRepoPath] = useState("");
   const [configSaving, setConfigSaving] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
@@ -461,9 +479,9 @@ function App() {
   const [securityTabAutoChosen, setSecurityTabAutoChosen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [newsIndex, setNewsIndex] = useState(0);
-  const [newsFade, setNewsFade] = useState(true);
+  const [videos, setVideos] = useState<VideoItem[]>([]);
+  const [videoIndex, setVideoIndex] = useState(0);
+  const [videoFade, setVideoFade] = useState(true);
   const [neuralguardStatus, setNeuralguardStatus] = useState<{
     installed: boolean;
     events_path: string;
@@ -596,6 +614,9 @@ function App() {
       loadSkills();
       loadHooks();
       loadPlugins();
+      invoke<{ name: string; id: string }[]>("list_youtube_channels")
+        .then(setYoutubeChannels)
+        .catch(() => setYoutubeChannels([]));
     }
 
     if (currentSection === "knowledge") {
@@ -643,6 +664,163 @@ function App() {
       loadGithubIssues(true);
     }
   }, [githubConfigOpen]);
+
+  // Terminal tab list — poll every 500ms while on terminal section so the
+  // sidebar sub-items stay in sync with backend state (new tabs, closes,
+  // active changes from PTY exits, etc).
+  useEffect(() => {
+    if (currentSection !== "terminal") return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const list = await invoke<{ id: string; title: string; is_active: boolean }[]>(
+          "native_term_list_tabs",
+        );
+        if (cancelled) return;
+        setTerminalTabs(list);
+        const active = list.find((t) => t.is_active);
+        if (active) setActiveTerminalTabId(active.id);
+        else if (list.length > 0) setActiveTerminalTabId(list[list.length - 1].id);
+      } catch {
+        // ignore
+      }
+    };
+    refresh();
+    const t = window.setInterval(refresh, 500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [currentSection]);
+
+  useEffect(() => {
+    if (!tabMenu) return;
+    const dismiss = () => setTabMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTabMenu(null);
+    };
+    window.addEventListener("click", dismiss);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", dismiss);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [tabMenu]);
+
+  const handleTerminalNewTab = useCallback(async () => {
+    const el = document.querySelector(".native-terminal-pane");
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) return;
+    const geom = {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(rect.height)),
+    };
+    try {
+      const id = await invoke<string>("native_term_new_tab", { geom });
+      setActiveTerminalTabId(id);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleTerminalSwitchTab = useCallback(
+    async (tabId: string) => {
+      if (tabId === activeTerminalTabId) return;
+      const el = document.querySelector(".native-terminal-pane");
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) return;
+      const geom = {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.max(1, Math.round(rect.width)),
+        height: Math.max(1, Math.round(rect.height)),
+      };
+      try {
+        await invoke<string>("native_term_show", { tabId, geom });
+        setActiveTerminalTabId(tabId);
+      } catch {
+        // ignore
+      }
+    },
+    [activeTerminalTabId],
+  );
+
+  const handleTerminalCloseTab = useCallback(async (tabId: string) => {
+    try {
+      await invoke("native_term_close_tab", { tabId });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const commitRename = useCallback(async () => {
+    if (!renamingTabId) return;
+    const next = renameDraft.trim();
+    const tabId = renamingTabId;
+    setRenamingTabId(null);
+    if (!next) return;
+    try {
+      await invoke("native_term_rename_tab", { tabId, title: next });
+      const tabs = await invoke<{ id: string; title: string; is_active: boolean }[]>(
+        "native_term_list_tabs",
+      );
+      setTerminalTabs(tabs);
+    } catch (err) {
+      console.error("rename failed", err);
+    }
+  }, [renamingTabId, renameDraft]);
+
+  const openTabContextMenu = useCallback(
+    (tabId: string, x: number, y: number) => {
+      setTabMenu({ tabId, x, y });
+    },
+    [],
+  );
+
+  // Listen for keyboard shortcuts emitted by the native Wayland keyboard
+  // loop (Ctrl+Shift+W close, Ctrl+Shift+T new, Ctrl+(Shift+)Tab cycle).
+  useEffect(() => {
+    if (currentSection !== "terminal") return;
+    const setup = async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const unlistens = await Promise.all([
+        listen("terminal-close-active-tab", () => {
+          if (activeTerminalTabId) {
+            void handleTerminalCloseTab(activeTerminalTabId);
+          }
+        }),
+        listen("terminal-new-tab", () => {
+          void handleTerminalNewTab();
+        }),
+        listen<string>("terminal-cycle-tab", (e) => {
+          const dir = e.payload === "prev" ? -1 : 1;
+          const idx = terminalTabs.findIndex((t) => t.id === activeTerminalTabId);
+          if (idx === -1 || terminalTabs.length < 2) return;
+          const nextIdx = (idx + dir + terminalTabs.length) % terminalTabs.length;
+          void handleTerminalSwitchTab(terminalTabs[nextIdx].id);
+        }),
+      ]);
+      return () => unlistens.forEach((u) => u());
+    };
+    let cleanup: (() => void) | undefined;
+    setup().then((c) => {
+      cleanup = c;
+    });
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [
+    currentSection,
+    activeTerminalTabId,
+    terminalTabs,
+    handleTerminalCloseTab,
+    handleTerminalNewTab,
+    handleTerminalSwitchTab,
+  ]);
 
   // Active agents polling
   useEffect(() => {
@@ -719,37 +897,37 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
-  // AI news feed — refresh every 15 minutes.
+  // YouTube video feed — refresh every 30 minutes.
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const items = await invoke<NewsItem[]>("get_ai_news");
-        if (!cancelled) setNews(items);
+        const items = await invoke<VideoItem[]>("get_youtube_videos");
+        if (!cancelled) setVideos(items);
       } catch (err) {
-        console.error("get_ai_news failed", err);
+        console.error("get_youtube_videos failed", err);
       }
     }
     load();
-    const id = setInterval(load, 15 * 60 * 1000);
+    const id = setInterval(load, 30 * 60 * 1000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
   }, []);
 
-  // Rotate news headline every 8s with a fade transition.
+  // Rotate video title every 8s with a fade transition.
   useEffect(() => {
-    if (news.length <= 1) return;
+    if (videos.length <= 1) return;
     const id = setInterval(() => {
-      setNewsFade(false);
+      setVideoFade(false);
       setTimeout(() => {
-        setNewsIndex((i) => (i + 1) % news.length);
-        setNewsFade(true);
+        setVideoIndex((i) => (i + 1) % videos.length);
+        setVideoFade(true);
       }, 250);
     }, 8000);
     return () => clearInterval(id);
-  }, [news.length]);
+  }, [videos.length]);
 
   async function loadPendingPrompts() {
     try {
@@ -2256,9 +2434,102 @@ function App() {
     return (
       <div className="sidebar">
         <div className="sidebar-header">
-          <div className="sidebar-logo">SYNTHIA</div>
+          <div className="sidebar-logo">
+            <svg className="sidebar-logo-mark" viewBox="0 0 24 24" aria-hidden="true">
+              <defs>
+                <linearGradient id="synthia-bars" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#67e8f9" />
+                  <stop offset="100%" stopColor="#f472b6" />
+                </linearGradient>
+              </defs>
+              <rect x="2" y="9" width="3" height="6" rx="1" fill="url(#synthia-bars)" className="bar bar-1" />
+              <rect x="7" y="5" width="3" height="14" rx="1" fill="url(#synthia-bars)" className="bar bar-2" />
+              <rect x="12" y="2" width="3" height="20" rx="1" fill="url(#synthia-bars)" className="bar bar-3" />
+              <rect x="17" y="6" width="3" height="12" rx="1" fill="url(#synthia-bars)" className="bar bar-4" />
+            </svg>
+            <span className="sidebar-logo-text">SYNTHIA</span>
+          </div>
         </div>
         <nav className="sidebar-nav">
+          <button
+            className={`nav-item ${currentSection === "terminal" ? "active" : ""}`}
+            onClick={() => setCurrentSection("terminal")}
+          >
+            <span className="nav-item-icon">▸_</span>
+            Terminal
+          </button>
+          {currentSection === "terminal" && (
+            <div className="terminal-tab-sublist">
+              {terminalTabs.map((tab) => {
+                const isRenaming = renamingTabId === tab.id;
+                return (
+                  <div
+                    key={tab.id}
+                    className={`terminal-tab-subitem${tab.is_active ? " active" : ""}`}
+                    onClick={() => {
+                      if (isRenaming) return;
+                      handleTerminalSwitchTab(tab.id);
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setRenameDraft(tab.title);
+                      setRenamingTabId(tab.id);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      openTabContextMenu(tab.id, e.clientX, e.clientY);
+                    }}
+                    title={tab.title}
+                  >
+                    <span className="terminal-tab-subitem-bullet">›</span>
+                    {isRenaming ? (
+                      <input
+                        className="terminal-tab-subitem-input"
+                        autoFocus
+                        value={renameDraft}
+                        maxLength={40}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void commitRename();
+                          }
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setRenamingTabId(null);
+                          }
+                        }}
+                        onBlur={() => void commitRename()}
+                      />
+                    ) : (
+                      <span className="terminal-tab-subitem-title">
+                        {tab.title.split(/\s*·\s*/).pop() || tab.title}
+                      </span>
+                    )}
+                    {!isRenaming && terminalTabs.length > 1 && (
+                      <button
+                        className="terminal-tab-subitem-close"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTerminalCloseTab(tab.id);
+                        }}
+                        aria-label="close tab"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <button
+                className="terminal-tab-subitem-new"
+                onClick={handleTerminalNewTab}
+              >
+                New tab
+              </button>
+            </div>
+          )}
           <button
             className={`nav-item ${currentSection === "agents" ? "active" : ""}`}
             onClick={() => setCurrentSection("agents")}
@@ -2308,6 +2579,13 @@ function App() {
           >
             <span className="nav-item-icon">&#128218;</span>
             Memory
+          </button>
+          <button
+            className={`nav-item ${currentSection === "shortcuts" ? "active" : ""}`}
+            onClick={() => setCurrentSection("shortcuts")}
+          >
+            <span className="nav-item-icon">&#9000;</span>
+            Shortcuts
           </button>
           <button
             className={`nav-item ${currentSection === "config" ? "active" : ""}`}
@@ -2420,6 +2698,16 @@ function App() {
             <div className="task-panel-header">
               <span className="task-panel-title">Tasks</span>
               <div className="task-panel-actions">
+                <button
+                  className="task-panel-btn"
+                  onClick={() => {
+                    requestTerminal({ cwd: selectedWorktree.path });
+                    setCurrentSection("terminal");
+                  }}
+                  title="Open Terminal cwd'd to this worktree"
+                >
+                  Open Terminal
+                </button>
                 <button
                   className="task-panel-btn primary"
                   onClick={() => handleResumeSession(selectedWorktree)}
@@ -3244,6 +3532,13 @@ function App() {
     );
   }
 
+  function extractChannelId(input: string): string | null {
+    const trimmed = input.trim();
+    if (/^UC[\w-]{20,}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/\/channel\/(UC[\w-]{20,})/);
+    return match ? match[1] : null;
+  }
+
   function renderConfigSection() {
     // Agent edit modal
     if (editingAgent) {
@@ -3482,172 +3777,155 @@ function App() {
 
         {/* Synthia Tab */}
         {configTab === "synthia" && (
-          <div className="config-layout">
-            <div className="config-panel">
-              <div className="config-panel-title">Synthia Settings</div>
+          <div className="config-layout-single">
+            {synthiaConfig ? (
+              <>
+                <div className="config-panel-title">Synthia Settings</div>
 
-              {synthiaConfig ? (
-                <>
-                  <div className="config-group">
-                    <div className="config-group-title">Processing Mode</div>
-
-                    <div className="config-toggle-row">
-                      <span>Speech-to-Text</span>
-                      <div className="config-toggle-group">
-                        <button
-                          className={`config-toggle-btn ${!synthiaConfig.use_local_stt ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_stt", false)}
-                        >
-                          Cloud
-                        </button>
-                        <button
-                          className={`config-toggle-btn ${synthiaConfig.use_local_stt ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_stt", true)}
-                        >
-                          Local
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="config-toggle-row">
-                      <span>AI Assistant</span>
-                      <div className="config-toggle-group">
-                        <button
-                          className={`config-toggle-btn ${!synthiaConfig.use_local_llm ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_llm", false)}
-                        >
-                          Cloud
-                        </button>
-                        <button
-                          className={`config-toggle-btn ${synthiaConfig.use_local_llm ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_llm", true)}
-                        >
-                          Local
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="config-toggle-row">
-                      <span>Text-to-Speech</span>
-                      <div className="config-toggle-group">
-                        <button
-                          className={`config-toggle-btn ${!synthiaConfig.use_local_tts ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_tts", false)}
-                        >
-                          Cloud
-                        </button>
-                        <button
-                          className={`config-toggle-btn ${synthiaConfig.use_local_tts ? "active" : ""}`}
-                          onClick={() => updateConfig("use_local_tts", true)}
-                        >
-                          Local
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="config-group">
-                    <div className="config-group-title">Models</div>
-
-                    <div className="config-field">
-                      <label>Local STT Model</label>
-                      <select
-                        value={synthiaConfig.local_stt_model}
-                        onChange={(e) => updateConfig("local_stt_model", e.target.value)}
+                <Accordion title="Processing Mode">
+                  <div className="config-toggle-row">
+                    <span>Speech-to-Text</span>
+                    <div className="config-toggle-group">
+                      <button
+                        className={`config-toggle-btn ${!synthiaConfig.use_local_stt ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_stt", false)}
                       >
-                        <option value="tiny">Tiny (fastest)</option>
-                        <option value="base">Base</option>
-                        <option value="small">Small</option>
-                        <option value="medium">Medium</option>
-                        <option value="large">Large (best)</option>
-                      </select>
-                    </div>
-
-                    <div className="config-field">
-                      <label>Local LLM Model</label>
-                      <input
-                        type="text"
-                        value={synthiaConfig.local_llm_model}
-                        onChange={(e) => updateConfig("local_llm_model", e.target.value)}
-                        placeholder="e.g., qwen2.5:7b-instruct-q4_0"
-                      />
-                    </div>
-
-                    <div className="config-field">
-                      <label>Cloud Assistant Model</label>
-                      <input
-                        type="text"
-                        value={synthiaConfig.assistant_model}
-                        onChange={(e) => updateConfig("assistant_model", e.target.value)}
-                        placeholder="e.g., claude-sonnet-4-20250514"
-                      />
+                        Cloud
+                      </button>
+                      <button
+                        className={`config-toggle-btn ${synthiaConfig.use_local_stt ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_stt", true)}
+                      >
+                        Local
+                      </button>
                     </div>
                   </div>
 
-                  <div className="config-group">
-                    <div className="config-group-title">Other Settings</div>
-
-                    <div className="config-field">
-                      <label>TTS Speed</label>
-                      <input
-                        type="number"
-                        value={synthiaConfig.tts_speed}
-                        onChange={(e) => updateConfig("tts_speed", parseFloat(e.target.value) || 1.0)}
-                        step="0.1"
-                        min="0.5"
-                        max="2.0"
-                      />
-                    </div>
-
-                    <div className="config-field">
-                      <label>Conversation Memory</label>
-                      <input
-                        type="number"
-                        value={synthiaConfig.conversation_memory}
-                        onChange={(e) => updateConfig("conversation_memory", parseInt(e.target.value) || 10)}
-                        min="1"
-                        max="50"
-                      />
-                    </div>
-
-                    <div className="config-checkbox-row">
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={synthiaConfig.show_notifications}
-                          onChange={(e) => updateConfig("show_notifications", e.target.checked)}
-                        />
-                        Show notifications
-                      </label>
-                    </div>
-
-                    <div className="config-checkbox-row">
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={synthiaConfig.play_sound_on_record}
-                          onChange={(e) => updateConfig("play_sound_on_record", e.target.checked)}
-                        />
-                        Play sound when recording
-                      </label>
+                  <div className="config-toggle-row">
+                    <span>AI Assistant</span>
+                    <div className="config-toggle-group">
+                      <button
+                        className={`config-toggle-btn ${!synthiaConfig.use_local_llm ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_llm", false)}
+                      >
+                        Cloud
+                      </button>
+                      <button
+                        className={`config-toggle-btn ${synthiaConfig.use_local_llm ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_llm", true)}
+                      >
+                        Local
+                      </button>
                     </div>
                   </div>
 
-                  <button
-                    className={`config-save-btn ${configSaved ? "saved" : ""}`}
-                    onClick={handleSaveConfig}
-                    disabled={configSaving}
-                  >
-                    {configSaving ? "Saving..." : configSaved ? "Saved!" : "Save Settings"}
-                  </button>
-                </>
-              ) : (
-                <div className="config-loading">Loading...</div>
-              )}
-            </div>
+                  <div className="config-toggle-row">
+                    <span>Text-to-Speech</span>
+                    <div className="config-toggle-group">
+                      <button
+                        className={`config-toggle-btn ${!synthiaConfig.use_local_tts ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_tts", false)}
+                      >
+                        Cloud
+                      </button>
+                      <button
+                        className={`config-toggle-btn ${synthiaConfig.use_local_tts ? "active" : ""}`}
+                        onClick={() => updateConfig("use_local_tts", true)}
+                      >
+                        Local
+                      </button>
+                    </div>
+                  </div>
+                </Accordion>
 
-            <div className="config-panel">
-              <div className="config-panel-title">Worktree Repositories</div>
+                <Accordion title="Models">
+                  <div className="config-field">
+                    <label>Local STT Model</label>
+                    <select
+                      value={synthiaConfig.local_stt_model}
+                      onChange={(e) => updateConfig("local_stt_model", e.target.value)}
+                    >
+                      <option value="tiny">Tiny (fastest)</option>
+                      <option value="base">Base</option>
+                      <option value="small">Small</option>
+                      <option value="medium">Medium</option>
+                      <option value="large">Large (best)</option>
+                    </select>
+                  </div>
+
+                  <div className="config-field">
+                    <label>Local LLM Model</label>
+                    <input
+                      type="text"
+                      value={synthiaConfig.local_llm_model}
+                      onChange={(e) => updateConfig("local_llm_model", e.target.value)}
+                      placeholder="e.g., qwen2.5:7b-instruct-q4_0"
+                    />
+                  </div>
+
+                  <div className="config-field">
+                    <label>Cloud Assistant Model</label>
+                    <input
+                      type="text"
+                      value={synthiaConfig.assistant_model}
+                      onChange={(e) => updateConfig("assistant_model", e.target.value)}
+                      placeholder="e.g., claude-sonnet-4-20250514"
+                    />
+                  </div>
+                </Accordion>
+
+                <Accordion title="Other Settings">
+                  <div className="config-field">
+                    <label>TTS Speed</label>
+                    <input
+                      type="number"
+                      value={synthiaConfig.tts_speed}
+                      onChange={(e) => updateConfig("tts_speed", parseFloat(e.target.value) || 1.0)}
+                      step="0.1"
+                      min="0.5"
+                      max="2.0"
+                    />
+                  </div>
+
+                  <div className="config-field">
+                    <label>Conversation Memory</label>
+                    <input
+                      type="number"
+                      value={synthiaConfig.conversation_memory}
+                      onChange={(e) => updateConfig("conversation_memory", parseInt(e.target.value) || 10)}
+                      min="1"
+                      max="50"
+                    />
+                  </div>
+
+                  <div className="config-checkbox-row">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={synthiaConfig.show_notifications}
+                        onChange={(e) => updateConfig("show_notifications", e.target.checked)}
+                      />
+                      Show notifications
+                    </label>
+                  </div>
+
+                  <div className="config-checkbox-row">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={synthiaConfig.play_sound_on_record}
+                        onChange={(e) => updateConfig("play_sound_on_record", e.target.checked)}
+                      />
+                      Play sound when recording
+                    </label>
+                  </div>
+                </Accordion>
+              </>
+            ) : (
+              <div className="config-loading">Loading...</div>
+            )}
+
+            <Accordion title="Worktree Repositories" badge={`${worktreeRepos.length}`}>
               <p className="config-description">
                 Git repositories to scan for worktrees in the Worktrees tab.
               </p>
@@ -3680,7 +3958,95 @@ function App() {
                   ))
                 )}
               </div>
-            </div>
+            </Accordion>
+
+            <Accordion title="YouTube Channels" badge={`${youtubeChannels.length}`}>
+              <p className="config-description">
+                Channels feeding the status-bar video rotator. Paste a channel URL like{" "}
+                <code>youtube.com/channel/UCxxx</code> or just the <code>UC…</code> id.
+              </p>
+
+              <div className="config-channel-add">
+                <input
+                  type="text"
+                  placeholder="Channel name (e.g. Cole Medin)"
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Channel URL or UC… id"
+                  value={newChannelUrl}
+                  onChange={(e) => setNewChannelUrl(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setChannelError(null);
+                    const id = extractChannelId(newChannelUrl);
+                    if (!id) {
+                      setChannelError("Could not find a UC… id in that URL.");
+                      return;
+                    }
+                    try {
+                      const updated = await invoke<{ name: string; id: string }[]>(
+                        "add_youtube_channel",
+                        { name: newChannelName.trim(), id },
+                      );
+                      setYoutubeChannels(updated);
+                      setNewChannelName("");
+                      setNewChannelUrl("");
+                    } catch (err) {
+                      setChannelError(String(err));
+                    }
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+              {channelError && <div className="config-channel-error">{channelError}</div>}
+
+              <div className="config-channel-list">
+                {youtubeChannels.length === 0 ? (
+                  <div className="config-channel-empty">No channels configured.</div>
+                ) : (
+                  youtubeChannels.map((c) => (
+                    <div key={c.id} className="config-channel-item">
+                      <span className="config-channel-name">{c.name}</span>
+                      <span className="config-channel-id">{c.id}</span>
+                      <button
+                        type="button"
+                        className="config-channel-remove"
+                        title="Remove channel"
+                        onClick={async () => {
+                          try {
+                            const updated = await invoke<{ name: string; id: string }[]>(
+                              "remove_youtube_channel",
+                              { id: c.id },
+                            );
+                            setYoutubeChannels(updated);
+                          } catch (err) {
+                            console.error("remove channel failed", err);
+                          }
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Accordion>
+
+            {synthiaConfig && (
+              <button
+                className={`config-save-btn ${configSaved ? "saved" : ""}`}
+                onClick={handleSaveConfig}
+                disabled={configSaving}
+              >
+                {configSaving ? "Saving..." : configSaved ? "Saved!" : "Save Settings"}
+              </button>
+            )}
           </div>
         )}
 
@@ -4372,21 +4738,21 @@ function App() {
 
         <div className="statusbar-divider" />
 
-        {news.length > 0 && (
+        {videos.length > 0 && (
           <button
             type="button"
             className="statusbar-news"
-            title={`${news[newsIndex].title} — click to open`}
+            title={`${videos[videoIndex].channel_name} — ${videos[videoIndex].title} — click to open`}
             onClick={() => {
-              const link = news[newsIndex]?.link;
+              const link = videos[videoIndex]?.video_url;
               if (link) {
                 openUrl(link).catch((e) => console.error("openUrl failed", e));
               }
             }}
           >
-            <span className="statusbar-news-icon">📰</span>
-            <span className={`statusbar-news-text ${newsFade ? "in" : "out"}`}>
-              {news[newsIndex]?.title ?? ""}
+            <span className="statusbar-news-icon">▶</span>
+            <span className={`statusbar-news-text ${videoFade ? "in" : "out"}`}>
+              {videos[videoIndex]?.channel_name ?? ""} — {videos[videoIndex]?.title ?? ""}
             </span>
           </button>
         )}
@@ -4415,6 +4781,38 @@ function App() {
 
   return (
     <div className="app-shell">
+      {tabMenu && (
+        <div
+          className="terminal-tab-context-menu"
+          style={{ left: tabMenu.x, top: tabMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="terminal-tab-context-item"
+            onClick={() => {
+              const tab = terminalTabs.find((t) => t.id === tabMenu.tabId);
+              if (tab) {
+                setRenameDraft(tab.title);
+                setRenamingTabId(tab.id);
+              }
+              setTabMenu(null);
+            }}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            className="terminal-tab-context-item"
+            onClick={() => {
+              void handleTerminalCloseTab(tabMenu.tabId);
+              setTabMenu(null);
+            }}
+          >
+            Close
+          </button>
+        </div>
+      )}
       <div className="app-layout">
         {renderSidebar()}
         {renderPromptModal()}
@@ -4422,6 +4820,10 @@ function App() {
           {currentSection === "agents" && renderAgentsSection()}
           {currentSection === "security" && renderSecuritySection()}
           {currentSection === "worktrees" && renderWorktreesSection()}
+          {currentSection === "terminal" && (
+            <TerminalPanel visible={currentSection === "terminal"} />
+          )}
+          {currentSection === "shortcuts" && <ShortcutsPanel />}
           {currentSection === "github" && renderGithubSection()}
           {currentSection === "knowledge" && renderKnowledgeSection()}
           {currentSection === "voice" && renderVoiceSection()}

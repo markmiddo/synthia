@@ -112,6 +112,13 @@ pub(crate) fn classify_ai_argv(argv: &str) -> Option<&'static str> {
     if argv_lc.contains("grep ") || argv_lc.contains("statusline") {
         return None;
     }
+    // Claude Code background-agent processes are surfaced via the
+    // ~/.claude/daemon/roster.json read in `list_active_agents`, not via
+    // process scan, because the spare/pty-host pair would otherwise get
+    // double-counted. Skip them here.
+    if argv.contains("--bg-spare") || argv.contains("--bg-pty-host") {
+        return None;
+    }
     let mut tokens = argv.split_whitespace();
     let first = tokens.next().unwrap_or("");
     let first_base = std::path::Path::new(first)
@@ -198,6 +205,116 @@ pub(crate) fn list_ai_processes(self_pid: u32) -> Vec<(u32, u64, String, &'stati
     }
     out
 }
+
+// ── Claude Code background-agent support ─────────────────────────────────────
+
+#[derive(Debug)]
+struct BgWorker {
+    short: String,
+    pid: u32,
+    cwd: String,
+    session_id: String,
+    started_ms: i64,
+}
+
+/// Read ~/.claude/daemon/roster.json for active background agents. Returns
+/// empty Vec on any I/O / parse error — Synthia must never crash because
+/// Claude Code's roster has a different shape.
+fn read_bg_roster() -> Vec<BgWorker> {
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return Vec::new(),
+    };
+    let path = std::path::PathBuf::from(home).join(".claude/daemon/roster.json");
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(_) => return Vec::new(),
+    };
+    let v: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let workers = match v.get("workers").and_then(|w| w.as_object()) {
+        Some(w) => w,
+        None => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for (short, worker) in workers {
+        let pid = worker.get("pid").and_then(|p| p.as_u64()).unwrap_or(0) as u32;
+        if pid == 0 {
+            continue;
+        }
+        // Skip workers whose pid is no longer alive — roster can outlive
+        // the actual process briefly during teardown.
+        if fs::metadata(format!("/proc/{}", pid)).is_err() {
+            continue;
+        }
+        let cwd = worker
+            .get("cwd")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        let session_id = worker
+            .get("sessionId")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        let started_ms = worker
+            .get("startedAt")
+            .and_then(|s| s.as_i64())
+            .unwrap_or(0);
+        out.push(BgWorker {
+            short: short.clone(),
+            pid,
+            cwd,
+            session_id,
+            started_ms,
+        });
+    }
+    out
+}
+
+#[derive(Debug, Default)]
+struct BgJobState {
+    state: Option<String>,   // "working" | "done" | "idle" | etc
+    intent: Option<String>,  // free-text user intent
+    detail: Option<String>,  // latest result/progress text
+    #[allow(dead_code)]
+    tempo: Option<String>,   // "idle" | "active"
+}
+
+fn read_bg_job_state(short: &str) -> BgJobState {
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return BgJobState::default(),
+    };
+    let path = std::path::PathBuf::from(home)
+        .join(".claude/jobs")
+        .join(short)
+        .join("state.json");
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(_) => return BgJobState::default(),
+    };
+    let v: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(_) => return BgJobState::default(),
+    };
+    let pull = |key: &str| {
+        v.get(key)
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    };
+    BgJobState {
+        state: pull("state"),
+        intent: pull("intent"),
+        detail: pull("detail"),
+        tempo: pull("tempo"),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Default)]
 pub(crate) struct SessionSnapshot {
@@ -1214,6 +1331,78 @@ pub fn list_active_agents() -> Vec<AgentInfo> {
             topic,
             current_task: snap.current_task,
             activity: snap.activity,
+            name,
+        });
+    }
+
+    // ===== Claude Code background agents (from roster.json) =====
+    let now_utc = chrono::Utc::now();
+    for worker in read_bg_roster() {
+        let started_at = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(worker.started_ms)
+            .unwrap_or(now_utc);
+        let etime_secs = (now_utc - started_at).num_seconds().max(0) as u64;
+
+        let state = read_bg_job_state(&worker.short);
+
+        let project_name = std::path::Path::new(&worker.cwd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string();
+
+        let branch = std::process::Command::new("git")
+            .args(["-C", &worker.cwd, "branch", "--show-current"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if s.is_empty() { None } else { Some(s) }
+                } else {
+                    None
+                }
+            });
+
+        let status = match state.state.as_deref() {
+            Some("working") => "active",
+            Some("done") | Some("idle") => "idle",
+            _ => "idle",
+        }
+        .to_string();
+
+        // Skip stale dead workers (state says done AND age > 1 day)
+        // — roster occasionally retains terminated entries.
+        if status == "idle" && etime_secs > 86400 {
+            continue;
+        }
+
+        let topic = state.intent.clone().filter(|s| !s.is_empty());
+        let current_task = state.detail.clone().filter(|s| !s.is_empty());
+
+        let role = "Background Agent".to_string();
+        let role_icon = "\u{1F977}".to_string(); // 🥷 ninja — works in stealth
+        let name = agent_name_for(&worker.short).to_string();
+
+        agents.push(AgentInfo {
+            pid: worker.pid,
+            kind: "claude-bg".to_string(),
+            cwd: worker.cwd.clone(),
+            project_name,
+            branch,
+            status,
+            started_at: started_at.to_rfc3339(),
+            last_activity: None,
+            last_user_msg: topic.clone(),
+            last_action: current_task.clone(),
+            session_id: Some(worker.session_id.clone()),
+            jsonl_path: None,
+            risk: None,
+            risk_events: Vec::new(),
+            role,
+            role_icon,
+            topic,
+            current_task,
+            activity: None,
             name,
         });
     }

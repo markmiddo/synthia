@@ -256,6 +256,98 @@ pub fn write_worktrees_repos(repos: &[String]) -> String {
     out
 }
 
+/// Append a `youtube:` section (with nested `channels:` list) to a Synthia
+/// config file IF no `youtube:` top-level key already exists. Returns the
+/// input unchanged when the section is already present — this is one-shot
+/// seeding, never an overwrite.
+pub fn append_youtube_channels(existing: &str, channels: &[(String, String)]) -> String {
+    let already_present = existing.lines().any(|line| {
+        let is_top_level = !line.starts_with(|c: char| c.is_whitespace());
+        is_top_level && line.trim_start().starts_with("youtube:")
+    });
+    if already_present {
+        return existing.to_string();
+    }
+
+    let ends_newline = existing.ends_with('\n');
+    let mut out = String::from(existing);
+    if !out.is_empty() && !out.ends_with("\n\n") {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out.push_str("# YouTube channels for the status-bar video feed.\n");
+    out.push_str(
+        "# Find a channel id by visiting the channel page and viewing source for `channelId`.\n",
+    );
+    out.push_str("youtube:\n");
+    out.push_str("  channels:\n");
+    for (name, id) in channels {
+        out.push_str(&format!(
+            "    - name: \"{}\"\n      id: \"{}\"\n",
+            yaml_escape(name),
+            yaml_escape(id)
+        ));
+    }
+
+    if !ends_newline && out.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+fn yaml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Replace the `youtube.channels:` block in a Synthia config string with
+/// the supplied channels. If `youtube:` doesn't exist, append a fresh
+/// section (delegates to `append_youtube_channels`). Preserves all
+/// comments and unrelated keys.
+#[allow(dead_code)] // call site lands in Task B
+pub fn write_youtube_channels(existing: &str, channels: &[(String, String)]) -> String {
+    // Find the top-level youtube: line.
+    let lines: Vec<&str> = existing.lines().collect();
+    let yt_idx = lines.iter().position(|line| {
+        let is_top_level = !line.starts_with(|c: char| c.is_whitespace());
+        is_top_level && line.trim_start().starts_with("youtube:")
+    });
+
+    let Some(yt_start) = yt_idx else {
+        return append_youtube_channels(existing, channels);
+    };
+
+    // Find where the youtube block ends — the next non-blank, non-comment
+    // line at column 0 that isn't a child of `youtube:`.
+    let yt_end = lines[yt_start + 1..]
+        .iter()
+        .position(|line| {
+            !line.is_empty()
+                && !line.starts_with(|c: char| c.is_whitespace())
+                && !line.trim_start().starts_with('#')
+        })
+        .map(|rel| yt_start + 1 + rel)
+        .unwrap_or(lines.len());
+
+    // Build the replacement block.
+    let mut block: Vec<String> = vec!["youtube:".to_string(), "  channels:".to_string()];
+    for (name, id) in channels {
+        block.push(format!("    - name: \"{}\"", yaml_escape(name)));
+        block.push(format!("      id: \"{}\"", yaml_escape(id)));
+    }
+
+    let mut out: Vec<String> = lines[..yt_start].iter().map(|s| s.to_string()).collect();
+    out.extend(block);
+    out.extend(lines[yt_end..].iter().map(|s| s.to_string()));
+
+    let mut joined = out.join("\n");
+    if existing.ends_with('\n') && !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +467,67 @@ mod tests {
         assert_eq!(out, input);
         // Sanity: count of `- already.here` is exactly one.
         assert_eq!(out.matches("- already.here").count(), 1);
+    }
+
+    #[test]
+    fn append_youtube_channels_appends_when_absent() {
+        let existing = "stt_engine: cloud\ntts_engine: piper\n";
+        let channels = vec![
+            ("Cole".into(), "UC1".into()),
+            ("AI Code King".into(), "UC2".into()),
+        ];
+        let out = append_youtube_channels(existing, &channels);
+        assert!(out.contains("youtube:"));
+        assert!(out.contains("- name: \"Cole\""));
+        assert!(out.contains("id: \"UC2\""));
+        assert!(out.contains("stt_engine: cloud"));
+    }
+
+    #[test]
+    fn append_youtube_channels_no_op_when_present() {
+        let existing = "youtube:\n  channels: []\n";
+        let channels = vec![("Cole".into(), "UC1".into())];
+        let out = append_youtube_channels(existing, &channels);
+        assert_eq!(out, existing);
+    }
+
+    #[test]
+    fn append_youtube_channels_escapes_quotes_in_name() {
+        let out = append_youtube_channels(
+            "",
+            &[(r#"My "favourite" channel"#.into(), "UC".into())],
+        );
+        assert!(out.contains(r#"name: "My \"favourite\" channel""#));
+    }
+
+    #[test]
+    fn write_youtube_channels_replaces_existing_list() {
+        let existing = "stt_engine: cloud\nyoutube:\n  channels:\n    - name: \"Old\"\n      id: \"UC0\"\nother_key: value\n";
+        let updated = write_youtube_channels(
+            existing,
+            &[("New".into(), "UC1".into()), ("Other".into(), "UC2".into())],
+        );
+        assert!(updated.contains("- name: \"New\""));
+        assert!(updated.contains("id: \"UC2\""));
+        assert!(!updated.contains("\"Old\""));
+        assert!(updated.contains("stt_engine: cloud"));
+        assert!(updated.contains("other_key: value"));
+    }
+
+    #[test]
+    fn write_youtube_channels_appends_when_absent() {
+        let existing = "stt_engine: cloud\n";
+        let updated = write_youtube_channels(existing, &[("Cole".into(), "UC1".into())]);
+        assert!(updated.contains("youtube:"));
+        assert!(updated.contains("- name: \"Cole\""));
+    }
+
+    #[test]
+    fn write_youtube_channels_handles_empty_list() {
+        let existing = "youtube:\n  channels:\n    - name: \"Foo\"\n      id: \"UC0\"\n";
+        let updated = write_youtube_channels(existing, &[]);
+        assert!(updated.contains("youtube:"));
+        assert!(updated.contains("channels:"));
+        assert!(!updated.contains("UC0"));
     }
 }

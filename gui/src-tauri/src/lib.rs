@@ -2,8 +2,9 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
+use std::io::Write as _;
 use std::process::Command;
 use std::fs;
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ mod state;
 mod config;
 mod yaml_writer;
 mod commands;
+mod native_term;
 
 /// Get the Synthia project root directory.
 /// Resolves from the executable path (gui/src-tauri/target/release/synthia-gui)
@@ -146,6 +148,50 @@ pub(crate) fn get_plugins_file() -> PathBuf {
 pub(crate) fn get_config_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/synthia/config.yaml")
+}
+
+/// One-shot seeding: when the Synthia config has no `youtube:` key, copy the
+/// channel list from the morning skill's `config.json` (if it exists). Skipped
+/// silently on any I/O error — the rotator will simply show nothing until the
+/// user adds channels manually.
+fn seed_youtube_channels() {
+    let cfg_path = get_config_path();
+    let existing = std::fs::read_to_string(&cfg_path).unwrap_or_default();
+    if existing.lines().any(|l| {
+        !l.starts_with(|c: char| c.is_whitespace()) && l.trim_start().starts_with("youtube:")
+    }) {
+        return;
+    }
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let morning_path = PathBuf::from(home).join(".claude/skills/morning/config.json");
+    let raw = std::fs::read_to_string(&morning_path).unwrap_or_default();
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let channels: Vec<(String, String)> = parsed
+        .get("youtube")
+        .and_then(|y| y.get("channels"))
+        .and_then(|c| c.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let name = item.get("name")?.as_str()?.to_string();
+                    let id = item.get("id")?.as_str()?.to_string();
+                    Some((name, id))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let updated = crate::yaml_writer::append_youtube_channels(&existing, &channels);
+    if updated != existing {
+        if let Some(parent) = cfg_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&cfg_path, updated);
+    }
 }
 
 pub(crate) fn get_runtime_state_path() -> PathBuf {
@@ -278,7 +324,10 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state::AppState::default())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            seed_youtube_channels();
+
             // Clean up any stale remote mode state from previous sessions
             let _ = fs::remove_file(get_runtime_dir().join("synthia-remote-mode"));
             let _ = Command::new("pkill")
@@ -374,12 +423,47 @@ pub fn run() {
             }
 
             if let Some(watcher) = spawn_state_watcher(app_handle, normal_icon, recording_icon) {
-                if let Ok(mut guard) = app.state::<state::AppState>().watchers.lock() {
-                    guard.push(Box::new(watcher));
-                }
+                app.state::<state::AppState>().watchers.lock().push(Box::new(watcher));
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+                    let paths_str: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+                    let _ = window.emit("synthia://file-drop", paths_str.clone());
+
+                    // If a native terminal tab is active, also write the
+                    // dropped paths into its PTY (single-quoted + space-
+                    // separated) so the user can drop a file onto the
+                    // terminal and have its path appear at the prompt.
+                    let slot = crate::native_term::active_writer_slot();
+                    let writer_opt = slot.lock().clone();
+                    if let Some(writer) = writer_opt {
+                        let mut buf = String::new();
+                        for (i, p) in paths_str.iter().enumerate() {
+                            if i > 0 { buf.push(' '); }
+                            // Single-quote and escape any embedded single quotes.
+                            buf.push('\'');
+                            buf.push_str(&p.replace('\'', "'\\''"));
+                            buf.push('\'');
+                        }
+                        if !buf.is_empty() {
+                            let mut w = writer.lock();
+                            let _ = w.write_all(buf.as_bytes());
+                            let _ = w.flush();
+                        }
+                    }
+                }
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Enter { .. }) => {
+                    let _ = window.emit("synthia://drag-enter", ());
+                }
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Leave) => {
+                    let _ = window.emit("synthia://drag-leave", ());
+                }
+                _ => {}
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::lifecycle::get_status,
@@ -455,7 +539,10 @@ pub fn run() {
             commands::notes::delete_note,
             commands::usage::get_usage_stats,
             commands::weather::get_weather,
-            commands::news::get_ai_news,
+            commands::youtube_feed::get_youtube_videos,
+            commands::youtube_feed::list_youtube_channels,
+            commands::youtube_feed::add_youtube_channel,
+            commands::youtube_feed::remove_youtube_channel,
             commands::notes::get_pinned_note,
             commands::notes::save_pinned_note,
             commands::github::get_github_config,
@@ -466,7 +553,26 @@ pub fn run() {
             commands::agents::kill_agent,
             commands::journal::add_journal_entry,
             commands::journal::get_journal_entries,
-            commands::journal::get_journal_entries_by_agent
+            commands::journal::get_journal_entries_by_agent,
+            commands::terminal::terminal_spawn,
+            commands::terminal::terminal_attach,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_kill,
+            commands::terminal::terminal_list,
+            commands::native_term::native_term_spawn,
+            commands::native_term::native_term_reposition,
+            commands::native_term::native_term_kill,
+            crate::native_term::commands::native_term_attach,
+            crate::native_term::commands::native_term_resize,
+            crate::native_term::commands::native_term_detach,
+            crate::native_term::commands::native_term_show,
+            crate::native_term::commands::native_term_hide,
+            crate::native_term::commands::native_term_new_tab,
+            crate::native_term::commands::native_term_close_tab,
+            crate::native_term::commands::native_term_rename_tab,
+            crate::native_term::commands::native_term_list_tabs,
+            commands::shortcuts::get_shell_aliases
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

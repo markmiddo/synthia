@@ -72,7 +72,7 @@ const STALE_OK: Duration = Duration::from_secs(600);
 
 fn read_oauth_token_cached(state: &AppState) -> Option<(String, Option<String>)> {
     {
-        let cache = state.usage_cache.lock().ok()?;
+        let cache = state.usage_cache.lock();
         if let Some(entry) = cache.as_ref() {
             if entry.fetched_at.elapsed() < TOKEN_TTL {
                 return Some((entry.token.clone(), None));
@@ -84,7 +84,8 @@ fn read_oauth_token_cached(state: &AppState) -> Option<(String, Option<String>)>
     let creds: CredsFile = serde_json::from_str(&content).ok()?;
     let oauth = creds.claude_ai_oauth?;
     let token = oauth.access_token?;
-    if let Ok(mut cache) = state.usage_cache.lock() {
+    {
+        let mut cache = state.usage_cache.lock();
         *cache = Some(UsageTokenCache {
             token: token.clone(),
             fetched_at: Instant::now(),
@@ -114,13 +115,12 @@ fn humanize_duration_until(iso: &str) -> String {
 }
 
 fn cached_or_error(state: &AppState, err: String) -> UsageStats {
-    if let Ok(cache) = state.usage_response_cache.lock() {
-        if let Some(entry) = cache.as_ref() {
-            if entry.fetched_at.elapsed() < STALE_OK {
-                let mut s = entry.stats.clone();
-                s.error = Some(format!("{} (showing cached)", err));
-                return s;
-            }
+    let cache = state.usage_response_cache.lock();
+    if let Some(entry) = cache.as_ref() {
+        if entry.fetched_at.elapsed() < STALE_OK {
+            let mut s = entry.stats.clone();
+            s.error = Some(format!("{} (showing cached)", err));
+            return s;
         }
     }
     UsageStats { error: Some(err), ..Default::default() }
@@ -130,15 +130,13 @@ fn cached_or_error(state: &AppState, err: String) -> UsageStats {
 pub async fn get_usage_stats(state: tauri::State<'_, AppState>) -> Result<UsageStats, ()> {
     // Fast path: read+drop cache before any await.
     let cached_fresh = {
-        let cache = state.usage_response_cache.lock().ok();
-        cache.and_then(|c| {
-            c.as_ref().and_then(|entry| {
-                if entry.fetched_at.elapsed() < RESPONSE_TTL {
-                    Some(entry.stats.clone())
-                } else {
-                    None
-                }
-            })
+        let cache = state.usage_response_cache.lock();
+        cache.as_ref().and_then(|entry| {
+            if entry.fetched_at.elapsed() < RESPONSE_TTL {
+                Some(entry.stats.clone())
+            } else {
+                None
+            }
         })
     };
     if let Some(stats) = cached_fresh {
@@ -207,7 +205,8 @@ pub async fn get_usage_stats(state: tauri::State<'_, AppState>) -> Result<UsageS
         }
     }
 
-    if let Ok(mut cache) = state.usage_response_cache.lock() {
+    {
+        let mut cache = state.usage_response_cache.lock();
         *cache = Some(UsageResponseCache {
             stats: stats.clone(),
             fetched_at: Instant::now(),

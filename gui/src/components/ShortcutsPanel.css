@@ -1,0 +1,83 @@
+.shortcuts-panel {
+  padding: 24px 32px;
+  color: rgba(226, 232, 240, 0.85);
+  font-size: 13px;
+}
+
+.shortcuts-search {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: #e2e8f0;
+  padding: 8px 12px;
+  font: inherit;
+  outline: none;
+  margin-bottom: 18px;
+}
+
+.shortcuts-search:focus {
+  border-color: #22d3ee;
+}
+
+.shortcuts-section-header {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.40);
+  margin: 18px 0 6px;
+}
+
+.shortcuts-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.shortcuts-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 16px;
+  padding: 6px 8px;
+  align-items: baseline;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  border-radius: 3px;
+}
+
+.shortcuts-row.clickable {
+  cursor: pointer;
+}
+
+.shortcuts-row.clickable:hover {
+  background: rgba(34, 211, 238, 0.06);
+}
+
+.shortcuts-row.flash {
+  background: rgba(34, 197, 94, 0.18);
+  transition: background 0.6s ease-out;
+}
+
+.shortcuts-keys {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  color: #22d3ee;
+  font-size: 12px;
+}
+
+.shortcuts-action {
+  color: rgba(226, 232, 240, 0.65);
+  word-break: break-word;
+}
+
+.shortcuts-scope {
+  color: rgba(255, 255, 255, 0.30);
+  font-size: 11px;
+}
+
+.shortcuts-empty {
+  color: rgba(255, 255, 255, 0.30);
+  padding: 6px 8px;
+  font-style: italic;
+}
