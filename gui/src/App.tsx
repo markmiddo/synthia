@@ -460,6 +460,10 @@ function App() {
   // Config state
   const [synthiaConfig, setSynthiaConfig] = useState<SynthiaConfig | null>(null);
   const [worktreeRepos, setWorktreeRepos] = useState<string[]>([]);
+  const [youtubeChannels, setYoutubeChannels] = useState<{ name: string; id: string }[]>([]);
+  const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelUrl, setNewChannelUrl] = useState("");
+  const [channelError, setChannelError] = useState<string | null>(null);
   const [newRepoPath, setNewRepoPath] = useState("");
   const [configSaving, setConfigSaving] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
@@ -610,6 +614,9 @@ function App() {
       loadSkills();
       loadHooks();
       loadPlugins();
+      invoke<{ name: string; id: string }[]>("list_youtube_channels")
+        .then(setYoutubeChannels)
+        .catch(() => setYoutubeChannels([]));
     }
 
     if (currentSection === "knowledge") {
@@ -3525,6 +3532,13 @@ function App() {
     );
   }
 
+  function extractChannelId(input: string): string | null {
+    const trimmed = input.trim();
+    if (/^UC[\w-]{20,}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/\/channel\/(UC[\w-]{20,})/);
+    return match ? match[1] : null;
+  }
+
   function renderConfigSection() {
     // Agent edit modal
     if (editingAgent) {
@@ -3945,6 +3959,84 @@ function App() {
                       <button
                         className="config-repo-remove"
                         onClick={() => handleRemoveRepo(index)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Accordion>
+
+            <Accordion title="YouTube Channels" badge={`${youtubeChannels.length}`}>
+              <p className="config-description">
+                Channels feeding the status-bar video rotator. Paste a channel URL like{" "}
+                <code>youtube.com/channel/UCxxx</code> or just the <code>UC…</code> id.
+              </p>
+
+              <div className="config-channel-add">
+                <input
+                  type="text"
+                  placeholder="Channel name (e.g. Cole Medin)"
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Channel URL or UC… id"
+                  value={newChannelUrl}
+                  onChange={(e) => setNewChannelUrl(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setChannelError(null);
+                    const id = extractChannelId(newChannelUrl);
+                    if (!id) {
+                      setChannelError("Could not find a UC… id in that URL.");
+                      return;
+                    }
+                    try {
+                      const updated = await invoke<{ name: string; id: string }[]>(
+                        "add_youtube_channel",
+                        { name: newChannelName.trim(), id },
+                      );
+                      setYoutubeChannels(updated);
+                      setNewChannelName("");
+                      setNewChannelUrl("");
+                    } catch (err) {
+                      setChannelError(String(err));
+                    }
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+              {channelError && <div className="config-channel-error">{channelError}</div>}
+
+              <div className="config-channel-list">
+                {youtubeChannels.length === 0 ? (
+                  <div className="config-channel-empty">No channels configured.</div>
+                ) : (
+                  youtubeChannels.map((c) => (
+                    <div key={c.id} className="config-channel-item">
+                      <span className="config-channel-name">{c.name}</span>
+                      <span className="config-channel-id">{c.id}</span>
+                      <button
+                        type="button"
+                        className="config-channel-remove"
+                        title="Remove channel"
+                        onClick={async () => {
+                          try {
+                            const updated = await invoke<{ name: string; id: string }[]>(
+                              "remove_youtube_channel",
+                              { id: c.id },
+                            );
+                            setYoutubeChannels(updated);
+                          } catch (err) {
+                            console.error("remove channel failed", err);
+                          }
+                        }}
                       >
                         ×
                       </button>

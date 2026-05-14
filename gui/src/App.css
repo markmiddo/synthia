@@ -5507,3 +5507,91 @@
   background: rgba(34, 211, 238, 0.10);
   color: #22d3ee;
 }
+
+.config-channel-add {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr auto;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.config-channel-add input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: #e2e8f0;
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.config-channel-add input:focus {
+  border-color: #22d3ee;
+  outline: none;
+}
+
+.config-channel-add button {
+  background: #22d3ee;
+  color: #11151c;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.config-channel-add button:hover {
+  background: #67e8f9;
+}
+
+.config-channel-error {
+  color: #f87171;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.config-channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-channel-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  align-items: center;
+}
+
+.config-channel-name {
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.config-channel-id {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  color: rgba(255, 255, 255, 0.40);
+  font-size: 11px;
+}
+
+.config-channel-remove {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.40);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.config-channel-remove:hover {
+  color: #f87171;
+}
+
+.config-channel-empty {
+  color: rgba(255, 255, 255, 0.30);
+  font-style: italic;
+  padding: 8px 10px;
+}
