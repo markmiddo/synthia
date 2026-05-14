@@ -3,8 +3,6 @@
 //! Surfaces shell aliases (parsed from `bash -ic 'alias'` output) and a
 //! static list of Synthia hotkeys to the Tauri frontend.
 
-#![allow(dead_code, unused_imports)] // Task 9 uses these
-
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -51,6 +49,56 @@ pub fn parse_alias_line(line: &str) -> Option<AliasEntry> {
         name: name.to_string(),
         expansion: unquoted.to_string(),
     })
+}
+
+fn detect_shell() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/bin/bash".into())
+}
+
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs (Task 10)
+pub async fn get_shell_aliases() -> Vec<AliasEntry> {
+    if let Ok(guard) = CACHE.lock() {
+        if let Some((items, fetched_at)) = guard.as_ref() {
+            if fetched_at.elapsed() < CACHE_TTL {
+                return items.clone();
+            }
+        }
+    }
+
+    let shell = detect_shell();
+    let result = timeout(
+        SHELL_TIMEOUT,
+        Command::new(&shell).args(["-ic", "alias"]).output(),
+    )
+    .await;
+
+    let output = match result {
+        Ok(Ok(out)) => out,
+        _ => return cached_or_empty(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut entries: Vec<AliasEntry> = stdout.lines().filter_map(parse_alias_line).collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries.dedup_by(|a, b| a.name == b.name);
+
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some((entries.clone(), Instant::now()));
+    }
+    entries
+}
+
+fn cached_or_empty() -> Vec<AliasEntry> {
+    if let Ok(guard) = CACHE.lock() {
+        if let Some((items, _)) = guard.as_ref() {
+            return items.clone();
+        }
+    }
+    Vec::new()
 }
 
 #[cfg(test)]
