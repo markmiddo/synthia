@@ -429,6 +429,11 @@ function App() {
   const [activeTerminalTabId, setActiveTerminalTabId] = useState<string | null>(null);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState<string>("");
+  const [tabMenu, setTabMenu] = useState<{
+    tabId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [voiceView, setVoiceView] = useState<VoiceView>("main");
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null);
@@ -678,6 +683,20 @@ function App() {
     };
   }, [currentSection]);
 
+  useEffect(() => {
+    if (!tabMenu) return;
+    const dismiss = () => setTabMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTabMenu(null);
+    };
+    window.addEventListener("click", dismiss);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", dismiss);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [tabMenu]);
+
   const handleTerminalNewTab = useCallback(async () => {
     const el = document.querySelector(".native-terminal-pane");
     if (!el) return;
@@ -746,8 +765,8 @@ function App() {
   }, [renamingTabId, renameDraft]);
 
   const openTabContextMenu = useCallback(
-    (_tabId: string, _x: number, _y: number) => {
-      // populated in Task 5 (right-click popover)
+    (tabId: string, x: number, y: number) => {
+      setTabMenu({ tabId, x, y });
     },
     [],
   );
@@ -4667,6 +4686,38 @@ function App() {
 
   return (
     <div className="app-shell">
+      {tabMenu && (
+        <div
+          className="terminal-tab-context-menu"
+          style={{ left: tabMenu.x, top: tabMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="terminal-tab-context-item"
+            onClick={() => {
+              const tab = terminalTabs.find((t) => t.id === tabMenu.tabId);
+              if (tab) {
+                setRenameDraft(tab.title);
+                setRenamingTabId(tab.id);
+              }
+              setTabMenu(null);
+            }}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            className="terminal-tab-context-item"
+            onClick={() => {
+              void handleTerminalCloseTab(tabMenu.tabId);
+              setTabMenu(null);
+            }}
+          >
+            Close
+          </button>
+        </div>
+      )}
       <div className="app-layout">
         {renderSidebar()}
         {renderPromptModal()}
