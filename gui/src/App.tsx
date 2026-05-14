@@ -76,11 +76,12 @@ interface WeatherSnapshot {
   error: string | null;
 }
 
-interface NewsItem {
+interface VideoItem {
   title: string;
-  link: string;
+  channel_name: string;
+  video_url: string;
+  thumbnail_url: string | null;
   published: string | null;
-  source: string;
 }
 
 interface AgentInfo {
@@ -473,9 +474,9 @@ function App() {
   const [securityTabAutoChosen, setSecurityTabAutoChosen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [newsIndex, setNewsIndex] = useState(0);
-  const [newsFade, setNewsFade] = useState(true);
+  const [videos, setVideos] = useState<VideoItem[]>([]);
+  const [videoIndex, setVideoIndex] = useState(0);
+  const [videoFade, setVideoFade] = useState(true);
   const [neuralguardStatus, setNeuralguardStatus] = useState<{
     installed: boolean;
     events_path: string;
@@ -888,37 +889,37 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
-  // AI news feed — refresh every 15 minutes.
+  // YouTube video feed — refresh every 30 minutes.
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const items = await invoke<NewsItem[]>("get_ai_news");
-        if (!cancelled) setNews(items);
+        const items = await invoke<VideoItem[]>("get_youtube_videos");
+        if (!cancelled) setVideos(items);
       } catch (err) {
-        console.error("get_ai_news failed", err);
+        console.error("get_youtube_videos failed", err);
       }
     }
     load();
-    const id = setInterval(load, 15 * 60 * 1000);
+    const id = setInterval(load, 30 * 60 * 1000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
   }, []);
 
-  // Rotate news headline every 8s with a fade transition.
+  // Rotate video title every 8s with a fade transition.
   useEffect(() => {
-    if (news.length <= 1) return;
+    if (videos.length <= 1) return;
     const id = setInterval(() => {
-      setNewsFade(false);
+      setVideoFade(false);
       setTimeout(() => {
-        setNewsIndex((i) => (i + 1) % news.length);
-        setNewsFade(true);
+        setVideoIndex((i) => (i + 1) % videos.length);
+        setVideoFade(true);
       }, 250);
     }, 8000);
     return () => clearInterval(id);
-  }, [news.length]);
+  }, [videos.length]);
 
   async function loadPendingPrompts() {
     try {
@@ -4651,21 +4652,21 @@ function App() {
 
         <div className="statusbar-divider" />
 
-        {news.length > 0 && (
+        {videos.length > 0 && (
           <button
             type="button"
             className="statusbar-news"
-            title={`${news[newsIndex].title} — click to open`}
+            title={`${videos[videoIndex].channel_name} — ${videos[videoIndex].title} — click to open`}
             onClick={() => {
-              const link = news[newsIndex]?.link;
+              const link = videos[videoIndex]?.video_url;
               if (link) {
                 openUrl(link).catch((e) => console.error("openUrl failed", e));
               }
             }}
           >
-            <span className="statusbar-news-icon">📰</span>
-            <span className={`statusbar-news-text ${newsFade ? "in" : "out"}`}>
-              {news[newsIndex]?.title ?? ""}
+            <span className="statusbar-news-icon">▶</span>
+            <span className={`statusbar-news-text ${videoFade ? "in" : "out"}`}>
+              {videos[videoIndex]?.channel_name ?? ""} — {videos[videoIndex]?.title ?? ""}
             </span>
           </button>
         )}
