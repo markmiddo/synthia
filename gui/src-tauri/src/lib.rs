@@ -521,6 +521,7 @@ pub fn run() {
             crate::native_term::commands::native_term_hide,
             crate::native_term::commands::native_term_new_tab,
             crate::native_term::commands::native_term_close_tab,
+            crate::native_term::commands::native_term_rename_tab,
             crate::native_term::commands::native_term_list_tabs
         ])
         .run(tauri::generate_context!())
