@@ -5463,3 +5463,43 @@
   color: #06b6d4;
   font-weight: 600;
 }
+
+.terminal-tab-subitem-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #22d3ee;
+  color: #22d3ee;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+  outline: none;
+}
+
+.terminal-tab-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 140px;
+  background: #11151c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-tab-context-item {
+  background: transparent;
+  border: none;
+  color: rgba(226, 232, 240, 0.85);
+  padding: 6px 14px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.terminal-tab-context-item:hover {
+  background: rgba(34, 211, 238, 0.10);
+  color: #22d3ee;
+}
