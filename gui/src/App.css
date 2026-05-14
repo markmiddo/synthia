@@ -4901,10 +4901,11 @@
   color: var(--text-muted, #aaa);
   border: 1px solid var(--border, #333);
 }
-.kind-claude   { color: #d4a373; border-color: #d4a37340; }
-.kind-opencode { color: #7dd3fc; border-color: #7dd3fc40; }
-.kind-kimi     { color: #c4b5fd; border-color: #c4b5fd40; }
-.kind-codex    { color: #86efac; border-color: #86efac40; }
+.kind-claude    { color: #d4a373; border-color: #d4a37340; }
+.kind-claude-bg { color: #c084fc; border-color: #c084fc40; }
+.kind-opencode  { color: #7dd3fc; border-color: #7dd3fc40; }
+.kind-kimi      { color: #c4b5fd; border-color: #c4b5fd40; }
+.kind-codex     { color: #86efac; border-color: #86efac40; }
 
 .agent-risk {
   font-size: 0.95em;
