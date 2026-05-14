@@ -3920,14 +3920,6 @@ function App() {
                     </label>
                   </div>
                 </Accordion>
-
-                <button
-                  className={`config-save-btn ${configSaved ? "saved" : ""}`}
-                  onClick={handleSaveConfig}
-                  disabled={configSaving}
-                >
-                  {configSaving ? "Saving..." : configSaved ? "Saved!" : "Save Settings"}
-                </button>
               </>
             ) : (
               <div className="config-loading">Loading...</div>
@@ -4045,6 +4037,16 @@ function App() {
                 )}
               </div>
             </Accordion>
+
+            {synthiaConfig && (
+              <button
+                className={`config-save-btn ${configSaved ? "saved" : ""}`}
+                onClick={handleSaveConfig}
+                disabled={configSaving}
+              >
+                {configSaving ? "Saving..." : configSaved ? "Saved!" : "Save Settings"}
+              </button>
+            )}
           </div>
         )}
 
