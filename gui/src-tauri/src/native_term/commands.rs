@@ -2,7 +2,7 @@
 
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter as _, Manager, State};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -840,4 +840,79 @@ pub async fn native_term_detach(
     let leased = session.leased;
     crate::commands::terminal::restore_from_native(&state.terminals, session_id, leased)?;
     Ok(())
+}
+
+/// Replace control chars with spaces, trim ends, cap to 40 chars.
+/// Returns None when the cleaned result is empty.
+fn sanitize_title(input: &str) -> Option<String> {
+    let cleaned: String = input
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let capped: String = trimmed.chars().take(40).collect();
+    Some(capped)
+}
+
+#[tauri::command]
+#[allow(dead_code)] // registered in lib.rs
+pub async fn native_term_rename_tab(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tab_id: Uuid,
+    title: String,
+) -> AppResult<()> {
+    let title = sanitize_title(&title)
+        .ok_or_else(|| AppError::Validation("title cannot be empty".into()))?;
+
+    // Confirm the tab actually exists in either map; otherwise return
+    // Validation so callers don't silently store orphan titles.
+    let exists = state.native_terminals.sessions.lock().contains_key(&tab_id)
+        || state
+            .native_terminals
+            .persistent
+            .lock()
+            .contains_key(&tab_id);
+    if !exists {
+        return Err(AppError::Validation("unknown tab id".into()));
+    }
+
+    state
+        .native_terminals
+        .custom_titles
+        .lock()
+        .insert(tab_id, title);
+
+    let _ = app.emit("terminal-tabs-changed", ());
+    Ok(())
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_rejects_empty() {
+        assert_eq!(sanitize_title("").as_deref(), None);
+        assert_eq!(sanitize_title("   ").as_deref(), None);
+    }
+
+    #[test]
+    fn sanitize_trims_and_caps() {
+        assert_eq!(sanitize_title("  build  ").as_deref(), Some("build"));
+        let long = "a".repeat(80);
+        let out = sanitize_title(&long).unwrap();
+        assert_eq!(out.chars().count(), 40);
+    }
+
+    #[test]
+    fn sanitize_strips_control_chars() {
+        assert_eq!(
+            sanitize_title("hi\nworld\t!").as_deref(),
+            Some("hi world !")
+        );
+    }
 }

@@ -128,6 +128,10 @@ pub struct NativeTermRegistry {
     /// Insertion order of tabs (active + persistent) for stable tab strip
     /// rendering across show/hide cycles.
     pub tab_order: Mutex<Vec<Uuid>>,
+    /// User-supplied tab titles.  Overrides the PTY meta title in
+    /// `native_term_list_tabs` when present.  Cleared when the tab is
+    /// closed.
+    pub custom_titles: Mutex<HashMap<Uuid, String>>,
 }
 
 #[allow(dead_code)] // wired up in commands.rs (D Task 13)
