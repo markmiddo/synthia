@@ -522,7 +522,8 @@ pub fn run() {
             crate::native_term::commands::native_term_new_tab,
             crate::native_term::commands::native_term_close_tab,
             crate::native_term::commands::native_term_rename_tab,
-            crate::native_term::commands::native_term_list_tabs
+            crate::native_term::commands::native_term_list_tabs,
+            commands::shortcuts::get_shell_aliases
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
