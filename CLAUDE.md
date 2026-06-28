@@ -120,6 +120,38 @@ cargo test --lib                            # 35 tests
 
 The Rust side maintains a strict clippy gate. New code should not introduce warnings.
 
+> Note: `cargo build --release` above is only the compile/clippy gate. It does **not**
+> produce a runnable app — see the GUI rebuild rules below.
+
+## Rebuilding / Updating the Desktop GUI
+
+Hard-won rules for getting a working installed app (not just a compiled binary):
+
+- **Always build with `npm run tauri build`** (from `gui/`), never bare `cargo build --release`.
+  Bare cargo skips Tauri's frontend-embedding step, so the binary keeps `devUrl`
+  (`http://localhost:1420`) active instead of embedding `frontendDist` (`../dist`).
+  Result: launching it with no vite dev server shows **"Could not connect to localhost:
+  Connection refused"** in the window. `cargo build --release` is fine ONLY for the
+  clippy/test gate, not for a usable app.
+- **Live development:** `npm run tauri dev`.
+- **Verify the frontend is embedded:**
+  `strings gui/src-tauri/target/release/synthia-gui | grep main-<hash>.js`
+  should match the asset in `gui/dist/assets/`.
+- **Installed launcher** runs `~/.local/bin/synthia-gui`, a symlink → the repo's
+  `gui/src-tauri/target/release/synthia-gui`. Confirm it points at the ACTIVE repo
+  (`~/dev/misc/synthia`), not a stale clone (e.g. old `~/dev/Synthia`). `install.sh`
+  sets this symlink.
+- **Desktop launcher icon** lives at `~/.local/share/icons/hicolor/<size>/apps/synthia-gui.png`
+  (referenced by `~/.local/share/applications/Synthia.desktop`, `Icon=synthia-gui`).
+  It is NOT installed by `install.sh` — regenerate from `gui/src-tauri/icons/icon.png`
+  and run `gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor`. COSMIC may cache
+  the old icon until logout/in.
+- **Tray icon** is compiled in via `include_bytes!("../icons/tray-icon.png")`, so changing
+  it requires a rebuild. `tray-icon.png` / `tray-recording.png` are generated from the
+  waveform brand (`icons/icon.png`).
+- **Single-instance lock:** `/run/user/1000/synthia-gui.lock`. A crashed instance can
+  leave it stale, making new launches exit instantly — `rm` it before relaunching.
+
 ## Running Tests
 
 ```bash
