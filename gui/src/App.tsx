@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
@@ -548,6 +548,10 @@ function App() {
   const [productError, setProductError] = useState<string | null>(null);
   const [productRefreshing, setProductRefreshing] = useState(false);
   const [productRefreshedAt, setProductRefreshedAt] = useState<string>("");
+  const [productRefreshFailed, setProductRefreshFailed] = useState(false);
+  // Reentrancy guard so the interval can't start a second refresh.sh while one
+  // is still running (concurrent writes to the same data files corrupt it).
+  const productRefreshingRef = useRef(false);
 
   // Active agents monitor state
   const [activeAgents, setActiveAgents] = useState<AgentInfo[]>([]);
@@ -674,7 +678,10 @@ function App() {
   useEffect(() => {
     if (currentSection !== "product") return;
     loadProductHtml();
-    refreshProductDashboard();
+    // refresh.sh is heavy (many gh calls) — only run it on the first visit this
+    // session; the interval keeps it live afterwards. Re-entering the tab just
+    // re-reads the current snapshot.
+    if (!productRefreshedAt) refreshProductDashboard();
     const id = setInterval(refreshProductDashboard, 15 * 60 * 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1117,25 +1124,43 @@ function App() {
     }
   }
 
+  function productErrText(e: unknown): string {
+    if (typeof e === "string") return e;
+    if (e && typeof e === "object") {
+      // AppError serializes as { Variant: "message" } — surface the message.
+      const v = Object.values(e as Record<string, unknown>)[0];
+      if (typeof v === "string") return v;
+    }
+    return JSON.stringify(e);
+  }
+
   async function loadProductHtml() {
     try {
       const html = await invoke<string>("get_product_dashboard_html");
       setProductHtml(html);
       setProductError(null);
     } catch (e) {
-      setProductError(typeof e === "string" ? e : JSON.stringify(e));
+      // Only becomes visible when there's no prior snapshot (render gates the
+      // empty-state on productHtml); a transient failure never blanks a good page.
+      setProductError(productErrText(e));
     }
   }
 
   async function refreshProductDashboard() {
+    if (productRefreshingRef.current) return; // never run two refresh.sh at once
+    productRefreshingRef.current = true;
     setProductRefreshing(true);
     try {
       await invoke("refresh_product_dashboard");
       await loadProductHtml();
       setProductRefreshedAt(new Date().toLocaleTimeString("en-AU"));
+      setProductRefreshFailed(false);
     } catch (e) {
-      setProductError(typeof e === "string" ? e : JSON.stringify(e));
+      // Keep the last good dashboard on screen; flag the failure in the toolbar.
+      setProductRefreshFailed(true);
+      if (!productHtml) setProductError(productErrText(e));
     } finally {
+      productRefreshingRef.current = false;
       setProductRefreshing(false);
     }
   }
@@ -3131,6 +3156,8 @@ function App() {
           <span className="product-status">
             {productRefreshing
               ? "Refreshing…"
+              : productRefreshFailed
+              ? "Refresh failed — showing last snapshot"
               : productRefreshedAt
               ? `Updated ${productRefreshedAt}`
               : ""}
@@ -3143,14 +3170,14 @@ function App() {
             Refresh
           </button>
         </div>
-        {productError ? (
-          <div className="product-empty">{productError}</div>
-        ) : (
+        {productHtml ? (
           <iframe
             className="product-frame"
             title="Product Dashboard"
             srcDoc={productHtml}
           />
+        ) : (
+          <div className="product-empty">{productError ?? "Loading…"}</div>
         )}
       </div>
     );
