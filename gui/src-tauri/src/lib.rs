@@ -125,6 +125,10 @@ pub(crate) fn get_memory_dir() -> PathBuf {
     get_claude_dir().join("memory")
 }
 
+pub(crate) fn get_product_dashboard_dir() -> PathBuf {
+    get_claude_dir().join("tools/product-dashboard")
+}
+
 pub(crate) fn get_agents_dir() -> PathBuf {
     get_claude_dir().join("agents")
 }
@@ -539,6 +543,7 @@ pub fn run() {
             commands::notes::delete_note,
             commands::usage::get_usage_stats,
             commands::weather::get_weather,
+            commands::product::get_product_dashboard_html,
             commands::youtube_feed::get_youtube_videos,
             commands::youtube_feed::list_youtube_channels,
             commands::youtube_feed::add_youtube_channel,
