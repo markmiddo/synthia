@@ -5596,3 +5596,34 @@
   font-style: italic;
   padding: 8px 10px;
 }
+
+.product-section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.product-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.product-title { font-weight: 600; }
+.product-status { color: #9a9aa8; font-size: 12px; margin-left: auto; }
+.product-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #08080c;
+}
+.product-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9a9aa8;
+  padding: 40px;
+  text-align: center;
+}

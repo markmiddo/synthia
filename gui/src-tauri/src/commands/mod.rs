@@ -14,6 +14,7 @@ pub mod native_term;
 pub mod neuralguard;
 pub mod notes;
 pub mod overlay;
+pub mod product;
 pub mod remote;
 pub mod shortcuts;
 pub mod terminal;

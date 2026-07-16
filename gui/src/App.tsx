@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "react-markdown";
@@ -400,7 +400,7 @@ interface GitHubIssuesResponse {
   error: string | null;
 }
 
-type Section = "worktrees" | "terminal" | "shortcuts" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github";
+type Section = "worktrees" | "terminal" | "shortcuts" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github" | "product";
 
 interface KnowledgeMeta {
   pinned: string[];
@@ -543,6 +543,16 @@ function App() {
   const [githubConfigOpen, setGithubConfigOpen] = useState(false);
   const [newGithubRepo, setNewGithubRepo] = useState("");
 
+  // Product dashboard state
+  const [productHtml, setProductHtml] = useState<string>("");
+  const [productError, setProductError] = useState<string | null>(null);
+  const [productRefreshing, setProductRefreshing] = useState(false);
+  const [productRefreshedAt, setProductRefreshedAt] = useState<string>("");
+  const [productRefreshFailed, setProductRefreshFailed] = useState(false);
+  // Reentrancy guard so the interval can't start a second refresh.sh while one
+  // is still running (concurrent writes to the same data files corrupt it).
+  const productRefreshingRef = useRef(false);
+
   // Active agents monitor state
   const [activeAgents, setActiveAgents] = useState<AgentInfo[]>([]);
   const [expandedAgentPid, setExpandedAgentPid] = useState<number | null>(null);
@@ -664,6 +674,18 @@ function App() {
       loadGithubIssues(true);
     }
   }, [githubConfigOpen]);
+
+  useEffect(() => {
+    if (currentSection !== "product") return;
+    loadProductHtml();
+    // refresh.sh is heavy (many gh calls) — only run it on the first visit this
+    // session; the interval keeps it live afterwards. Re-entering the tab just
+    // re-reads the current snapshot.
+    if (!productRefreshedAt) refreshProductDashboard();
+    const id = setInterval(refreshProductDashboard, 15 * 60 * 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSection]);
 
   // Terminal tab list — poll every 500ms while on terminal section so the
   // sidebar sub-items stay in sync with backend state (new tabs, closes,
@@ -1099,6 +1121,47 @@ function App() {
       setGithubConfig({ repos, refresh_interval_seconds: refreshInterval });
     } catch (e) {
       setGithubError(String(e));
+    }
+  }
+
+  function productErrText(e: unknown): string {
+    if (typeof e === "string") return e;
+    if (e && typeof e === "object") {
+      // AppError serializes as { Variant: "message" } — surface the message.
+      const v = Object.values(e as Record<string, unknown>)[0];
+      if (typeof v === "string") return v;
+    }
+    return JSON.stringify(e);
+  }
+
+  async function loadProductHtml() {
+    try {
+      const html = await invoke<string>("get_product_dashboard_html");
+      setProductHtml(html);
+      setProductError(null);
+    } catch (e) {
+      // Only becomes visible when there's no prior snapshot (render gates the
+      // empty-state on productHtml); a transient failure never blanks a good page.
+      setProductError(productErrText(e));
+    }
+  }
+
+  async function refreshProductDashboard() {
+    if (productRefreshingRef.current) return; // never run two refresh.sh at once
+    productRefreshingRef.current = true;
+    setProductRefreshing(true);
+    try {
+      await invoke("refresh_product_dashboard");
+      await loadProductHtml();
+      setProductRefreshedAt(new Date().toLocaleTimeString("en-AU"));
+      setProductRefreshFailed(false);
+    } catch (e) {
+      // Keep the last good dashboard on screen; flag the failure in the toolbar.
+      setProductRefreshFailed(true);
+      if (!productHtml) setProductError(productErrText(e));
+    } finally {
+      productRefreshingRef.current = false;
+      setProductRefreshing(false);
     }
   }
 
@@ -2567,6 +2630,13 @@ function App() {
             {(() => { const c = githubIssues.filter(i => i.state === "OPEN").length; return c > 0 ? <span className="nav-badge">{c}</span> : null; })()}
           </button>
           <button
+            className={`nav-item ${currentSection === "product" ? "active" : ""}`}
+            onClick={() => setCurrentSection("product")}
+          >
+            <span className="nav-item-icon">&#128202;</span>
+            Product
+          </button>
+          <button
             className={`nav-item ${currentSection === "voice" ? "active" : ""}`}
             onClick={() => { setCurrentSection("voice"); setVoiceView("main"); }}
           >
@@ -3073,6 +3143,41 @@ function App() {
               </button>
             </div>
           </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderProductSection() {
+    return (
+      <div className="product-section">
+        <div className="product-toolbar">
+          <span className="product-title">Product Dashboard</span>
+          <span className="product-status">
+            {productRefreshing
+              ? "Refreshing…"
+              : productRefreshFailed
+              ? "Refresh failed — showing last snapshot"
+              : productRefreshedAt
+              ? `Updated ${productRefreshedAt}`
+              : ""}
+          </span>
+          <button
+            className="task-panel-btn primary"
+            onClick={refreshProductDashboard}
+            disabled={productRefreshing}
+          >
+            Refresh
+          </button>
+        </div>
+        {productHtml ? (
+          <iframe
+            className="product-frame"
+            title="Product Dashboard"
+            srcDoc={productHtml}
+          />
+        ) : (
+          <div className="product-empty">{productError ?? "Loading…"}</div>
         )}
       </div>
     );
@@ -4825,6 +4930,7 @@ function App() {
           )}
           {currentSection === "shortcuts" && <ShortcutsPanel />}
           {currentSection === "github" && renderGithubSection()}
+          {currentSection === "product" && renderProductSection()}
           {currentSection === "knowledge" && renderKnowledgeSection()}
           {currentSection === "voice" && renderVoiceSection()}
           {currentSection === "memory" && renderMemorySection()}
