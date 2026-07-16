@@ -400,7 +400,7 @@ interface GitHubIssuesResponse {
   error: string | null;
 }
 
-type Section = "worktrees" | "terminal" | "shortcuts" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github";
+type Section = "worktrees" | "terminal" | "shortcuts" | "knowledge" | "agents" | "security" | "voice" | "memory" | "config" | "github" | "product";
 
 interface KnowledgeMeta {
   pinned: string[];
@@ -543,6 +543,12 @@ function App() {
   const [githubConfigOpen, setGithubConfigOpen] = useState(false);
   const [newGithubRepo, setNewGithubRepo] = useState("");
 
+  // Product dashboard state
+  const [productHtml, setProductHtml] = useState<string>("");
+  const [productError, setProductError] = useState<string | null>(null);
+  const [productRefreshing, setProductRefreshing] = useState(false);
+  const [productRefreshedAt, setProductRefreshedAt] = useState<string>("");
+
   // Active agents monitor state
   const [activeAgents, setActiveAgents] = useState<AgentInfo[]>([]);
   const [expandedAgentPid, setExpandedAgentPid] = useState<number | null>(null);
@@ -664,6 +670,15 @@ function App() {
       loadGithubIssues(true);
     }
   }, [githubConfigOpen]);
+
+  useEffect(() => {
+    if (currentSection !== "product") return;
+    loadProductHtml();
+    refreshProductDashboard();
+    const id = setInterval(refreshProductDashboard, 15 * 60 * 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSection]);
 
   // Terminal tab list — poll every 500ms while on terminal section so the
   // sidebar sub-items stay in sync with backend state (new tabs, closes,
@@ -1099,6 +1114,29 @@ function App() {
       setGithubConfig({ repos, refresh_interval_seconds: refreshInterval });
     } catch (e) {
       setGithubError(String(e));
+    }
+  }
+
+  async function loadProductHtml() {
+    try {
+      const html = await invoke<string>("get_product_dashboard_html");
+      setProductHtml(html);
+      setProductError(null);
+    } catch (e) {
+      setProductError(typeof e === "string" ? e : JSON.stringify(e));
+    }
+  }
+
+  async function refreshProductDashboard() {
+    setProductRefreshing(true);
+    try {
+      await invoke("refresh_product_dashboard");
+      await loadProductHtml();
+      setProductRefreshedAt(new Date().toLocaleTimeString("en-AU"));
+    } catch (e) {
+      setProductError(typeof e === "string" ? e : JSON.stringify(e));
+    } finally {
+      setProductRefreshing(false);
     }
   }
 
@@ -2567,6 +2605,13 @@ function App() {
             {(() => { const c = githubIssues.filter(i => i.state === "OPEN").length; return c > 0 ? <span className="nav-badge">{c}</span> : null; })()}
           </button>
           <button
+            className={`nav-item ${currentSection === "product" ? "active" : ""}`}
+            onClick={() => setCurrentSection("product")}
+          >
+            <span className="nav-item-icon">&#128202;</span>
+            Product
+          </button>
+          <button
             className={`nav-item ${currentSection === "voice" ? "active" : ""}`}
             onClick={() => { setCurrentSection("voice"); setVoiceView("main"); }}
           >
@@ -3073,6 +3118,39 @@ function App() {
               </button>
             </div>
           </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderProductSection() {
+    return (
+      <div className="product-section">
+        <div className="product-toolbar">
+          <span className="product-title">Product Dashboard</span>
+          <span className="product-status">
+            {productRefreshing
+              ? "Refreshing…"
+              : productRefreshedAt
+              ? `Updated ${productRefreshedAt}`
+              : ""}
+          </span>
+          <button
+            className="task-panel-btn primary"
+            onClick={refreshProductDashboard}
+            disabled={productRefreshing}
+          >
+            Refresh
+          </button>
+        </div>
+        {productError ? (
+          <div className="product-empty">{productError}</div>
+        ) : (
+          <iframe
+            className="product-frame"
+            title="Product Dashboard"
+            srcDoc={productHtml}
+          />
         )}
       </div>
     );
@@ -4825,6 +4903,7 @@ function App() {
           )}
           {currentSection === "shortcuts" && <ShortcutsPanel />}
           {currentSection === "github" && renderGithubSection()}
+          {currentSection === "product" && renderProductSection()}
           {currentSection === "knowledge" && renderKnowledgeSection()}
           {currentSection === "voice" && renderVoiceSection()}
           {currentSection === "memory" && renderMemorySection()}
