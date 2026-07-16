@@ -544,6 +544,7 @@ pub fn run() {
             commands::usage::get_usage_stats,
             commands::weather::get_weather,
             commands::product::get_product_dashboard_html,
+            commands::product::refresh_product_dashboard,
             commands::youtube_feed::get_youtube_videos,
             commands::youtube_feed::list_youtube_channels,
             commands::youtube_feed::add_youtube_channel,

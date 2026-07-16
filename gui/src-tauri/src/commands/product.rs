@@ -39,6 +39,33 @@ pub async fn get_product_dashboard_html() -> Result<String, AppError> {
     Ok(build_embedded_html(&html, &sidecar))
 }
 
+/// Regenerate the dashboard data by running the tool's `refresh.sh`.
+/// Runs off the UI thread; `refresh.sh` keeps prior data on partial failure.
+#[tauri::command]
+pub async fn refresh_product_dashboard() -> Result<String, AppError> {
+    let dir = get_product_dashboard_dir();
+    if !dir.join("refresh.sh").exists() {
+        return Err(AppError::NotFound("refresh.sh not found".into()));
+    }
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        std::process::Command::new("bash")
+            .arg("refresh.sh")
+            .current_dir(&dir)
+            .output()
+    })
+    .await
+    .map_err(|e| AppError::Process(e.to_string()))?
+    .map_err(|e| AppError::Process(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(AppError::Process(format!(
+            "refresh.sh failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    Ok("refreshed".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
