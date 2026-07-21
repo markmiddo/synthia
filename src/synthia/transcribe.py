@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import tempfile
+from typing import Any
 
 import numpy as np
 
@@ -36,8 +37,8 @@ class Transcriber:
         self.sample_rate = sample_rate
         self.use_local = use_local
         self.local_model = local_model
-        self.whisper_model = None
-        self.client = None
+        self.whisper_model: Any = None
+        self.client: Any = None
 
         # Post-process to remove filler words
         self.filler_words = {"uh", "um", "ah", "er", "hmm", "uh,", "um,", "ah,", "er,"}

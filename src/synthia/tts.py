@@ -10,6 +10,7 @@ import os
 import subprocess
 import tempfile
 import time
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class TextToSpeech:
         self.speed = speed
         self.voice_name = voice_name
         self.local_voice = os.path.expanduser(local_voice)
-        self.client = None
+        self.client: Any = None
 
         if use_local:
             logger.info("Piper TTS initialized with voice: %s", os.path.basename(self.local_voice))

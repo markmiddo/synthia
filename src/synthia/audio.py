@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import queue
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import numpy as np
 import sounddevice as sd
@@ -75,7 +75,7 @@ class AudioRecorder:
         # Calculate the number of samples in the resampled audio
         num_samples = int(len(audio_data) * target_rate / orig_rate)
         resampled = signal.resample(audio_data, num_samples)
-        return np.asarray(resampled).astype(np.int16)
+        return cast(np.ndarray, np.asarray(resampled).astype(np.int16))
 
     def _audio_callback(
         self, indata: np.ndarray, frames: int, time: object, status: sd.CallbackFlags
@@ -150,7 +150,7 @@ class AudioRecorder:
                 audio_data, self.device_sample_rate, self.target_sample_rate
             )
 
-        return audio_data.tobytes()
+        return cast(bytes, audio_data.tobytes())
 
 
 def list_audio_devices() -> None:

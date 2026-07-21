@@ -183,10 +183,10 @@ class Assistant:
             model=self.model,
             max_tokens=1500,
             system=system_prompt,
-            messages=self.conversation_history,
+            messages=self.conversation_history,  # type: ignore[arg-type]
         )
 
-        response_text = response.content[0].text.strip()
+        response_text = getattr(response.content[0], "text", "").strip()
         return self._parse_response(response_text)
 
     def _process_ollama(self, user_input: str) -> Dict[str, Any]:

@@ -95,3 +95,10 @@ line_length = 100
 python_version = "3.10"
 warn_return_any = true
 warn_unused_ignores = false
+
+# numpy's bundled stubs use PEP 695 `type` syntax that mypy rejects when
+# targeting python_version < 3.12. Skip parsing numpy internals; we only
+# consume it via --ignore-missing-imports anyway.
+[[tool.mypy.overrides]]
+module = "numpy.*"
+follow_imports = "skip"
