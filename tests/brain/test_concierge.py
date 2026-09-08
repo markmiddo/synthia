@@ -1,11 +1,11 @@
 import asyncio
 import json
 from datetime import date
-from pathlib import Path
 
 import pytest
 from claude_agent_sdk import ResultMessage, StreamEvent
 
+from synthia.brain import concierge as concierge_module
 from synthia.brain.concierge import Brain, SpokenEvent
 from synthia.brain.config import BrainConfig
 
@@ -36,6 +36,11 @@ class FakeClient:
         self.interrupted = True
 
     async def receive_response(self):
+        # Guards against interrupt()/receive_response() ever being called while
+        # idle (no query sent yet) — that would hang forever against the real SDK.
+        if not self.queries:
+            await asyncio.Event().wait()
+            return
         for word in self.reply.split(" "):
             yield StreamEvent(
                 uuid="u",
@@ -56,9 +61,70 @@ class FakeClient:
         )
 
 
+class BlockingClient:
+    """Stand-in whose receive_response blocks mid-stream until the test releases it."""
+
+    instances: list["BlockingClient"] = []
+
+    def __init__(self, options):
+        self.options = options
+        self.queries: list[str] = []
+        self.interrupted = False
+        self.connected = False
+        self.release = asyncio.Event()
+        BlockingClient.instances.append(self)
+
+    async def connect(self):
+        self.connected = True
+
+    async def disconnect(self):
+        self.connected = False
+
+    async def query(self, prompt, session_id="default"):
+        self.queries.append(prompt)
+
+    async def interrupt(self):
+        self.interrupted = True
+
+    async def receive_response(self):
+        yield StreamEvent(
+            uuid="u",
+            session_id="sess-1",
+            event={
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "hello "},
+            },
+        )
+        await self.release.wait()
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="sess-1",
+            result="hello there",
+        )
+
+
+class FlakyOnceClient(FakeClient):
+    """Raises once on the first [job event] query, then behaves like FakeClient."""
+
+    def __init__(self, options):
+        super().__init__(options)
+        self._raised = False
+
+    async def query(self, prompt, session_id="default"):
+        if prompt.startswith("[job event]") and not self._raised:
+            self._raised = True
+            raise RuntimeError("transient failure")
+        await super().query(prompt, session_id)
+
+
 @pytest.fixture(autouse=True)
 def _reset():
     FakeClient.instances.clear()
+    BlockingClient.instances.clear()
 
 
 def _cfg(tmp_path) -> BrainConfig:
@@ -148,10 +214,104 @@ async def test_job_event_spoken_when_idle(tmp_path):
 
 
 async def test_interrupt_drains_then_allows_send(tmp_path):
+    """Interrupting a live send() only signals the client (the send() loop itself
+    picks up the terminal ResultMessage); once that turn finishes, later sends work."""
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=BlockingClient, runner=None)
+    await brain.start()
+
+    gen = brain.send("hi")
+    first = await gen.__anext__()
+    assert first == "hello "
+
+    client = BlockingClient.instances[0]
+    await brain.interrupt()
+    assert client.interrupted is True
+
+    client.release.set()
+    rest = "".join([chunk async for chunk in gen])
+    assert (first + rest).strip() == "hello"
+
+    text = await _collect(brain.send("again"))
+    assert text.strip() == "hello"
+    await brain.stop()
+
+
+async def test_job_event_waits_until_reply_finishes(tmp_path):
+    async def runner(rec):
+        return 0, json.dumps({"is_error": False, "result": "Briefing done."}), ""
+
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=BlockingClient, runner=runner)
+    await brain.start()
+
+    send_task = asyncio.create_task(_collect(brain.send("hi")))
+    await asyncio.sleep(0.05)
+    client = BlockingClient.instances[-1]
+    assert client.queries == ["hi"]
+
+    await brain.jobs.dispatch("morning", "/morning")
+    events = brain.events()
+    events_task = asyncio.create_task(events.__anext__())
+    await asyncio.sleep(0.05)
+    assert not any(q.startswith("[job event]") for q in client.queries)
+
+    client.release.set()
+    text = await asyncio.wait_for(send_task, 2)
+    ev = await asyncio.wait_for(events_task, 2)
+
+    assert text.strip() == "hello"
+    assert isinstance(ev, SpokenEvent)
+    assert any(q.startswith("[job event]") for q in client.queries)
+    await brain.stop()
+
+
+async def test_abandoned_send_does_not_strand_lock(tmp_path):
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=BlockingClient, runner=None)
+    await brain.start()
+
+    gen = brain.send("one")
+    first = await gen.__anext__()
+    assert first == "hello "
+
+    client = BlockingClient.instances[0]
+    client.release.set()
+    await gen.aclose()
+
+    text = await asyncio.wait_for(_collect(brain.send("two")), 2)
+    assert text.strip() == "hello"
+    assert client.interrupted is True
+    await brain.stop()
+
+
+async def test_interrupt_when_idle_returns_immediately(tmp_path):
     brain = Brain(_cfg(tmp_path), _yes, client_factory=FakeClient, runner=None)
     await brain.start()
-    await brain.interrupt()
-    assert FakeClient.instances[0].interrupted is True
-    text = await _collect(brain.send("again"))
-    assert text.strip() == "hello there"
+    await asyncio.wait_for(brain.interrupt(), 1)
+    client = FakeClient.instances[0]
+    assert client.interrupted is False
+    await brain.stop()
+
+
+async def test_corrupt_session_file_starts_fresh(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "session.json").write_text("{not json")
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=FakeClient, runner=None)
+    await brain.start()
+    assert FakeClient.instances[0].options.resume is None
+    await brain.stop()
+
+
+async def test_events_survive_ask_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(concierge_module, "EVENT_RETRY_DELAY_S", 0.01)
+
+    async def runner(rec):
+        return 0, json.dumps({"is_error": False, "result": "Briefing done."}), ""
+
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=FlakyOnceClient, runner=runner)
+    await brain.start()
+    events = brain.events()
+    await brain.jobs.dispatch("morning", "/morning")
+    ev = await asyncio.wait_for(events.__anext__(), 2)
+    assert isinstance(ev, SpokenEvent)
+    assert brain.jobs.status(ev.job.id).delivered is True
     await brain.stop()
