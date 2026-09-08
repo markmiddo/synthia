@@ -25,6 +25,15 @@ def test_summarize_truncates_and_handles_garbage():
     assert "not json at all" in summary
 
 
+def test_summarize_non_object_json():
+    ok, summary = summarize("42")
+    assert ok is False
+    assert summary == "42"
+    ok, summary = summarize('["a"]')
+    assert ok is False
+    assert summary == '["a"]'
+
+
 def test_store_roundtrip(tmp_path):
     from synthia.brain.jobs import JobRecord
 
@@ -55,6 +64,22 @@ async def test_dispatch_runs_and_emits_event(tmp_path):
     assert ev.job.ok is True
     assert ev.job.summary == "summary here"
     assert mgr.status(rec.id).status == "done"
+    await mgr.shutdown()
+
+
+async def test_runner_exception_marks_failed(tmp_path):
+    events: asyncio.Queue[JobFinished] = asyncio.Queue()
+
+    async def runner(rec):
+        raise FileNotFoundError("claude")
+
+    mgr = JobManager(JobStore(tmp_path), events, runner, max_workers=2, timeout_s=5)
+    rec = await mgr.dispatch("test", "prompt")
+    ev = await asyncio.wait_for(events.get(), 2)
+    assert ev.job.status == "failed"
+    assert ev.job.ok is False
+    assert "crashed" in ev.job.summary
+    assert mgr.status(rec.id).status == "failed"
     await mgr.shutdown()
 
 

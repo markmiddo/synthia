@@ -49,6 +49,8 @@ def summarize(stdout: str, limit: int = SUMMARY_LIMIT) -> tuple[bool, str]:
         data = json.loads(stdout.strip().splitlines()[-1] if stdout.strip() else "")
     except (json.JSONDecodeError, IndexError):
         return False, stdout.strip()[:limit]
+    if not isinstance(data, dict):
+        return False, stdout.strip()[:limit]
     ok = not bool(data.get("is_error"))
     text = str(data.get("result") or "").strip()
     return ok, text[:limit]
@@ -142,6 +144,9 @@ class JobManager:
                 except asyncio.TimeoutError:
                     self._finish(rec, "failed", False, f"{rec.name} timed out")
                     return
+                except Exception as exc:
+                    self._finish(rec, "failed", False, f"{rec.name} crashed: {exc}")
+                    return
                 Path(rec.log_path).write_text(out + ("\n--- stderr ---\n" + err if err else ""))
                 ok, summary = summarize(out)
                 ok = ok and code == 0
@@ -149,6 +154,8 @@ class JobManager:
         except asyncio.CancelledError:
             self._finish(rec, "cancelled", False, f"{rec.name} cancelled")
             raise
+        except Exception as exc:
+            self._finish(rec, "failed", False, f"{rec.name} crashed: {exc}")
 
     def _finish(self, rec: JobRecord, status: str, ok: bool, summary: str) -> None:
         rec.status = status
@@ -187,6 +194,7 @@ def claude_runner(cwd: Path, allowed_tools: list[str], model: str | None = None)
             out, err = await proc.communicate()
         except asyncio.CancelledError:
             proc.kill()
+            await proc.wait()
             raise
         return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
