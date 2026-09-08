@@ -1,0 +1,59 @@
+import pytest
+from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+from claude_agent_sdk.types import ToolPermissionContext
+
+from synthia.brain.gate import classify, describe, make_can_use_tool
+
+
+@pytest.mark.parametrize(
+    "tool,inp,expected",
+    [
+        ("Bash", {"command": "ls -la"}, "allow"),
+        ("Bash", {"command": "rm -rf /"}, "deny"),
+        ("Bash", {"command": "git push origin main"}, "confirm"),
+        ("Bash", {"command": "git push --force origin feat/x"}, "confirm"),
+        ("Bash", {"command": "ssh server 'sudo systemctl restart eva-core'"}, "confirm"),
+        ("Bash", {"command": "mongosh prod --eval 'db.users.deleteMany({})'"}, "confirm"),
+        ("Bash", {"command": "gh pr merge 123"}, "confirm"),
+        ("Write", {"file_path": "/home/markmiddo/dev/eventflo/README.md"}, "allow"),
+        ("Write", {"file_path": "/home/markmiddo/.ssh/authorized_keys"}, "deny"),
+        ("Read", {"file_path": "/home/markmiddo/dev/eventflo/x.py"}, "allow"),
+    ],
+)
+def test_classify(tool, inp, expected):
+    decision, _reason = classify(tool, inp)
+    assert decision == expected
+
+
+def test_describe_bash_and_write():
+    assert describe("Bash", {"command": "git push origin main"}) == "run git push origin main"
+    assert describe("Write", {"file_path": "/a/b.py"}) == "write /a/b.py"
+    assert describe("Edit", {"file_path": "/a/b.py"}) == "edit /a/b.py"
+    assert describe("Weird", {"x": 1}) == "use Weird"
+
+
+async def test_can_use_tool_paths():
+    asked: list[str] = []
+
+    async def say_yes(q):
+        asked.append(q)
+        return True
+
+    async def say_no(q):
+        asked.append(q)
+        return False
+
+    ctx = ToolPermissionContext()
+    allow = make_can_use_tool(say_yes)
+    assert isinstance(await allow("Bash", {"command": "ls"}, ctx), PermissionResultAllow)
+    assert asked == []
+    assert isinstance(await allow("Bash", {"command": "rm -rf /"}, ctx), PermissionResultDeny)
+    assert asked == []
+    res = await allow("Bash", {"command": "git push origin main"}, ctx)
+    assert isinstance(res, PermissionResultAllow)
+    assert asked == ["run git push origin main"]
+
+    deny = make_can_use_tool(say_no)
+    res = await deny("Bash", {"command": "git push origin main"}, ctx)
+    assert isinstance(res, PermissionResultDeny)
+    assert "not confirmed" in res.message
