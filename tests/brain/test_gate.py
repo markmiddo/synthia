@@ -18,6 +18,15 @@ from synthia.brain.gate import classify, describe, make_can_use_tool
         ("Write", {"file_path": "/home/markmiddo/dev/eventflo/README.md"}, "allow"),
         ("Write", {"file_path": "/home/markmiddo/.ssh/authorized_keys"}, "deny"),
         ("Read", {"file_path": "/home/markmiddo/dev/eventflo/x.py"}, "allow"),
+        ("Bash", {"command": "cargo build --release"}, "allow"),
+        ("Bash", {"command": "systemctl --user restart eva-core.service"}, "confirm"),
+        ("Bash", {"command": 'git commit -m "revert git push behavior"'}, "allow"),
+        ("Bash", {"command": "echo git push origin main"}, "allow"),
+        ("Bash", {"command": "git status && git push"}, "confirm"),
+        ("Bash", {"command": "npm run deploy"}, "confirm"),
+        ("Bash", {"command": "./deploy.sh production"}, "confirm"),
+        ("Bash", {"command": "rm -rf node_modules"}, "confirm"),
+        ("Bash", {"command": "gh release create v1.2"}, "confirm"),
     ],
 )
 def test_classify(tool, inp, expected):
