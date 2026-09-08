@@ -1,4 +1,6 @@
+import asyncio
 import subprocess
+import time
 from pathlib import Path
 
 from synthia.brain.cli import main, pull_repos, repl
@@ -64,3 +66,41 @@ async def test_repl_routes_lines_and_commands():
 
 def test_main_unknown_subcommand_returns_2(capsys):
     assert main(["bogus"]) == 2
+
+
+async def test_repl_input_does_not_block_loop():
+    """Verify event loop keeps running while repl waits for input."""
+    brain = FakeBrain()
+    counter = {"ticks": 0}
+
+    def slow_input(prompt):
+        # Sleep 0.2s to simulate user thinking before responding
+        time.sleep(0.2)
+        return "/quit"
+
+    async def tick_task():
+        """Increment counter every 0.02s until cancelled."""
+        try:
+            while True:
+                counter["ticks"] += 1
+                await asyncio.sleep(0.02)
+        except asyncio.CancelledError:
+            pass
+
+    # Start the background counter task
+    task = asyncio.create_task(tick_task())
+    try:
+        # Run repl; it should not block the event loop during input
+        await repl(brain, input_fn=slow_input, print_fn=lambda _: None)
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    # The counter should have advanced during the 0.2s sleep
+    # With 0.02s sleep between increments, we expect ~10 ticks, but assert >= 5 for robustness
+    assert (
+        counter["ticks"] >= 5
+    ), f"Event loop was blocked: only {counter['ticks']} ticks during 0.2s input wait"

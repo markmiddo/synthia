@@ -37,7 +37,8 @@ def pull_repos(
 
 async def _always_yes(question: str) -> bool:
     print(f"[confirm] {question}")
-    return input("yes/no> ").strip().lower() in ("y", "yes")
+    answer = await asyncio.to_thread(input, "yes/no> ")
+    return answer.strip().lower() in ("y", "yes")
 
 
 async def repl(
@@ -50,7 +51,7 @@ async def repl(
     )
     while True:
         try:
-            line = input_fn("you> ").strip()
+            line = (await asyncio.to_thread(input_fn, "you> ")).strip()
         except (EOFError, KeyboardInterrupt):
             return
         if not line:
