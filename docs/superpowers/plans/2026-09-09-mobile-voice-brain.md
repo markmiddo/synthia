@@ -1757,7 +1757,7 @@ git commit -m "feat(brain): synthia-brain CLI with text REPL and repo pull"
 
 Deliberate deviation from spec Section 3: when Google TTS fails the transport (Task 9) sends the reply as a text message instead of falling back to Piper. Piper is not installed on middo247 and a text fallback is simpler and still readable on the phone. Revisit only if Google TTS proves flaky.
 
-Design note: Google STT accepts `OGG_OPUS` at 48 kHz directly (Telegram voice notes are 48 kHz Opus) and Google TTS emits `OGG_OPUS` directly, so no ffmpeg step is needed. Clients are injectable for tests; real clients are created lazily so importing the module never touches Google.
+Design note: Google TTS emits `OGG_OPUS` directly, which Telegram accepts as a voice message. For STT the note is decoded with ffmpeg to 16 kHz mono PCM and sent as `LINEAR16`; sending `OGG_OPUS` with a declared sample rate silently mis-transcribes when the rate does not match (measured: 48 kHz gave garbage on Google TTS output). Clients are injectable for tests; real clients are created lazily so importing the module never touches Google.
 
 - [ ] **Step 1: Write the failing tests**
 

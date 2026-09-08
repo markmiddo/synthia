@@ -1,4 +1,11 @@
-"""Speech in and out for the brain: Google Cloud STT/TTS, OGG_OPUS out, ffmpeg-decoded PCM in."""
+"""Speech in and out for the brain: Google Cloud STT/TTS.
+
+Design note: Google TTS emits OGG_OPUS directly, which Telegram accepts as a voice message.
+For STT the note is decoded with ffmpeg to 16 kHz mono PCM and sent as LINEAR16; sending OGG_OPUS
+with a declared sample rate silently mis-transcribes when the rate does not match (measured: 48 kHz
+gave garbage on Google TTS output). Clients are injectable for tests; real clients are created
+lazily so importing the module never touches Google.
+"""
 
 from __future__ import annotations
 
@@ -47,7 +54,7 @@ def _ffmpeg_pcm16k(path: Path) -> bytes:
 def split_for_tts(text: str, limit: int = TTS_CHUNK_LIMIT) -> list[str]:
     """Split on sentence ends so each chunk is at most `limit` characters.
 
-    Hard-splits any single sentence longer than limit on whitespace.
+    Hard-splits any single sentence/word longer than limit on whitespace or at character boundaries.
     """
     if len(text) <= limit:
         return [text]
@@ -61,18 +68,16 @@ def split_for_tts(text: str, limit: int = TTS_CHUNK_LIMIT) -> list[str]:
             # Hard-split sentence on whitespace
             words = sentence.split()
             sentence_chunks = []
-            word_group = ""
             for word in words:
-                test = f"{word_group} {word}".strip()
-                if len(test) <= limit:
-                    word_group = test
+                # If word itself is longer than limit, clip it into chunks
+                if len(word) > limit:
+                    while len(word) > limit:
+                        sentence_chunks.append(word[:limit])
+                        word = word[limit:]
+                    if word:
+                        sentence_chunks.append(word)
                 else:
-                    if word_group:
-                        sentence_chunks.append(word_group)
-                    word_group = word
-            if word_group:
-                sentence_chunks.append(word_group)
-            sentence = " ".join(sentence_chunks)
+                    sentence_chunks.append(word)
             sentences_to_add = sentence_chunks
         else:
             sentences_to_add = [sentence]
@@ -130,8 +135,9 @@ class Speech:
         """Transcribe OGG_OPUS voice note to text.
 
         Decodes via ffmpeg to PCM 16-bit mono at 16000 Hz, then uses Google Speech-to-Text
-        with phrase hints. Raises google.api_core.exceptions.GoogleAPIError on API failure
-        and RuntimeError if ffmpeg is missing; callers handle both.
+        with phrase hints. Raises google.api_core.exceptions.GoogleAPIError on API failure,
+        RuntimeError if ffmpeg is missing, and subprocess.CalledProcessError when ffmpeg
+        fails to decode (corrupt audio); callers handle all.
         """
         from google.cloud import speech
 

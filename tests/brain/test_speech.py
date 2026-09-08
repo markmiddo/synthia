@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from google.cloud import speech
 
 from synthia.brain.speech import Speech, split_for_tts
 
@@ -26,6 +27,14 @@ def test_split_for_tts_hard_splits_long_sentence():
     original_words = text.split()
     reconstructed_words = " ".join(chunks).split()
     assert original_words == reconstructed_words
+
+    # Test whitespace-free token longer than limit
+    text2 = "x" * 7000
+    chunks2 = split_for_tts(text2, limit=3000)
+    assert all(
+        len(c) <= 3000 for c in chunks2
+    ), f"Found chunk longer than 3000: {max(len(c) for c in chunks2)}"
+    assert "".join(chunks2) == text2
 
 
 class FakeSTT:
@@ -67,6 +76,7 @@ def test_transcribe_ogg_decodes_then_recognises(tmp_path):
     assert sp.transcribe_ogg(ogg) == "run the morning ritual"
     config, audio = stt.calls[0]
     assert config.language_code == "en-AU"
+    assert config.encoding == speech.RecognitionConfig.AudioEncoding.LINEAR16
     assert config.sample_rate_hertz == 16000
     assert list(config.speech_contexts[0].phrases) == ["eventflo", "Barry"]
     assert audio.content == b"\x00\x01" * 100
