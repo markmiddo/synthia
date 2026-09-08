@@ -1,5 +1,8 @@
+import os
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from synthia.brain.speech import Speech, split_for_tts
 
@@ -10,6 +13,19 @@ def test_split_for_tts_respects_limit_and_sentences():
     assert all(len(p) <= 60 for p in parts)
     assert "".join(p + " " for p in parts).strip() == text.strip()
     assert split_for_tts("short", limit=60) == ["short"]
+
+
+def test_split_for_tts_hard_splits_long_sentence():
+    text = "word " * 1000
+    limit = 60
+    chunks = split_for_tts(text.strip(), limit=limit)
+    assert all(
+        len(c) <= limit for c in chunks
+    ), f"Found chunk longer than {limit}: {max(len(c) for c in chunks)}"
+    # Verify no words are lost
+    original_words = text.split()
+    reconstructed_words = " ".join(chunks).split()
+    assert original_words == reconstructed_words
 
 
 class FakeSTT:
@@ -31,17 +47,41 @@ class FakeTTS:
         return SimpleNamespace(audio_content=b"OggS" + input.text.encode())
 
 
-def test_transcribe_ogg_uses_opus_and_hints(tmp_path):
+def test_transcribe_ogg_decodes_then_recognises(tmp_path):
     ogg = tmp_path / "note.ogg"
     ogg.write_bytes(b"OggSfake")
     stt = FakeSTT()
-    sp = Speech("en-AU", "en-AU-Neural2-B", ["eventflo", "Barry"], stt_client=stt, tts_client=None)
+
+    def fake_decoder(path):
+        assert path == ogg
+        return b"\x00\x01" * 100
+
+    sp = Speech(
+        "en-AU",
+        "en-AU-Neural2-B",
+        ["eventflo", "Barry"],
+        stt_client=stt,
+        tts_client=None,
+        decoder=fake_decoder,
+    )
     assert sp.transcribe_ogg(ogg) == "run the morning ritual"
     config, audio = stt.calls[0]
     assert config.language_code == "en-AU"
-    assert config.sample_rate_hertz == 48000
+    assert config.sample_rate_hertz == 16000
     assert list(config.speech_contexts[0].phrases) == ["eventflo", "Barry"]
-    assert audio.content == b"OggSfake"
+    assert audio.content == b"\x00\x01" * 100
+
+
+def test_transcribe_ogg_ffmpeg_missing_raises(tmp_path):
+    ogg = tmp_path / "note.ogg"
+    ogg.write_bytes(b"OggSfake")
+
+    def broken_decoder(path):
+        raise FileNotFoundError("ffmpeg not found")
+
+    sp = Speech("en-AU", "v", [], decoder=broken_decoder)
+    with pytest.raises(RuntimeError, match="ffmpeg not found"):
+        sp.transcribe_ogg(ogg)
 
 
 def test_speak_to_ogg_chunks_and_writes(tmp_path):
@@ -54,6 +94,14 @@ def test_speak_to_ogg_chunks_and_writes(tmp_path):
     assert tts.calls[0][1] == "en-AU-Neural2-B"
 
 
+def test_speak_to_ogg_blank_returns_empty(tmp_path):
+    tts = FakeTTS()
+    sp = Speech("en-AU", "en-AU-Neural2-B", [], stt_client=None, tts_client=tts)
+    files = sp.speak_to_ogg("   \n  ", tmp_path)
+    assert files == []
+    assert tts.calls == []
+
+
 def test_transcribe_empty_result_returns_empty(tmp_path):
     class Empty:
         def recognize(self, config, audio):
@@ -61,5 +109,23 @@ def test_transcribe_empty_result_returns_empty(tmp_path):
 
     ogg = tmp_path / "n.ogg"
     ogg.write_bytes(b"x")
-    sp = Speech("en-AU", "v", [], stt_client=Empty(), tts_client=None)
+
+    def fake_decoder(path):
+        return b"pcm"
+
+    sp = Speech("en-AU", "v", [], stt_client=Empty(), decoder=fake_decoder)
     assert sp.transcribe_ogg(ogg) == ""
+
+
+@pytest.mark.skipif(
+    not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"),
+    reason="needs Google credentials",
+)
+def test_real_google_roundtrip(tmp_path):
+    sp = Speech("en-AU", "en-AU-Neural2-B", ["eventflo", "Barry"])
+    files = sp.speak_to_ogg("Morning Mark. Barry ready for his walk?", tmp_path)
+    assert len(files) >= 1
+    transcript = sp.transcribe_ogg(files[0])
+    transcript_lower = transcript.lower()
+    assert "barry" in transcript_lower, f"Expected 'Barry' in transcript, got: {transcript}"
+    assert "walk" in transcript_lower, f"Expected 'walk' in transcript, got: {transcript}"
