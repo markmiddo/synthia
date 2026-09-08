@@ -90,6 +90,8 @@ class Brain:
         self._session_date: str | None = None
         self._client: ClientLike | None = None
         self._lock = asyncio.Lock()
+        # Serialises concurrent drain attempts so only one ever reads the stream.
+        self._drain_lock = asyncio.Lock()
         # A query has been sent and its ResultMessage has not yet been seen.
         self._in_flight: bool = False
         # A send() generator body is currently the one consuming the stream.
@@ -196,21 +198,25 @@ class Brain:
     async def _drain_leftover(self) -> None:
         """Finish an abandoned or interrupted turn so the shared stream is clean
         for the next one."""
-        if not self._in_flight:
-            return
-        client = self._require_client()
-        try:
-            await client.interrupt()
-            await asyncio.wait_for(self._consume_until_result(client), DRAIN_TIMEOUT_S)
-        except asyncio.TimeoutError:
-            logger.warning("Timed out draining a leftover turn after %ss", DRAIN_TIMEOUT_S)
-        finally:
-            self._in_flight = False
+        async with self._drain_lock:
+            # Re-check inside the lock: a concurrent drain may have already
+            # finished this turn while we were waiting for the lock.
+            if not self._in_flight:
+                return
+            client = self._require_client()
+            try:
+                await client.interrupt()
+                await asyncio.wait_for(self._consume_until_result(client), DRAIN_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                logger.warning("Timed out draining a leftover turn after %ss", DRAIN_TIMEOUT_S)
+            finally:
+                self._in_flight = False
 
     # ---- talking ----
 
     async def _ask(self, prompt: str) -> str:
         client = self._require_client()
+        await self._drain_leftover()  # in case a previous turn was abandoned
         await client.query(prompt)
         self._in_flight = True
         self._reader_active = True
@@ -227,6 +233,8 @@ class Brain:
                     fallback = message.result or ""
         finally:
             self._reader_active = False
+            if self._in_flight:  # this turn ended abnormally (e.g. an exception)
+                await self._drain_leftover()
         return "".join(parts) if parts else fallback
 
     def _note_result(self, message: ResultMessage) -> None:

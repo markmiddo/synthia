@@ -72,6 +72,8 @@ class BlockingClient:
         self.interrupted = False
         self.connected = False
         self.release = asyncio.Event()
+        self.interrupt_calls = 0
+        self.receive_response_calls = 0
         BlockingClient.instances.append(self)
 
     async def connect(self):
@@ -85,8 +87,10 @@ class BlockingClient:
 
     async def interrupt(self):
         self.interrupted = True
+        self.interrupt_calls += 1
 
     async def receive_response(self):
+        self.receive_response_calls += 1
         yield StreamEvent(
             uuid="u",
             session_id="sess-1",
@@ -119,6 +123,43 @@ class FlakyOnceClient(FakeClient):
             self._raised = True
             raise RuntimeError("transient failure")
         await super().query(prompt, session_id)
+
+
+class DirtyStreamClient(FakeClient):
+    """First receive_response call for a [job event] query yields one delta then
+    raises mid-stream; every other call (the drain's own, and any retry) behaves
+    like FakeClient. Records call order so a test can assert the drain happened
+    before the retry re-queried."""
+
+    def __init__(self, options):
+        super().__init__(options)
+        self._raised = False
+        self.interrupt_calls = 0
+        self.call_order: list[str] = []
+
+    async def query(self, prompt, session_id="default"):
+        self.call_order.append(f"query:{prompt}")
+        await super().query(prompt, session_id)
+
+    async def interrupt(self):
+        self.call_order.append("interrupt")
+        self.interrupt_calls += 1
+        await super().interrupt()
+
+    async def receive_response(self):
+        if self.queries[-1].startswith("[job event]") and not self._raised:
+            self._raised = True
+            yield StreamEvent(
+                uuid="u",
+                session_id="sess-1",
+                event={
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "hello "},
+                },
+            )
+            raise RuntimeError("stream broke")
+        async for message in super().receive_response():
+            yield message
 
 
 @pytest.fixture(autouse=True)
@@ -313,5 +354,52 @@ async def test_events_survive_ask_failure(tmp_path, monkeypatch):
     await brain.jobs.dispatch("morning", "/morning")
     ev = await asyncio.wait_for(events.__anext__(), 2)
     assert isinstance(ev, SpokenEvent)
+    assert brain.jobs.status(ev.job.id).delivered is True
+    await brain.stop()
+
+
+async def test_concurrent_interrupt_during_abandoned_send_drains_once(tmp_path):
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=BlockingClient, runner=None)
+    await brain.start()
+
+    gen = brain.send("one")
+    first = await gen.__anext__()
+    assert first == "hello "
+
+    client = BlockingClient.instances[0]
+    client.release.set()
+
+    await asyncio.gather(gen.aclose(), brain.interrupt())
+
+    assert client.interrupt_calls == 1
+    assert client.receive_response_calls <= 2
+
+    text = await asyncio.wait_for(_collect(brain.send("two")), 2)
+    assert text.strip() == "hello"
+    await brain.stop()
+
+
+async def test_ask_retry_drains_dirty_stream(tmp_path, monkeypatch):
+    monkeypatch.setattr(concierge_module, "EVENT_RETRY_DELAY_S", 0.01)
+
+    async def runner(rec):
+        return 0, json.dumps({"is_error": False, "result": "Briefing done."}), ""
+
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=DirtyStreamClient, runner=runner)
+    await brain.start()
+    events = brain.events()
+    await brain.jobs.dispatch("morning", "/morning")
+    ev = await asyncio.wait_for(events.__anext__(), 2)
+
+    client = FakeClient.instances[-1]
+    job_event_indices = [
+        i for i, c in enumerate(client.call_order) if c.startswith("query:[job event]")
+    ]
+    interrupt_indices = [i for i, c in enumerate(client.call_order) if c == "interrupt"]
+    assert client.interrupt_calls >= 1
+    assert len(job_event_indices) >= 2
+    assert interrupt_indices[0] < job_event_indices[1]
+
+    assert ev.text.strip() == "hello there"
     assert brain.jobs.status(ev.job.id).delivered is True
     await brain.stop()
