@@ -169,7 +169,9 @@ def _reset():
 
 
 def _cfg(tmp_path) -> BrainConfig:
-    return BrainConfig(cwd=tmp_path, state_dir=tmp_path / "state", repos=[])
+    return BrainConfig(
+        cwd=tmp_path, state_dir=tmp_path / "state", journal_dir=tmp_path / "walk", repos=[]
+    )
 
 
 async def _yes(q):
@@ -439,9 +441,7 @@ async def test_send_and_job_event_are_journaled(tmp_path):
     async def runner(rec):
         return 0, json.dumps({"is_error": False, "result": "Briefing done."}), ""
 
-    cfg = _cfg(tmp_path)
-    cfg.journal_dir = tmp_path / "walk"
-    brain = Brain(cfg, _yes, client_factory=FakeClient, runner=runner)
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=FakeClient, runner=runner)
     await brain.start()
     await _collect(brain.send("what's on"))
     events = brain.events()
