@@ -130,8 +130,12 @@ class Brain:
 
     def _save_session(self) -> None:
         tmp = self._session_file.parent / f"{self._session_file.name}.tmp"
-        tmp.write_text(json.dumps({"session_id": self.session_id, "date": self._session_date}))
-        os.replace(tmp, self._session_file)
+        try:
+            tmp.write_text(json.dumps({"session_id": self.session_id, "date": self._session_date}))
+            os.replace(tmp, self._session_file)
+        except OSError as exc:
+            # A read-only or full state dir must not kill a live conversation.
+            logger.warning("Could not write session file %s: %s", self._session_file, exc)
 
     def _options(self, resume: str | None, handover: str | None) -> ClaudeAgentOptions:
         return ClaudeAgentOptions(
@@ -156,7 +160,20 @@ class Brain:
 
     async def start(self) -> None:
         self._load_session()
-        await self._open(self.session_id)
+        try:
+            await self._open(self.session_id)
+        except Exception:
+            # A stale or deleted resume id must not brick startup; drop it and open fresh.
+            logger.warning(
+                "Could not resume session %s; starting a fresh one", self.session_id, exc_info=True
+            )
+            self.session_id = None
+            self._save_session()
+            await self._open(None)
+        try:
+            self.jobs.store.prune()
+        except OSError as exc:
+            logger.warning("Could not prune old job records: %s", exc)
         for rec in self.jobs.store.undelivered():
             self._job_events.put_nowait(JobFinished(rec))
 
@@ -299,6 +316,14 @@ class Brain:
                 await self._job_events.put(finished)
                 await asyncio.sleep(EVENT_RETRY_DELAY_S)
                 continue
-            rec.delivered = True
-            self.jobs.store.save(rec)
+            # Marked delivered only once a transport has actually pushed it (see ack).
             yield SpokenEvent(rec, text)
+
+    def ack(self, rec: JobRecord) -> None:
+        """Mark a job event as delivered. Transports call this after the push succeeds."""
+        rec.delivered = True
+        self.jobs.store.save(rec)
+
+    def requeue(self, rec: JobRecord) -> None:
+        """Put an undelivered job event back on the queue for another attempt."""
+        self._job_events.put_nowait(JobFinished(rec))

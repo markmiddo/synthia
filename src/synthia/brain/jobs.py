@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -78,6 +78,37 @@ class JobStore:
     def list_all(self) -> list[JobRecord]:
         records = [JobRecord(**json.loads(p.read_text())) for p in self.root.glob("*.json")]
         return sorted(records, key=lambda r: r.started)
+
+    def prune(self, max_age_days: int = 14) -> int:
+        """Delete job records and worker logs older than `max_age_days`.
+
+        Uses the record's `started` timestamp, falling back to the file's mtime for logs
+        and unreadable records. Returns the number of files removed.
+        """
+        cutoff = datetime.now() - timedelta(days=max_age_days)
+        removed = 0
+        for path in sorted(self.root.iterdir()):
+            if path.suffix not in (".json", ".log"):
+                continue
+            started: datetime | None = None
+            if path.suffix == ".json":
+                try:
+                    started = datetime.fromisoformat(json.loads(path.read_text())["started"])
+                except (OSError, ValueError, KeyError, TypeError):
+                    started = None
+            if started is None:
+                try:
+                    started = datetime.fromtimestamp(path.stat().st_mtime)
+                except OSError:
+                    continue
+            if started >= cutoff:
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError as exc:
+                logger.warning("Could not prune %s: %s", path, exc)
+        return removed
 
     def undelivered(self) -> list[JobRecord]:
         return [

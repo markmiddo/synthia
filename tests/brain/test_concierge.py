@@ -250,6 +250,9 @@ async def test_job_event_spoken_when_idle(tmp_path):
     assert client.queries[-1].startswith("[job event] morning finished")
     assert "Briefing done" in client.queries[-1]
     assert ev.text.strip() == "hello there"
+    # Not delivered until the transport has actually pushed it.
+    assert brain.jobs.status(ev.job.id).delivered is False
+    brain.ack(ev.job)
     assert brain.jobs.status(ev.job.id).delivered is True
     await brain.stop()
 
@@ -354,6 +357,7 @@ async def test_events_survive_ask_failure(tmp_path, monkeypatch):
     await brain.jobs.dispatch("morning", "/morning")
     ev = await asyncio.wait_for(events.__anext__(), 2)
     assert isinstance(ev, SpokenEvent)
+    brain.ack(ev.job)
     assert brain.jobs.status(ev.job.id).delivered is True
     await brain.stop()
 
@@ -401,5 +405,31 @@ async def test_ask_retry_drains_dirty_stream(tmp_path, monkeypatch):
     assert interrupt_indices[0] < job_event_indices[1]
 
     assert ev.text.strip() == "hello there"
+    brain.ack(ev.job)
     assert brain.jobs.status(ev.job.id).delivered is True
+    await brain.stop()
+
+
+class ResumeRefusingClient(FakeClient):
+    """Rejects any attempt to resume, as the CLI does for a session it no longer has."""
+
+    async def connect(self):
+        if self.options.resume is not None:
+            raise RuntimeError("no conversation found with session id")
+        await super().connect()
+
+
+async def test_stale_resume_id_starts_a_fresh_session(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "session.json").write_text(json.dumps({"session_id": "gone", "date": "2026-09-08"}))
+
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=ResumeRefusingClient, runner=None)
+    await brain.start()
+
+    assert ResumeRefusingClient.instances[0].options.resume == "gone"
+    assert ResumeRefusingClient.instances[1].options.resume is None
+    assert brain.session_id is None
+    text = await asyncio.wait_for(_collect(brain.send("hi")), 2)
+    assert text.strip() == "hello there"
     await brain.stop()

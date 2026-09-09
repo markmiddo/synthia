@@ -1,5 +1,8 @@
 import asyncio
 import json
+import os
+import time
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -186,3 +189,24 @@ async def test_claude_runner_builds_command(tmp_path, monkeypatch):
     assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
     assert cmd[cmd.index("--allowedTools") + 1] == "Bash,Read,mcp__eva-core__*"
     assert captured["kwargs"]["cwd"] == str(tmp_path)
+
+
+def test_prune_removes_old_records_and_logs(tmp_path):
+    store = JobStore(tmp_path / "jobs")
+    old_started = (datetime.now() - timedelta(days=30)).replace(microsecond=0).isoformat()
+    new_started = datetime.now().replace(microsecond=0).isoformat()
+    store.save(JobRecord(id="old", name="stale", prompt="p", started=old_started))
+    store.save(JobRecord(id="new", name="fresh", prompt="p", started=new_started))
+    old_log = store.root / "old.log"
+    new_log = store.root / "new.log"
+    old_log.write_text("old output")
+    new_log.write_text("new output")
+    stale = time.time() - 30 * 86400
+    os.utime(old_log, (stale, stale))
+
+    assert store.prune(max_age_days=14) == 2
+    assert not (store.root / "old.json").exists()
+    assert not old_log.exists()
+    assert (store.root / "new.json").exists()
+    assert new_log.exists()
+    assert [r.id for r in store.list_all()] == ["new"]
