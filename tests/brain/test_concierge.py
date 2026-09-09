@@ -433,3 +433,24 @@ async def test_stale_resume_id_starts_a_fresh_session(tmp_path):
     text = await asyncio.wait_for(_collect(brain.send("hi")), 2)
     assert text.strip() == "hello there"
     await brain.stop()
+
+
+async def test_send_and_job_event_are_journaled(tmp_path):
+    async def runner(rec):
+        return 0, json.dumps({"is_error": False, "result": "Briefing done."}), ""
+
+    cfg = _cfg(tmp_path)
+    cfg.journal_dir = tmp_path / "walk"
+    brain = Brain(cfg, _yes, client_factory=FakeClient, runner=runner)
+    await brain.start()
+    await _collect(brain.send("what's on"))
+    events = brain.events()
+    await brain.jobs.dispatch("morning", "/morning")
+    await asyncio.wait_for(events.__anext__(), 2)
+    files = list((tmp_path / "walk").glob("*.md"))
+    assert len(files) == 1
+    text = files[0].read_text()
+    assert "**Mark:** what's on" in text
+    assert "**Synthia:** hello there" in text
+    assert "**Job done:** morning — Briefing done." in text
+    await brain.stop()

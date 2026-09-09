@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from claude_agent_sdk.types import McpSdkServerConfig
@@ -22,7 +22,9 @@ def _line(rec: JobRecord) -> str:
     return f"{rec.name} (id {rec.id}) {rec.status}{tail}"
 
 
-def make_tools(manager: JobManager) -> list[SdkMcpTool[Any]]:
+def make_tools(
+    manager: JobManager, on_dispatch: Callable[[str, str], None] | None = None
+) -> list[SdkMcpTool[Any]]:
     @tool(
         "dispatch_job",
         "Run a long task in the background as a headless Claude Code worker in the eventflo "
@@ -34,6 +36,8 @@ def make_tools(manager: JobManager) -> list[SdkMcpTool[Any]]:
     )
     async def dispatch_job(args: dict[str, Any]) -> dict[str, Any]:
         rec = await manager.dispatch(args["name"], args["prompt"])
+        if on_dispatch is not None:
+            on_dispatch(rec.name, rec.prompt)
         return _text(f"{rec.name} dispatched, id {rec.id} starting. I'll report when it finishes.")
 
     @tool("job_status", "Status and summary of one background job.", {"job_id": str})
@@ -59,5 +63,9 @@ def make_tools(manager: JobManager) -> list[SdkMcpTool[Any]]:
     return [dispatch_job, job_status, list_jobs, cancel_job]
 
 
-def build_jobs_server(manager: JobManager) -> McpSdkServerConfig:
-    return create_sdk_mcp_server(name="jobs", version="1.0.0", tools=make_tools(manager))
+def build_jobs_server(
+    manager: JobManager, on_dispatch: Callable[[str, str], None] | None = None
+) -> McpSdkServerConfig:
+    return create_sdk_mcp_server(
+        name="jobs", version="1.0.0", tools=make_tools(manager, on_dispatch)
+    )

@@ -68,3 +68,20 @@ A risky action is read out as a voice note ending in 'Say yes to confirm'; reply
 "Cloud speech is down": Google credentials missing or expired in `brain.env`.
 No replies at all: check `telegram_allowed_users` matches your Telegram user id.
 Worker fails instantly: run `claude -p "hi" --output-format json` in `~/dev/eventflo` on the server.
+
+## Walk journal (continuity with the desktop)
+
+Every turn, dispatched job, job result and confirmation decision is appended to
+`~/.claude/projects/-home-markmiddo-dev-eventflo/memory/walk/YYYY-MM-DD.md` on the server
+(`journal_dir` in `brain.yaml`). The desktop reads it two ways:
+
+- `deploy/brain/desktop/walk-journal-session-hook.sh` — install to `~/.claude/hooks/` and register
+  under `hooks.SessionStart` in `~/.claude/settings.json`; it pulls today's file from the server and
+  prints it into the new session's context.
+- The `/morning` skill checks today's journal first and recaps instead of re-running when the
+  briefing already happened on the walk.
+
+`deploy/brain/desktop/brain-sync.{sh,service,timer}` push skills, agents, global instructions and the
+eventflo memory folder to the server every 10 minutes and pull the memory folder back (stopgap until
+Syncthing). Install: copy the script to `~/.claude/hooks/`, the units to `~/.config/systemd/user/`,
+then `systemctl --user enable --now brain-sync.timer`.

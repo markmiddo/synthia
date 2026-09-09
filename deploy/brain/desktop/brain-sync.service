@@ -1,0 +1,6 @@
+[Unit]
+Description=Sync Claude skills, agents and eventflo memory with middo247 (brain stopgap)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.claude/hooks/brain-sync.sh
