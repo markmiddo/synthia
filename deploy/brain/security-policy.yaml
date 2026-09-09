@@ -1,0 +1,14 @@
+# Synthia security-gate policy for the headless brain server (middo247).
+# Copy to ~/.config/synthia/security/policy.yaml (install.sh does this if absent).
+#
+# Why this file exists: the PreToolUse security-gate hook synced from the desktop
+# prompts for HIGH-severity hits and waits thirty seconds for a GUI answer that will
+# never come on a headless server, then denies anyway. Listing "high" in block_on makes
+# the hook deny those outright with no stall.
+#
+# This does not weaken voice confirmation: git push, PR merges, service restarts, prod DB
+# writes and connector mutations are brain gate rules (src/synthia/brain/gate.py), asked
+# over Telegram and answered with a spoken yes. They are unrelated to security_gate rules.
+default: allow
+mode: permissive
+block_on: [critical, high]

@@ -5,11 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=markmiddo
-WorkingDirectory=/home/markmiddo/dev/misc/synthia
-EnvironmentFile=/home/markmiddo/.config/synthia/brain.env
-Environment=PATH=/home/markmiddo/.local/bin:/home/markmiddo/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/markmiddo/dev/misc/synthia/venv/bin/synthia-brain telegram
+WorkingDirectory=%h/dev/misc/synthia
+EnvironmentFile=%h/.config/synthia/brain.env
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/dev/misc/synthia/venv/bin/synthia-brain telegram
 Restart=always
 RestartSec=5
 

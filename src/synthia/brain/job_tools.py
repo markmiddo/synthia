@@ -27,8 +27,9 @@ def make_tools(manager: JobManager) -> list[SdkMcpTool[Any]]:
         "dispatch_job",
         "Run a long task in the background as a headless Claude Code worker in the eventflo "
         "folder. Use for anything over about thirty seconds (morning briefing, builds, audits). "
-        "The prompt can be a skill like '/morning' or plain instructions. Returns immediately; "
-        "you will be told when it finishes.",
+        "The prompt can be a skill like '/morning' or plain instructions. Code-changing jobs go "
+        "through /build, which works in its own worktree. Returns immediately; you will be told "
+        "when it finishes.",
         {"name": str, "prompt": str},
     )
     async def dispatch_job(args: dict[str, Any]) -> dict[str, Any]:

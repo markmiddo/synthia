@@ -98,7 +98,7 @@ before any other work; if API key is required, the model default becomes a cost 
 - In-process MCP server (`create_sdk_mcp_server`) exposing four tools to the concierge:
   `dispatch_job(name, prompt)`, `job_status(name)`, `list_jobs()`, `cancel_job(name)`.
 - **Worker:** `claude -p "<prompt>" --output-format json` subprocess, `cwd` = eventflo root, same settings
-  sources, `--permission-mode acceptEdits` plus the same allowlist as the concierge. `morning` is simply
+  sources, `--permission-mode acceptEdits` plus its own worker allowlist (`worker_allowed_tools`: Bash, file tools, Skill, Task, and the connector servers); safety comes from the synced PreToolUse security-gate hook, which can only block, never approve. `morning` is simply
   the prompt `/morning`. Workers that touch git must use a worktree (the `/build` skill already does).
 - **State:** one JSON file per job under `~/.local/share/synthia/brain/jobs/<id>.json` with
   `name, prompt, pid, started, finished, ok, summary, log_path`. Stdout/stderr to `<id>.log`.
@@ -155,11 +155,17 @@ before any other work; if API key is required, the model default becomes a cost 
   patterns deny outright; "risky" patterns (git push, prod DB writes, deletes, deploys) request **voice
   confirmation**: the brain says what it wants to do, the transport waits up to two minutes for a reply
   containing an explicit yes, otherwise deny. Confirmation applies to that one call only.
-- Workers inherit the same allowlist and gate (as a PreToolUse hook), run in worktrees, never on the
-  concierge's checkout.
+- Workers use `worker_allowed_tools` and the PreToolUse security-gate hook (server policy: HIGH and
+  CRITICAL denied outright, no GUI prompt). `~/dev/eventflo` is a directory of repos, not one git
+  repo, so workers run with that cwd; any code-changing job goes through `/build`, which uses
+  worktrees.
+- Any `mcp__` connector tool whose action is not clearly read-only (get/list/search/fetch/read/
+  query/ping/download and friends) needs the same voice confirmation: sending mail, updating a
+  Notion page, sharing a Drive file or dispatching an Eva Core task are all confirmed.
 - Server has no inbound ports for this; Telegram is outbound long-polling. Bot token and keys live in
   `~/.config/synthia/brain.env` (mode 600), loaded by the systemd unit.
-- Logs: one line per turn (transcript, reply length, latency) to journald; never log audio.
+- Logs: one line per turn (input length, reply length, latency) to journald; never log audio or
+  transcripts.
 
 ## Testing
 

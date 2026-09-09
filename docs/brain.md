@@ -20,6 +20,18 @@ Prerequisites on the server: `claude` CLI logged in (`claude login`), eventflo r
 `~/.claude/settings.json` with the security-gate PreToolUse hook that workers rely on), and `ffmpeg`
 installed (`sudo apt install ffmpeg`).
 
+The systemd units use `%h` for the home directory, so the repo must live at `~/dev/misc/synthia`
+and the venv at `~/dev/misc/synthia/venv`.
+
+`install.sh` will not start the service while `brain.env` still holds the placeholder token; it
+prints the two edit steps and exits, so re-run it once the token and allowed user id are real.
+
+It also copies `deploy/brain/security-policy.yaml` to `~/.config/synthia/security/policy.yaml`
+(only if that file does not already exist). On a headless server the security-gate hook would
+otherwise wait thirty seconds for a GUI answer to every HIGH-severity hit and then deny anyway;
+the policy denies HIGH and CRITICAL outright instead. Voice confirmation is unaffected — git push,
+PR merges, service restarts and connector mutations are brain gate rules, not security_gate rules.
+
 ## Run from the desktop (text only)
 
     synthia-brain repl -v
@@ -40,6 +52,12 @@ A risky action is read out as a voice note ending in 'Say yes to confirm'; reply
 - Risky tool calls (git push, PR merge, service restarts, database writes) are read out and need a
   spoken "yes" within two minutes, otherwise denied.
 - A new session starts each day with a five-line handover from the previous one.
+- Background workers run headless, so nobody can answer a permission prompt for them. They get
+  their own allowlist (`worker_allowed_tools` in `brain.yaml`: Bash, the file tools, Skill, Task
+  and the connector servers) — wider than the concierge's read-only one. What actually stops a
+  dangerous worker call is the synced PreToolUse security-gate hook. Code-changing jobs go through
+  `/build`, which works in its own worktree.
+- Job records and worker logs older than fourteen days are pruned at startup.
 
 ## Troubleshooting
 
