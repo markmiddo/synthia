@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from synthia.brain.jobs import JobRecord
+from synthia.brain.transports import telegram as telegram_module
 from synthia.brain.transports.telegram import TelegramTransport, is_yes
 
 
@@ -15,6 +16,17 @@ class FakeBrain:
         self.new_sessions = 0
         self._events: asyncio.Queue = asyncio.Queue()
         self.jobs = SimpleNamespace(list_jobs=lambda: [])
+        self.acked: list = []
+        self.requeued: list = []
+        # Raise this many times from events() before yielding normally (test hook).
+        self.fail_events_times = 0
+
+    def ack(self, rec):
+        rec.delivered = True
+        self.acked.append(rec)
+
+    def requeue(self, rec):
+        self.requeued.append(rec)
 
     async def send(self, text):
         self.sent.append(text)
@@ -28,6 +40,9 @@ class FakeBrain:
         self.new_sessions += 1
 
     async def events(self):
+        if self.fail_events_times > 0:
+            self.fail_events_times -= 1
+            raise RuntimeError("events() blew up")
         while True:
             yield await self._events.get()
 
@@ -162,6 +177,8 @@ async def test_pump_events_pushes_voice(parts):
     await asyncio.sleep(0.05)
     pump.cancel()
     assert bot.voices[-1] == (1, "Briefing is done, two meetings today.")
+    assert brain.acked == [rec]
+    assert rec.delivered is True
 
 
 def test_build_app_enables_concurrent_updates(parts):
@@ -200,3 +217,60 @@ async def test_speak_cleans_up_on_send_failure(parts):
     with pytest.raises(RuntimeError):
         await tr._speak(bot, 1, "hello")
     assert not ogg_path.exists()
+
+
+async def test_pump_events_requeues_when_no_chat(parts, monkeypatch):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    monkeypatch.setattr(telegram_module, "EVENT_RETRY_DELAY_S", 0.01)
+    tr.chat_id = None
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert brain.requeued == [rec]
+    assert brain.acked == []
+    assert rec.delivered is False
+    assert bot.voices == []
+
+
+async def test_pump_events_restarts_when_events_raises(parts, monkeypatch):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    monkeypatch.setattr(telegram_module, "EVENT_RETRY_DELAY_S", 0.01)
+    brain.fail_events_times = 1
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await asyncio.sleep(0.05)
+    await brain._events.put(SpokenEvent(rec, "Briefing is done after the crash."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert bot.voices[-1] == (1, "Briefing is done after the crash.")
+
+
+async def test_confirm_denies_a_second_request_while_one_is_pending(parts):
+    brain, speech, bot, tr, ctx = parts
+    tr.bot = bot
+    first = asyncio.create_task(tr.confirm("run git push origin main"))
+    await asyncio.sleep(0.01)
+    pending = tr._pending_confirm
+
+    assert await tr.confirm("run gh pr merge 1") is False
+    assert tr._pending_confirm is pending  # the first waiter was not stranded
+
+    await tr.on_text(_update(text="yes", bot=bot), ctx)
+    assert await first is True
+
+
+async def test_non_yes_answer_is_taken_as_no(parts):
+    brain, speech, bot, tr, ctx = parts
+    tr.bot = bot
+    task = asyncio.create_task(tr.confirm("run git push origin main"))
+    await asyncio.sleep(0.01)
+    await tr.on_text(_update(text="no, leave it", bot=bot), ctx)
+    assert await task is False
+    assert any(t == "Taken as no." for _, t in bot.texts)
+    assert brain.sent == []

@@ -28,6 +28,9 @@ _YES = re.compile(r"\b(yes|yep|yeah|confirm|confirmed|go ahead|do it|approved)\b
 # Telegram caps voice message captions at 1024 characters.
 CAPTION_LIMIT = 1024
 
+# How long to wait before retrying an event we could not push, or restarting a crashed pump.
+EVENT_RETRY_DELAY_S = 30
+
 # python-telegram-bot's Application is generic over six type parameters; we don't
 # customise any of them, so spell them out as Any rather than reach for # type: ignore.
 # Only a type alias, so it stays resolvable when the package is not installed.
@@ -101,7 +104,10 @@ class TelegramTransport:
         if self.chat_id is None:
             self.chat_id = chat_id
         if self._pending_confirm is not None and not self._pending_confirm.done():
-            self._pending_confirm.set_result(is_yes(text))
+            answer = is_yes(text)
+            self._pending_confirm.set_result(answer)
+            if not answer and update.message is not None:
+                await update.message.reply_text("Taken as no.")
             return
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
         t0 = time.monotonic()
@@ -177,6 +183,10 @@ class TelegramTransport:
         if self.bot is None or self.chat_id is None:
             logger.warning("confirm requested with no chat; denying: %s", question)
             return False
+        if self._pending_confirm is not None and not self._pending_confirm.done():
+            # Overwriting the future would strand the first waiter forever.
+            logger.warning("confirmation already pending; denying: %s", question)
+            return False
         loop = asyncio.get_running_loop()
         self._pending_confirm = loop.create_future()
         await self._speak(self.bot, self.chat_id, f"I want to {question}. Say yes to confirm.")
@@ -191,17 +201,33 @@ class TelegramTransport:
     # ---- job events ----
 
     async def pump_events(self, bot: Any) -> None:
-        async for ev in self.brain.events():
+        """Push finished-job events as voice notes, for the life of the process.
+
+        Restarts itself if `events()` raises: the pump is the only thing that tells Mark
+        a job finished, so it must outlive a bad turn.
+        """
+        while True:
             try:
-                if self.chat_id is None:
-                    logger.warning("job event with no chat id; dropping %s", ev.job.id)
-                    continue
-                await self._speak(bot, self.chat_id, ev.text or f"{ev.job.name} finished.")
+                async for ev in self.brain.events():
+                    try:
+                        if self.chat_id is None:
+                            # No chat yet (Mark has not messaged since boot); keep it.
+                            logger.warning("job event with no chat id; requeuing %s", ev.job.id)
+                            self.brain.requeue(ev.job)
+                            await asyncio.sleep(EVENT_RETRY_DELAY_S)
+                            continue
+                        await self._speak(bot, self.chat_id, ev.text or f"{ev.job.name} finished.")
+                        self.brain.ack(ev.job)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("event push failed")
+                        continue
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("event push failed")
-                continue
+                logger.exception("event pump crashed; restarting")
+                await asyncio.sleep(EVENT_RETRY_DELAY_S)
 
     # ---- wiring ----
 
