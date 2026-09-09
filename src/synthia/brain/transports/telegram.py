@@ -8,11 +8,16 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from telegram import Update
-from telegram.constants import ChatAction
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+try:
+    from telegram import Update
+    from telegram.constants import ChatAction
+    from telegram.ext import Application, CommandHandler, MessageHandler, filters
+
+    HAS_TELEGRAM = True
+except ImportError:  # pragma: no cover - only hit without the `brain` extra
+    HAS_TELEGRAM = False
 
 from synthia.brain.config import BrainConfig
 
@@ -25,7 +30,13 @@ CAPTION_LIMIT = 1024
 
 # python-telegram-bot's Application is generic over six type parameters; we don't
 # customise any of them, so spell them out as Any rather than reach for # type: ignore.
-TelegramApp = Application[Any, Any, Any, Any, Any, Any]
+# Only a type alias, so it stays resolvable when the package is not installed.
+if TYPE_CHECKING:
+    from telegram.ext import Application as _Application
+
+    TelegramApp = _Application[Any, Any, Any, Any, Any, Any]
+else:
+    TelegramApp = Any
 
 
 def is_yes(text: str) -> bool:
@@ -225,6 +236,11 @@ def run_telegram(cfg: BrainConfig) -> int:
     from synthia.brain.concierge import Brain
     from synthia.brain.speech import Speech
 
+    if not HAS_TELEGRAM:
+        raise RuntimeError(
+            "python-telegram-bot is not installed; install the brain extra with "
+            'pip install -e ".[brain]"'
+        )
     if not cfg.telegram_token:
         print("BRAIN_TELEGRAM_TOKEN is not set")
         return 2

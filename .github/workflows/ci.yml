@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,brain]"
       - run: black --check src/ tests/
       - run: isort --check src/ tests/
 
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,brain]"
       - run: mypy src/synthia/ --ignore-missing-imports
 
   test:
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,brain]"
       - run: pytest --cov=synthia --cov-report=xml tests/
       - uses: codecov/codecov-action@v4
         if: matrix.python-version == '3.12'
