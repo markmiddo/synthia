@@ -46,6 +46,8 @@ Synthia is a voice assistant + dev workstation companion for Linux with:
   - `gui/src-tauri/src/yaml_writer.rs` - comment-preserving config writers
 - `tests/` - pytest test suite (593 tests)
 - `docs/` - Documentation, specs, plans
+- `src/synthia/brain/` - mobile voice brain (Agent SDK concierge, job workers, Telegram transport); see `docs/brain.md`
+- `deploy/brain/` - systemd units and install script for the brain on middo247
 
 ## Brand
 
@@ -198,4 +200,6 @@ Validation never crashes - it warns and uses defaults.
 ./run.sh            # Start voice assistant
 synthia             # Same (if installed)
 synthia-dash        # TUI dashboard
+synthia-brain repl      # Text REPL against the voice brain (desktop testing)
+synthia-brain telegram  # Telegram voice transport (runs on middo247)
 ```
