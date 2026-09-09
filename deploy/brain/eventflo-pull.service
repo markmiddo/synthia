@@ -1,0 +1,6 @@
+[Unit]
+Description=Fast-forward pull of eventflo repos for the Synthia brain
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'for r in %h/dev/eventflo/*/; do [ -d "$r/.git" ] || continue; git -C "$r" pull --ff-only || echo "pull failed in $r" >&2; done'

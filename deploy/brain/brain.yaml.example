@@ -1,0 +1,36 @@
+# Copy to ~/.config/synthia/brain.yaml
+cwd: ~/dev/eventflo
+repos:
+  - ~/dev/eventflo/eva-ai
+  - ~/dev/eventflo/eva-core
+  - ~/dev/eventflo/admin-panel
+language: en-AU
+voice: en-AU-Neural2-B
+phrase_hints: [eventflo, Eva, Eva Core, Barry, FloSale, Vishal, Corey]
+telegram_allowed_users: [111111111]
+telegram_chat_id: 111111111
+max_workers: 2
+job_timeout_s: 1800
+confirm_timeout_s: 120
+
+# Tools headless background workers may use. Anything outside this list is denied
+# (there is nobody to answer a permission prompt); the synced PreToolUse security-gate
+# hook is what actually blocks dangerous calls. Uncomment to override the default:
+# worker_allowed_tools:
+#   - Bash
+#   - Read
+#   - Write
+#   - Edit
+#   - Glob
+#   - Grep
+#   - Skill
+#   - Task
+#   - TodoWrite
+#   - WebFetch
+#   - WebSearch
+#   - mcp__claude_ai_Gmail__*
+#   - mcp__claude_ai_Google_Calendar__*
+#   - mcp__claude_ai_Google_Drive__*
+#   - mcp__claude_ai_Notion__*
+#   - mcp__eva-core__*
+#   - mcp__tavily__*
