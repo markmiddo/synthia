@@ -70,6 +70,7 @@ class TelegramTransport:
         self.work_dir = work_dir
         self.bot: Any = None
         self._pending_confirm: asyncio.Future[bool] | None = None
+        self._pump_task: asyncio.Task[None] | None = None
 
     # ---- helpers ----
 
@@ -251,9 +252,17 @@ class TelegramTransport:
     async def _post_init(self, app: TelegramApp) -> None:
         self.bot = app.bot
         await self.brain.start()
-        app.create_task(self.pump_events(app.bot))
+        # post_init runs before the application is "running", so use a plain
+        # asyncio task and keep the reference; cancelled in _post_shutdown.
+        self._pump_task = asyncio.create_task(self.pump_events(app.bot))
 
     async def _post_shutdown(self, app: TelegramApp) -> None:
+        if self._pump_task is not None:
+            self._pump_task.cancel()
+            try:
+                await self._pump_task
+            except asyncio.CancelledError:
+                pass
         await self.brain.stop()
 
 
