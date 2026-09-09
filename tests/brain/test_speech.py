@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from google.cloud import speech
 
-from synthia.brain.speech import Speech, split_for_tts
+from synthia.brain.speech import FFMPEG_TIMEOUT_S, Speech, _ffmpeg_pcm16k, split_for_tts
 
 
 def test_split_for_tts_respects_limit_and_sentences():
@@ -92,6 +92,22 @@ def test_transcribe_ogg_ffmpeg_missing_raises(tmp_path):
     sp = Speech("en-AU", "v", [], decoder=broken_decoder)
     with pytest.raises(RuntimeError, match="ffmpeg not found"):
         sp.transcribe_ogg(ogg)
+
+
+def test_ffmpeg_timeout_becomes_runtime_error(tmp_path, monkeypatch):
+    """A hung ffmpeg must not wedge the transport's worker thread forever."""
+    import subprocess
+
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="ffmpeg timed out"):
+        _ffmpeg_pcm16k(tmp_path / "note.ogg")
+    assert seen["timeout"] == FFMPEG_TIMEOUT_S
 
 
 def test_speak_to_ogg_chunks_and_writes(tmp_path):

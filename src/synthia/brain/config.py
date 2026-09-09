@@ -76,6 +76,36 @@ class BrainConfig:
 
 _PATH_FIELDS = {"cwd", "state_dir"}
 _PATH_LIST_FIELDS = {"repos"}
+_INT_FIELDS = {"max_workers", "job_timeout_s", "confirm_timeout_s"}
+
+
+def _coerce_int(key: str, value: Any, default: Any) -> Any:
+    """Ints from YAML are frequently strings or typos; never crash the brain over one."""
+    if isinstance(value, bool) or value is None:
+        logger.warning("brain.yaml: %s must be a number, got %r; using %r", key, value, default)
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.warning("brain.yaml: %s must be a number, got %r; using %r", key, value, default)
+        return default
+
+
+def _coerce_int_list(key: str, value: Any, default: list[int]) -> list[int]:
+    if not isinstance(value, (list, tuple)):
+        logger.warning("brain.yaml: %s must be a list, got %r; using %r", key, value, default)
+        return list(default)
+    out: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            logger.warning("brain.yaml: %s entry %r is not a number; using %r", key, item, default)
+            return list(default)
+        try:
+            out.append(int(item))
+        except (TypeError, ValueError):
+            logger.warning("brain.yaml: %s entry %r is not a number; using %r", key, item, default)
+            return list(default)
+    return out
 
 
 def load_brain_config(
@@ -86,9 +116,18 @@ def load_brain_config(
     env = os.environ if env is None else env
     raw: dict[str, Any] = {}
     if path.exists():
-        with open(path) as f:
-            raw = yaml.safe_load(f) or {}
+        try:
+            with open(path) as f:
+                loaded = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            logger.warning("Could not read %s: %s; using defaults", path, exc)
+            loaded = {}
+        if isinstance(loaded, dict):
+            raw = loaded
+        else:
+            logger.warning("%s is not a mapping; using defaults", path)
 
+    defaults = BrainConfig()
     known = {f.name for f in fields(BrainConfig)}
     kwargs: dict[str, Any] = {}
     for key, value in raw.items():
@@ -99,6 +138,12 @@ def load_brain_config(
             kwargs[key] = Path(os.path.expanduser(str(value)))
         elif key in _PATH_LIST_FIELDS:
             kwargs[key] = [Path(os.path.expanduser(str(v))) for v in value]
+        elif key in _INT_FIELDS:
+            kwargs[key] = _coerce_int(key, value, getattr(defaults, key))
+        elif key == "telegram_chat_id":
+            kwargs[key] = None if value is None else _coerce_int(key, value, None)
+        elif key == "telegram_allowed_users":
+            kwargs[key] = _coerce_int_list(key, value, defaults.telegram_allowed_users)
         else:
             kwargs[key] = value
 

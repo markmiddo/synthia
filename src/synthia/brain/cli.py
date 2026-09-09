@@ -101,11 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "repl":
         asyncio.run(_run_repl(cfg))
         return 0
-    if args.command == "telegram":
-        from synthia.brain.transports.telegram import run_telegram
+    from synthia.brain.transports.telegram import run_telegram
 
-        return run_telegram(cfg)
-    return 2
+    return run_telegram(cfg)
 
 
 if __name__ == "__main__":

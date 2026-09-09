@@ -19,12 +19,19 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 STT_SAMPLE_RATE = 16000
+# A voice note is seconds of audio; anything past this means ffmpeg is stuck.
+FFMPEG_TIMEOUT_S = 60
 TTS_CHUNK_LIMIT = 3000
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 def _ffmpeg_pcm16k(path: Path) -> bytes:
-    """Decode OGG file to PCM 16-bit mono at 16000 Hz via ffmpeg."""
+    """Decode OGG file to PCM 16-bit mono at 16000 Hz via ffmpeg.
+
+    Raises RuntimeError if ffmpeg is missing or takes longer than FFMPEG_TIMEOUT_S
+    (a hung decoder must not wedge the transport's worker thread forever), and
+    CalledProcessError if ffmpeg itself fails.
+    """
     try:
         result = subprocess.run(
             [
@@ -45,10 +52,13 @@ def _ffmpeg_pcm16k(path: Path) -> bytes:
             ],
             capture_output=True,
             check=True,
+            timeout=FFMPEG_TIMEOUT_S,
         )
         return result.stdout
     except FileNotFoundError as e:
         raise RuntimeError("ffmpeg not found") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("ffmpeg timed out") from e
 
 
 def split_for_tts(text: str, limit: int = TTS_CHUNK_LIMIT) -> list[str]:
