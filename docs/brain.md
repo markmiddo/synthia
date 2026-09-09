@@ -85,3 +85,10 @@ Every turn, dispatched job, job result and confirmation decision is appended to
 eventflo memory folder to the server every 10 minutes and pull the memory folder back (stopgap until
 Syncthing). Install: copy the script to `~/.claude/hooks/`, the units to `~/.config/systemd/user/`,
 then `systemctl --user enable --now brain-sync.timer`.
+
+## Reminders from the walk
+
+"Remind me to X" on the walk becomes a `note` item in the personal inbox (`~/.claude/tasks/inbox.py add note`).
+The inbox script and its JSON are synced both ways by `brain-sync.timer`, and the SessionStart hook pulls
+`inbox.json` and lists open notes, so a reminder set by voice shows up in the next desktop session and
+can be ticked off from either side.
