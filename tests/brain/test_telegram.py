@@ -52,8 +52,13 @@ class FakeBot:
         self.voices = []
         self.actions = []
         self.texts = []
+        # Raise this many times from send_voice before succeeding (test hook).
+        self.fail_send_voice_times = 0
 
     async def send_voice(self, chat_id, voice, caption=None, **kw):
+        if self.fail_send_voice_times > 0:
+            self.fail_send_voice_times -= 1
+            raise RuntimeError("send_voice failed")
         self.voices.append((chat_id, caption))
 
     async def send_chat_action(self, chat_id, action):
@@ -157,3 +162,41 @@ async def test_pump_events_pushes_voice(parts):
     await asyncio.sleep(0.05)
     pump.cancel()
     assert bot.voices[-1] == (1, "Briefing is done, two meetings today.")
+
+
+def test_build_app_enables_concurrent_updates(parts):
+    brain, speech, bot, tr, ctx = parts
+    app = tr.build_app("123:abc")
+    assert app.concurrent_updates
+    assert app.concurrent_updates > 1
+
+
+async def test_pump_events_survives_send_failure(parts):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    bot.fail_send_voice_times = 1
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "first event, send fails"))
+    await asyncio.sleep(0.05)
+    await brain._events.put(SpokenEvent(rec, "second event, delivered"))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert bot.voices[-1] == (1, "second event, delivered")
+
+
+async def test_on_error_notifies_chat(parts):
+    brain, speech, bot, tr, ctx = parts
+    fake_ctx = SimpleNamespace(bot=bot, error=RuntimeError("boom"))
+    await tr.on_error(None, fake_ctx)
+    assert any(t == "Something went wrong on my end. Try again?" for _, t in bot.texts)
+
+
+async def test_speak_cleans_up_on_send_failure(parts):
+    brain, speech, bot, tr, ctx = parts
+    bot.fail_send_voice_times = 1
+    ogg_path = tr.work_dir / "out" / "1.ogg"
+    with pytest.raises(RuntimeError):
+        await tr._speak(bot, 1, "hello")
+    assert not ogg_path.exists()

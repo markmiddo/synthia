@@ -12,7 +12,7 @@ from typing import Any
 
 from telegram import Update
 from telegram.constants import ChatAction
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from synthia.brain.config import BrainConfig
 
@@ -72,11 +72,18 @@ class TelegramTransport:
             logger.error("TTS failed: %s", e)
             await bot.send_message(chat_id=chat_id, text=text)
             return
+        if not files:
+            await bot.send_message(chat_id=chat_id, text=text)
+            return
         caption = _truncate_caption(text)
         for i, path in enumerate(files):
-            with open(path, "rb") as f:
-                await bot.send_voice(chat_id=chat_id, voice=f, caption=caption if i == 0 else None)
-            path.unlink(missing_ok=True)
+            try:
+                with open(path, "rb") as f:
+                    await bot.send_voice(
+                        chat_id=chat_id, voice=f, caption=caption if i == 0 else None
+                    )
+            finally:
+                path.unlink(missing_ok=True)
 
     async def _handle_text(self, update: Any, context: Any, text: str) -> None:
         chat_id = update.effective_chat.id
@@ -119,29 +126,39 @@ class TelegramTransport:
                 return
         finally:
             ogg_path.unlink(missing_ok=True)
-        if not text:
+        if not text.strip():
             await update.message.reply_text("Couldn't make that out. Say it again?")
             return
         await self._handle_text(update, context, text)
 
     async def on_stop(self, update: Any, context: Any) -> None:
-        if not self._authorised(update):
+        if not self._authorised(update) or not update.message:
             return
         await self.brain.interrupt()
         await update.message.reply_text("Stopped.")
 
     async def on_new(self, update: Any, context: Any) -> None:
-        if not self._authorised(update):
+        if not self._authorised(update) or not update.message:
             return
         await self.brain.new_session()
         await update.message.reply_text("Fresh session.")
 
     async def on_jobs(self, update: Any, context: Any) -> None:
-        if not self._authorised(update):
+        if not self._authorised(update) or not update.message:
             return
         jobs = self.brain.jobs.list_jobs()
         text = "No jobs." if not jobs else "\n".join(f"{j.name}: {j.status}" for j in jobs)
         await update.message.reply_text(text)
+
+    async def on_error(self, update: Any, context: Any) -> None:
+        logger.exception("unhandled error in telegram handler", exc_info=context.error)
+        if self.chat_id is not None:
+            try:
+                await context.bot.send_message(
+                    chat_id=self.chat_id, text="Something went wrong on my end. Try again?"
+                )
+            except Exception as e:
+                logger.error("failed to notify chat of error: %s", e)
 
     # ---- confirmation (Confirmer for the brain's gate) ----
 
@@ -164,26 +181,43 @@ class TelegramTransport:
 
     async def pump_events(self, bot: Any) -> None:
         async for ev in self.brain.events():
-            if self.chat_id is None:
-                logger.warning("job event with no chat id; dropping %s", ev.job.id)
+            try:
+                if self.chat_id is None:
+                    logger.warning("job event with no chat id; dropping %s", ev.job.id)
+                    continue
+                await self._speak(bot, self.chat_id, ev.text or f"{ev.job.name} finished.")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("event push failed")
                 continue
-            await self._speak(bot, self.chat_id, ev.text or f"{ev.job.name} finished.")
 
     # ---- wiring ----
 
     def build_app(self, token: str) -> TelegramApp:
-        app: TelegramApp = Application.builder().token(token).post_init(self._post_init).build()
+        app: TelegramApp = (
+            Application.builder()
+            .token(token)
+            .concurrent_updates(True)
+            .post_init(self._post_init)
+            .post_shutdown(self._post_shutdown)
+            .build()
+        )
         app.add_handler(CommandHandler("stop", self.on_stop))
         app.add_handler(CommandHandler("new", self.on_new))
         app.add_handler(CommandHandler("jobs", self.on_jobs))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_text))
         app.add_handler(MessageHandler(filters.VOICE, self.on_voice))
+        app.add_error_handler(self.on_error)
         return app
 
     async def _post_init(self, app: TelegramApp) -> None:
         self.bot = app.bot
         await self.brain.start()
         app.create_task(self.pump_events(app.bot))
+
+    async def _post_shutdown(self, app: TelegramApp) -> None:
+        await self.brain.stop()
 
 
 def run_telegram(cfg: BrainConfig) -> int:
@@ -194,6 +228,8 @@ def run_telegram(cfg: BrainConfig) -> int:
     if not cfg.telegram_token:
         print("BRAIN_TELEGRAM_TOKEN is not set")
         return 2
+    if not cfg.telegram_allowed_users:
+        logger.warning("no allowed users configured; every message will be ignored")
     pull_repos(cfg.repos)
     work_dir = cfg.state_dir / "audio"
     work_dir.mkdir(parents=True, exist_ok=True)
