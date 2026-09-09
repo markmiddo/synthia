@@ -8,8 +8,14 @@ JOURNAL_DIR="$HOME/.claude/projects/-home-markmiddo-dev-eventflo/memory/walk"
 TODAY="$(date +%F)"
 mkdir -p "$JOURNAL_DIR"
 timeout 8 rsync -aq --update "server:$JOURNAL_DIR/" "$JOURNAL_DIR/" 2>/dev/null || true
+timeout 8 rsync -aq --update "server:$HOME/.claude/tasks/inbox.json" "$HOME/.claude/tasks/inbox.json" 2>/dev/null || true
 FILE="$JOURNAL_DIR/$TODAY.md"
 if [ -s "$FILE" ]; then
   echo "WALK JOURNAL for today (Mark talked to Synthia on the walk; already done — do not redo):"
   tail -n 60 "$FILE"
+fi
+NOTES="$(python3 "$HOME/.claude/tasks/inbox.py" list 2>/dev/null | grep ' NOTE ' || true)"
+if [ -n "$NOTES" ]; then
+  echo "OPEN NOTES (Mark asked to be reminded; from ~/.claude/tasks/inbox.py):"
+  echo "$NOTES"
 fi

@@ -10,3 +10,7 @@ timeout 20 rsync -aq --update "$H/.claude/CLAUDE.md" "$S:$H/.claude/CLAUDE.md" 2
 MEM="$H/.claude/projects/-home-markmiddo-dev-eventflo/memory"
 timeout 60 rsync -aq --update "$MEM/" "$S:$MEM/" 2>/dev/null || true
 timeout 60 rsync -aq --update "$S:$MEM/" "$MEM/" 2>/dev/null || true
+# personal task inbox (script + data), both ways, newest file wins
+mkdir -p "$H/.claude/tasks"
+timeout 20 rsync -aq --update "$H/.claude/tasks/" "$S:$H/.claude/tasks/" 2>/dev/null || true
+timeout 20 rsync -aq --update "$S:$H/.claude/tasks/" "$H/.claude/tasks/" 2>/dev/null || true
