@@ -62,6 +62,7 @@ def sanitize_terminal_input(text: str) -> str:
 
 try:
     from telegram import Update
+    from telegram.error import Conflict as TelegramConflict
     from telegram.ext import (
         Application,
         CommandHandler,
@@ -98,6 +99,7 @@ class SynthiaBot:
         self.bot_token = bot_token
         self.allowed_users = allowed_users
         self.app = None
+        self.token_conflict = False
 
         # Load config and initialize components
         self.config = load_config()
@@ -815,9 +817,32 @@ class SynthiaBot:
         self.app.add_handler(MessageHandler(filters.Document.ALL, self.handle_document))
         self.app.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
 
+        # If anything else is polling this token (the mobile brain on the
+        # server uses the same bot), Telegram answers getUpdates with 409
+        # Conflict. Two pollers fight forever and the other side spams its
+        # error handler, so back off: stop cleanly and exit 0 so systemd's
+        # Restart=on-failure does not bring us straight back.
+        self.app.add_error_handler(self._on_error)
+
         # Run the bot
         logger.info("Bot is ready! Listening for messages...")
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
+        if self.token_conflict:
+            logger.error(
+                "exiting: another bot instance (probably the Synthia brain on the "
+                "server) is polling this token"
+            )
+
+    async def _on_error(self, update, context):
+        """Log handler errors; stop the bot on a token Conflict."""
+        err = context.error
+        if isinstance(err, TelegramConflict):
+            if not self.token_conflict:
+                self.token_conflict = True
+                logger.error("telegram token conflict: %s", err)
+                self.app.stop_running()
+            return
+        logger.error("unhandled error in telegram handler: %s", err, exc_info=err)
 
 
 def send_telegram_notification(message: str):

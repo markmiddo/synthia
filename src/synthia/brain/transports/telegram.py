@@ -29,6 +29,9 @@ _YES = re.compile(r"\b(yes|yep|yeah|confirm|confirmed|go ahead|do it|approved)\b
 # Telegram caps voice message captions at 1024 characters.
 CAPTION_LIMIT = 1024
 
+# Rate limit for the "someone else has my token" chat notice.
+CONFLICT_NOTIFY_INTERVAL_S = 3600
+
 # How long to wait before retrying an event we could not push, or restarting a crashed pump.
 EVENT_RETRY_DELAY_S = 30
 
@@ -72,6 +75,7 @@ class TelegramTransport:
         self.bot: Any = None
         self._pending_confirm: asyncio.Future[bool] | None = None
         self._pump_task: asyncio.Task[None] | None = None
+        self._conflict_notified_at: float | None = None
 
     # ---- helpers ----
 
@@ -182,6 +186,7 @@ class TelegramTransport:
                     "telegram getUpdates conflict: another bot instance is polling "
                     "this token; stop the other instance"
                 )
+                await self._notify_conflict(context.bot)
             else:
                 logger.exception("telegram polling error", exc_info=err)
             return
@@ -193,6 +198,28 @@ class TelegramTransport:
                 )
             except Exception as e:
                 logger.error("failed to notify chat of error: %s", e)
+
+    async def _notify_conflict(self, bot: Any) -> None:
+        """Tell Mark once per hour that something else is using the bot token."""
+        now = time.monotonic()
+        if self.chat_id is None:
+            return
+        last = self._conflict_notified_at
+        if last is not None and now - last < CONFLICT_NOTIFY_INTERVAL_S:
+            return
+        self._conflict_notified_at = now
+        try:
+            await bot.send_message(
+                chat_id=self.chat_id,
+                text=(
+                    "Another bot is polling my Telegram token, so I can't hear you. "
+                    "Usually the old desktop Synthia bot: run "
+                    "`systemctl --user stop synthia-telegram` on the desktop. "
+                    "I'll say this again in an hour if it's still happening."
+                ),
+            )
+        except Exception as e:
+            logger.error("failed to notify chat of token conflict: %s", e)
 
     # ---- confirmation (Confirmer for the brain's gate) ----
 

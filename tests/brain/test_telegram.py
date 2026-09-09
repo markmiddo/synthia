@@ -211,18 +211,29 @@ async def test_on_error_notifies_chat(parts):
     assert any(t == "Something went wrong on my end. Try again?" for _, t in bot.texts)
 
 
-async def test_on_error_polling_conflict_stays_quiet(parts):
+async def test_on_error_polling_conflict_warns_once_per_hour(parts, monkeypatch):
     """A getUpdates Conflict (second bot on the token) has no update to answer.
 
     Regression: a duplicate poller made the brain post "Something went wrong"
-    to the chat every ~35 s for hours.
+    to the chat every ~35 s for hours. Now: one pointed notice, then silence
+    for an hour.
     """
     from telegram.error import Conflict
 
     brain, speech, bot, tr, ctx = parts
+    tr.chat_id = 1
+    clock = [1000.0]
+    monkeypatch.setattr(telegram_module.time, "monotonic", lambda: clock[0])
     fake_ctx = SimpleNamespace(bot=bot, error=Conflict("terminated by other getUpdates request"))
+    for _ in range(5):
+        await tr.on_error(None, fake_ctx)
+        clock[0] += 35
+    assert len(bot.texts) == 1
+    assert "Another bot is polling my Telegram token" in bot.texts[0][1]
+    assert "Something went wrong" not in bot.texts[0][1]
+    clock[0] += 3600
     await tr.on_error(None, fake_ctx)
-    assert bot.texts == []
+    assert len(bot.texts) == 2
 
 
 async def test_on_error_polling_network_error_stays_quiet(parts):
