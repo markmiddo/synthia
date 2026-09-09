@@ -11,7 +11,6 @@ from claude_agent_sdk.types import ToolPermissionContext
 from synthia.hooks.security_gate import (
     CRITICAL,
     HIGH,
-    QUOTING_BINARIES,
     SEV_RANK,
     _binary_of,
     _split_pipeline_stages,
@@ -22,13 +21,66 @@ from synthia.hooks.security_gate import (
 Decision = Literal["allow", "deny", "confirm"]
 Confirmer = Callable[[str], Awaitable[bool]]
 
+# A confirmation is read aloud, so a long command becomes an unlistenable voice note.
+SPOKEN_COMMAND_LIMIT = 120
+
+# MCP connector actions that only read. Anything else on a connector mutates something
+# Mark cares about (send mail, update a page, share a file, dispatch a task), so it needs
+# a spoken yes rather than the default-allow the gate gives unmodelled built-in tools.
+SAFE_MCP_ACTION_PREFIXES = (
+    "get",
+    "list",
+    "search",
+    "fetch",
+    "read",
+    "query",
+    "ping",
+    "whats_running",
+    "job_",
+    "kb_get",
+    "kb_list",
+    "kb_search",
+    "sales_summary",
+    "suggest_time",
+    "download",
+    "notion-search",
+    "notion-fetch",
+    "notion-list",
+    "notion-get",
+    "notion-query",
+    "notion-ai-search",
+    "tavily_",
+)
+
+# The brain's own in-process job server; its tools are the brain's own API.
+_OWN_MCP_SERVER = "jobs"
+
+
+def _mcp_parts(tool_name: str) -> tuple[str, str] | None:
+    """Split `mcp__<server>__<action>` into (server, action), or None if not an MCP tool."""
+    parts = tool_name.split("__")
+    if parts[0] != "mcp" or len(parts) < 3:
+        return None
+    return parts[1], parts[-1]
+
+
+def _truncate_spoken(text: str, limit: int = SPOKEN_COMMAND_LIMIT) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "\u2026"
+
 
 def describe(tool_name: str, tool_input: dict[str, Any]) -> str:
     if tool_name == "Bash":
-        return f"run {tool_input.get('command', '') or ''}".strip()
+        cmd = _truncate_spoken(str(tool_input.get("command", "") or ""))
+        return f"run {cmd}".strip()
     if tool_name in ("Write", "Edit", "NotebookEdit"):
         verb = "write" if tool_name == "Write" else "edit"
         return f"{verb} {tool_input.get('file_path', '') or ''}".strip()
+    parts = _mcp_parts(tool_name)
+    if parts is not None:
+        server, action = parts
+        return f"use {server} {action}"
     return f"use {tool_name}"
 
 
@@ -129,6 +181,11 @@ def classify(tool_name: str, tool_input: dict[str, Any]) -> tuple[Decision, str]
         action = risky_action(cmd)
         if action:
             return "confirm", f"risky action {action}"
+    parts = _mcp_parts(tool_name)
+    if parts is not None:
+        server, action = parts
+        if server != _OWN_MCP_SERVER and not action.startswith(SAFE_MCP_ACTION_PREFIXES):
+            return "confirm", f"connector action {action}"
     return "allow", "ok"
 
 

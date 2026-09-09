@@ -27,6 +27,14 @@ from synthia.brain.gate import classify, describe, make_can_use_tool
         ("Bash", {"command": "./deploy.sh production"}, "confirm"),
         ("Bash", {"command": "rm -rf node_modules"}, "confirm"),
         ("Bash", {"command": "gh release create v1.2"}, "confirm"),
+        ("mcp__claude_ai_Gmail__send_message", {}, "confirm"),
+        ("mcp__claude_ai_Gmail__search_threads", {}, "allow"),
+        ("mcp__claude_ai_Notion__notion-update-page", {}, "confirm"),
+        ("mcp__claude_ai_Google_Drive__share_file", {}, "confirm"),
+        ("mcp__eva-core__task_dispatch", {}, "confirm"),
+        ("mcp__eva-core__job_list", {}, "allow"),
+        ("mcp__jobs__dispatch_job", {}, "allow"),
+        ("TodoWrite", {"todos": []}, "allow"),
     ],
 )
 def test_classify(tool, inp, expected):
@@ -39,6 +47,16 @@ def test_describe_bash_and_write():
     assert describe("Write", {"file_path": "/a/b.py"}) == "write /a/b.py"
     assert describe("Edit", {"file_path": "/a/b.py"}) == "edit /a/b.py"
     assert describe("Weird", {"x": 1}) == "use Weird"
+
+
+def test_describe_truncates_long_commands():
+    spoken = describe("Bash", {"command": "echo " + "x" * 400})
+    assert len(spoken) <= len("run ") + 120
+    assert spoken.endswith("\u2026")
+
+
+def test_describe_mcp_strips_the_prefix():
+    assert describe("mcp__claude_ai_Gmail__send_message", {}) == "use claude_ai_Gmail send_message"
 
 
 async def test_can_use_tool_paths():
