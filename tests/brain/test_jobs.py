@@ -3,7 +3,14 @@ import json
 
 import pytest
 
-from synthia.brain.jobs import JobFinished, JobManager, JobStore, summarize
+from synthia.brain.jobs import (
+    JobFinished,
+    JobManager,
+    JobRecord,
+    JobStore,
+    claude_runner,
+    summarize,
+)
 
 
 def _ok_stdout(text="all done"):
@@ -142,3 +149,40 @@ async def test_cancel_running_job(tmp_path):
     assert ev.job.status == "cancelled"
     assert await mgr.cancel("nope") is False
     await mgr.shutdown()
+
+
+async def test_claude_runner_builds_command(tmp_path, monkeypatch):
+    """The worker subprocess gets the worker allowlist, acceptEdits and the job cwd."""
+    captured: dict = {}
+
+    class FakeProc:
+        pid = 4321
+        returncode = 0
+
+        async def communicate(self):
+            return b'{"is_error": false, "result": "ok"}', b""
+
+    async def fake_exec(*cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["kwargs"] = kwargs
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    tools = ["Bash", "Read", "mcp__eva-core__*"]
+    run = claude_runner(tmp_path, tools)
+    rec = JobRecord(id="j1", name="morning", prompt="/morning", started="t")
+    code, out, err = await run(rec)
+
+    assert (code, err) == (0, "")
+    assert json.loads(out)["result"] == "ok"
+    assert rec.pid == 4321
+
+    cmd = captured["cmd"]
+    assert cmd[0] == "claude"
+    assert cmd[1] == "-p"
+    assert cmd[2] == "/morning"
+    assert cmd[cmd.index("--output-format") + 1] == "json"
+    assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+    assert cmd[cmd.index("--allowedTools") + 1] == "Bash,Read,mcp__eva-core__*"
+    assert captured["kwargs"]["cwd"] == str(tmp_path)

@@ -30,6 +30,28 @@ DEFAULT_ALLOWED_TOOLS = [
     "mcp__jobs__cancel_job",
 ]
 
+# Workers are headless: nobody can answer a permission prompt, so anything not in this
+# list is denied outright. Safety comes from the synced PreToolUse security-gate hook.
+DEFAULT_WORKER_ALLOWED_TOOLS = [
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "Skill",
+    "Task",
+    "TodoWrite",
+    "WebFetch",
+    "WebSearch",
+    "mcp__claude_ai_Gmail__*",
+    "mcp__claude_ai_Google_Calendar__*",
+    "mcp__claude_ai_Google_Drive__*",
+    "mcp__claude_ai_Notion__*",
+    "mcp__eva-core__*",
+    "mcp__tavily__*",
+]
+
 
 @dataclass
 class BrainConfig:
@@ -38,6 +60,9 @@ class BrainConfig:
     state_dir: Path = field(default_factory=lambda: DEFAULT_STATE_DIR)
     model: str | None = None
     allowed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_ALLOWED_TOOLS))
+    worker_allowed_tools: list[str] = field(
+        default_factory=lambda: list(DEFAULT_WORKER_ALLOWED_TOOLS)
+    )
     max_workers: int = 2
     job_timeout_s: int = 1800
     language: str = "en-AU"

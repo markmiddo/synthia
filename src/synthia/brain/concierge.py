@@ -101,7 +101,7 @@ class Brain:
         self.jobs = JobManager(
             JobStore(config.state_dir / "jobs"),
             self._job_events,
-            runner or claude_runner(config.cwd, config.allowed_tools, config.model),
+            runner or claude_runner(config.cwd, config.worker_allowed_tools, config.model),
             max_workers=config.max_workers,
             timeout_s=config.job_timeout_s,
         )

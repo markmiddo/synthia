@@ -167,7 +167,14 @@ class JobManager:
 
 
 def claude_runner(cwd: Path, allowed_tools: list[str], model: str | None = None) -> Runner:
-    """Real worker: `claude -p` in cwd, JSON output, no interactive prompts."""
+    """Real worker: `claude -p` in cwd, JSON output, no interactive prompts.
+
+    `allowed_tools` is the *worker* allowlist (BrainConfig.worker_allowed_tools), not the
+    concierge's read-only one: a headless worker has nobody to answer a permission prompt,
+    so anything outside the list is denied. Worker safety therefore relies on the synced
+    PreToolUse security-gate hook (~/.claude/settings.json), which can only block, never
+    approve. `mcp__server__*` wildcards are accepted by Claude Code in --allowedTools.
+    """
 
     async def run(rec: JobRecord) -> tuple[int, str, str]:
         cmd = [
