@@ -1,0 +1,9 @@
+[Unit]
+Description=Run brain-sync every 10 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

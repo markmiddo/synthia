@@ -24,6 +24,7 @@ from synthia.brain.config import BrainConfig
 from synthia.brain.gate import Confirmer, make_can_use_tool
 from synthia.brain.job_tools import build_jobs_server
 from synthia.brain.jobs import JobFinished, JobManager, JobRecord, JobStore, Runner, claude_runner
+from synthia.brain.journal import WalkJournal
 from synthia.brain.persona import build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,7 @@ class Brain:
         self._reader_active: bool = False
         self._job_events: asyncio.Queue[JobFinished] = asyncio.Queue()
         config.state_dir.mkdir(parents=True, exist_ok=True)
+        self.journal = WalkJournal(config.journal_dir)
         self.jobs = JobManager(
             JobStore(config.state_dir / "jobs"),
             self._job_events,
@@ -144,7 +146,7 @@ class Brain:
             system_prompt=build_system_prompt(handover),
             skills="all",
             include_partial_messages=True,
-            mcp_servers={"jobs": build_jobs_server(self.jobs)},
+            mcp_servers={"jobs": build_jobs_server(self.jobs, self.journal.job_dispatched)},
             allowed_tools=list(self.config.allowed_tools),
             permission_mode="default",
             can_use_tool=make_can_use_tool(self.confirm),
@@ -275,17 +277,21 @@ class Brain:
             self._in_flight = True
             self._reader_active = True
             streamed = False
+            spoken: list[str] = []
             try:
                 async for message in client.receive_response():
                     delta = _delta_text(message)
                     if delta:
                         streamed = True
+                        spoken.append(delta)
                         yield delta
                     elif isinstance(message, ResultMessage):
                         self._in_flight = False
                         self._note_result(message)
                         if not streamed and message.result:
+                            spoken.append(message.result)
                             yield message.result
+                        self.journal.turn(text, "".join(spoken))
             finally:
                 self._reader_active = False
                 if self._in_flight:  # consumer abandoned us mid-turn
@@ -316,6 +322,7 @@ class Brain:
                 await self._job_events.put(finished)
                 await asyncio.sleep(EVENT_RETRY_DELAY_S)
                 continue
+            self.journal.job_finished(rec.name, rec.status, rec.summary, text)
             # Marked delivered only once a transport has actually pushed it (see ack).
             yield SpokenEvent(rec, text)
 

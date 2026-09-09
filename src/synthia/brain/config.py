@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PATH = Path.home() / ".config" / "synthia" / "brain.yaml"
 DEFAULT_STATE_DIR = Path.home() / ".local" / "share" / "synthia" / "brain"
+DEFAULT_JOURNAL_DIR = (
+    Path.home() / ".claude" / "projects" / "-home-markmiddo-dev-eventflo" / "memory" / "walk"
+)
 
 DEFAULT_PHRASE_HINTS = ["eventflo", "Eva", "Eva Core", "Barry", "FloSale", "Vishal", "Corey"]
 
@@ -58,6 +61,7 @@ class BrainConfig:
     cwd: Path = field(default_factory=lambda: Path.home() / "dev" / "eventflo")
     repos: list[Path] = field(default_factory=list)
     state_dir: Path = field(default_factory=lambda: DEFAULT_STATE_DIR)
+    journal_dir: Path = field(default_factory=lambda: DEFAULT_JOURNAL_DIR)
     model: str | None = None
     allowed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_ALLOWED_TOOLS))
     worker_allowed_tools: list[str] = field(
@@ -74,7 +78,7 @@ class BrainConfig:
     confirm_timeout_s: int = 120
 
 
-_PATH_FIELDS = {"cwd", "state_dir"}
+_PATH_FIELDS = {"cwd", "state_dir", "journal_dir"}
 _PATH_LIST_FIELDS = {"repos"}
 _INT_FIELDS = {"max_workers", "job_timeout_s", "confirm_timeout_s"}
 

@@ -192,12 +192,16 @@ class TelegramTransport:
         self._pending_confirm = loop.create_future()
         await self._speak(self.bot, self.chat_id, f"I want to {question}. Say yes to confirm.")
         try:
-            return await asyncio.wait_for(self._pending_confirm, self.confirm_timeout_s)
+            approved = await asyncio.wait_for(self._pending_confirm, self.confirm_timeout_s)
         except asyncio.TimeoutError:
             await self._speak(self.bot, self.chat_id, "No confirmation, so I did not do it.")
-            return False
+            approved = False
         finally:
             self._pending_confirm = None
+        journal = getattr(self.brain, "journal", None)
+        if journal is not None:
+            journal.confirmation(question, approved)
+        return approved
 
     # ---- job events ----
 

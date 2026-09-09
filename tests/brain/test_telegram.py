@@ -274,3 +274,17 @@ async def test_non_yes_answer_is_taken_as_no(parts):
     assert await task is False
     assert any(t == "Taken as no." for _, t in bot.texts)
     assert brain.sent == []
+
+
+async def test_confirmation_is_journaled(parts, tmp_path):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.journal import WalkJournal
+
+    brain.journal = WalkJournal(tmp_path / "walk")
+    tr.bot = bot
+    task = asyncio.create_task(tr.confirm("run git push origin main"))
+    await asyncio.sleep(0.01)
+    await tr.on_text(_update(text="no", bot=bot), ctx)
+    assert await task is False
+    text = brain.journal.today_path().read_text()
+    assert "**Confirmation denied:** run git push origin main" in text
