@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 try:
     from telegram import Update
     from telegram.constants import ChatAction
+    from telegram.error import Conflict as TelegramConflict
     from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
     HAS_TELEGRAM = True
@@ -169,7 +170,22 @@ class TelegramTransport:
         await update.message.reply_text(text)
 
     async def on_error(self, update: Any, context: Any) -> None:
-        logger.exception("unhandled error in telegram handler", exc_info=context.error)
+        err = context.error
+        if update is None:
+            # Errors raised by the polling loop itself (getUpdates), not by a
+            # message from Mark. The most common one is ``Conflict``: another
+            # process is polling with the same bot token. Nothing was asked, so
+            # there is nothing to reply to; messaging the chat here just floods
+            # it with "something went wrong" every retry.
+            if HAS_TELEGRAM and isinstance(err, TelegramConflict):
+                logger.error(
+                    "telegram getUpdates conflict: another bot instance is polling "
+                    "this token; stop the other instance"
+                )
+            else:
+                logger.exception("telegram polling error", exc_info=err)
+            return
+        logger.exception("unhandled error in telegram handler", exc_info=err)
         if self.chat_id is not None:
             try:
                 await context.bot.send_message(
