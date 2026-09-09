@@ -1,0 +1,17 @@
+[Unit]
+Description=Synthia mobile voice brain (Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=markmiddo
+WorkingDirectory=/home/markmiddo/dev/misc/synthia
+EnvironmentFile=/home/markmiddo/.config/synthia/brain.env
+Environment=PATH=/home/markmiddo/.local/bin:/home/markmiddo/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/markmiddo/dev/misc/synthia/venv/bin/synthia-brain telegram
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

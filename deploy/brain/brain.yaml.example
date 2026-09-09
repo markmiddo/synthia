@@ -1,0 +1,14 @@
+# Copy to ~/.config/synthia/brain.yaml
+cwd: ~/dev/eventflo
+repos:
+  - ~/dev/eventflo/eva-ai
+  - ~/dev/eventflo/eva-core
+  - ~/dev/eventflo/admin-panel
+language: en-AU
+voice: en-AU-Neural2-B
+phrase_hints: [eventflo, Eva, Eva Core, Barry, FloSale, Vishal, Corey]
+telegram_allowed_users: [111111111]
+telegram_chat_id: 111111111
+max_workers: 2
+job_timeout_s: 1800
+confirm_timeout_s: 120
