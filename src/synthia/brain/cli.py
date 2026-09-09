@@ -97,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # httpx logs full request URLs, which for Telegram include the bot token.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     cfg = load_brain_config(path=args.config)
     if args.command == "repl":
         asyncio.run(_run_repl(cfg))
