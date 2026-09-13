@@ -427,7 +427,8 @@ function App() {
   const [editingKey, setEditingKey] = useState<"dictate" | "assistant" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [currentSection, setCurrentSection] = useState<Section>("agents");
+  // Product is Mark's morning surface, so the app opens on it.
+  const [currentSection, setCurrentSection] = useState<Section>("product");
   const [terminalTabs, setTerminalTabs] = useState<{ id: string; title: string; is_active: boolean }[]>([]);
   const [activeTerminalTabId, setActiveTerminalTabId] = useState<string | null>(null);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
@@ -2515,6 +2516,13 @@ function App() {
         </div>
         <nav className="sidebar-nav">
           <button
+            className={`nav-item ${currentSection === "product" ? "active" : ""}`}
+            onClick={() => setCurrentSection("product")}
+          >
+            <span className="nav-item-icon">&#128202;</span>
+            Product
+          </button>
+          <button
             className={`nav-item ${currentSection === "terminal" ? "active" : ""}`}
             onClick={() => setCurrentSection("terminal")}
           >
@@ -2628,13 +2636,6 @@ function App() {
             <span className="nav-item-icon">&#128025;</span>
             GitHub
             {(() => { const c = githubIssues.filter(i => i.state === "OPEN").length; return c > 0 ? <span className="nav-badge">{c}</span> : null; })()}
-          </button>
-          <button
-            className={`nav-item ${currentSection === "product" ? "active" : ""}`}
-            onClick={() => setCurrentSection("product")}
-          >
-            <span className="nav-item-icon">&#128202;</span>
-            Product
           </button>
           <button
             className={`nav-item ${currentSection === "voice" ? "active" : ""}`}
