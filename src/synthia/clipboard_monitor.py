@@ -140,6 +140,13 @@ class ClipboardMonitor:
 
             except Exception as e:
                 logger.warning("Wayland clipboard monitor error: %s", e)
+            finally:
+                # Always reap the watcher before looping. Without this, an
+                # exception in _add_item left the old wl-paste running and a
+                # new one was spawned on top: 1,358 leaked watchers in one
+                # morning, which made every Ctrl+C storm the desktop.
+                self._stop_process()
+            if self.running:
                 time.sleep(1)
 
     def _run_x11_monitor(self) -> None:
@@ -170,17 +177,22 @@ class ClipboardMonitor:
 
         self._thread.start()
 
+    def _stop_process(self) -> None:
+        """Terminate the current wl-paste watcher, if any."""
+        proc, self._process = self._process, None
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=1)
+        except Exception:
+            proc.kill()
+
     def stop(self) -> None:
         """Stop the clipboard monitor."""
         self.running = False
 
-        if self._process:
-            try:
-                self._process.terminate()
-                self._process.wait(timeout=1)
-            except Exception:
-                self._process.kill()
-            self._process = None
+        self._stop_process()
 
         if self._thread:
             self._thread.join(timeout=2)

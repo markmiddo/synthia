@@ -652,3 +652,40 @@ class TestGetClipboardContent:
         result = monitor._get_clipboard_content()
 
         assert result is None
+
+
+class TestWaylandWatcherLeak:
+    """A failing clipboard handler must not leak wl-paste watchers."""
+
+    def test_watcher_is_reaped_before_respawn_when_handler_raises(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock, patch
+        from synthia.clipboard_monitor import ClipboardMonitor
+
+        monitor = ClipboardMonitor.__new__(ClipboardMonitor)
+        monitor.running = True
+        monitor._process = None
+
+        procs = []
+
+        def fake_popen(*args, **kwargs):
+            proc = MagicMock()
+            proc.poll.return_value = None
+            proc.stdout.readline.return_value = "copied text\n"
+            procs.append(proc)
+            if len(procs) == 2:
+                monitor.running = False
+            return proc
+
+        def failing_add(_content):
+            raise RuntimeError("handler blew up")
+
+        monkeypatch.setattr(monitor, "_add_item", failing_add)
+        with patch("synthia.clipboard_monitor.subprocess.Popen", side_effect=fake_popen), \
+             patch("synthia.clipboard_monitor.time.sleep"):
+            monitor._run_wayland_monitor()
+
+        assert len(procs) == 2
+        # Every watcher that was started got terminated: none left running.
+        for proc in procs:
+            proc.terminate.assert_called_once()
+        assert monitor._process is None
