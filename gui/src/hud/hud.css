@@ -1087,13 +1087,22 @@ div.node {
   border-radius: 12px;
   padding: 11px 14px 12px;
   cursor: pointer;
-  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
 }
 
 .role:hover,
 .role.selected {
   border-color: var(--blue);
-  transform: translateY(-2px);
+}
+
+/* Selected and live only ever change colour and glow, never size or position, so the connectors
+   (pseudo-elements of the card itself) always meet it. */
+.role.selected {
+  box-shadow: 0 0 0 1px var(--blue), 0 0 22px rgba(124, 196, 255, 0.28);
+}
+
+.role.dim:not(.selected):not(:hover) {
+  opacity: 0.6;
 }
 
 .role.lit {
@@ -1935,4 +1944,267 @@ div.node {
 .top .example,
 .gauge span {
   white-space: nowrap;
+}
+
+/* ---- company: leadership and departments ---- */
+
+.leaders {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: -8px;
+}
+
+.leaders .drop {
+  width: 0;
+  height: 18px;
+  border-left: 1px solid var(--line-hi);
+}
+
+.boss,
+.chief {
+  background: var(--panel);
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  padding: 8px 18px;
+  text-align: center;
+}
+
+.boss b,
+.chief b {
+  font-weight: 600;
+  font-size: 14.5px;
+}
+
+.boss span,
+.chief-role {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.chief {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  max-width: 440px;
+  padding: 10px 18px;
+}
+
+.chief p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--soft);
+}
+
+.chief-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--slate);
+}
+
+.chief.idle .chief-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 12px var(--cyan);
+}
+
+.chief.thinking .chief-dot,
+.chief.speaking .chief-dot {
+  background: var(--blue);
+  box-shadow: 0 0 14px var(--blue);
+}
+
+.depts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr));
+  gap: 30px 34px;
+  align-items: start;
+}
+
+.dept {
+  min-width: 0;
+}
+
+.dept-head {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 0 10px;
+  margin-bottom: 14px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid rgba(44, 74, 116, 0.4);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dept-head svg {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  align-self: center;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s;
+}
+
+.dept-head svg.open {
+  transform: rotate(90deg);
+}
+
+.dept-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.dept-head span {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.dept-sub {
+  margin: -4px 0 16px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.repo-group + .repo-group {
+  margin-top: 22px;
+}
+
+.repo-group .lbl {
+  margin: 0 0 10px;
+}
+
+.devs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.devcard {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  padding: 10px 14px 11px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.devcard:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.devcard:hover:not(:disabled) {
+  border-color: var(--blue);
+}
+
+.dev {
+  --c: var(--slate);
+}
+
+.dev .devcard .role-dot {
+  top: 13px;
+  right: 14px;
+}
+
+.devcard b {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.3;
+  padding-right: 20px;
+  overflow-wrap: anywhere;
+}
+
+.devcard .role-meta em {
+  font-style: normal;
+  color: var(--c);
+}
+
+.kind {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.subtree {
+  list-style: none;
+  margin: 0 0 0 18px;
+  padding: 8px 0 0 16px;
+  border-left: 1px solid var(--line-hi);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.subtree li {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.subtree li::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  width: 12px;
+  border-top: 1px solid var(--line-hi);
+}
+
+.subtree b {
+  font-weight: 500;
+  color: var(--cyan);
+}
+
+.subtree li.done b {
+  color: var(--soft);
+}
+
+.subtree li span {
+  color: var(--soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtree li.done {
+  opacity: 0.7;
+}
+
+.subtree li i {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.subtree li.live i {
+  color: var(--green);
+}
+
+.subtree li.more {
+  display: block;
 }
