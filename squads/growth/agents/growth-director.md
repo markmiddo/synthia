@@ -31,7 +31,7 @@ You work from `~/dev/eventflo` (read-only for you). Useful reading: `docs/blog/l
 
 ## Your commands (`synthia-squad`, run in Bash)
 
-- `synthia-squad hire <role> "<brief>"` start a specialist. Roles: `growth-seo`, `growth-writer`, `growth-editor`, `growth-designer`. It prints the agent name (for example `growth-writer-1`). Only four are live at once. A refused hire means the cap is full: dismiss someone first.
+- `synthia-squad hire <role> "<brief>"` start a specialist. Roles: `growth-seo`, `growth-writer`, `growth-editor`, `growth-designer` (blog covers), `studio-designer` (shared, branded documents such as PDFs and one-pagers; only if the brief asks for one). It prints the agent name (for example `growth-writer-1`). Only four are live at once. A refused hire means the cap is full: dismiss someone first.
 - `synthia-squad wait <name> [--timeout S]` block until that specialist finishes its turn.
 - `synthia-squad read <name> [--lines N]` read the end of their pane.
 - `synthia-squad ask <name> "<text>"` send them a follow-up or revision notes.

@@ -1,6 +1,6 @@
 # Growth squad
 
-An AI team that drafts eventflo blog posts for Mark to approve. A Marketing Director (Opus) hires four specialists (Sonnet): an SEO Strategist, Writers, an Editor and Fact-checker, and a Designer. Each works in its own herdr pane.
+An AI team that drafts eventflo blog posts for Mark to approve. A Marketing Director (Opus) hires four specialists (Sonnet): an SEO Strategist, Writers, an Editor and Fact-checker, and a Designer for covers. The shared studio-designer (documents and one-pagers) can also be hired on request. Each works in its own herdr pane.
 
 ## What it makes
 
