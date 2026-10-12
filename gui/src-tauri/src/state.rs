@@ -33,6 +33,8 @@ pub struct AppState {
     pub native_terminals: NativeTermRegistry,
     /// Fake-embed Wezterm sessions (older path, will be removed in v2).
     pub fake_embed_terminals: FakeEmbedRegistry,
+    /// Herdr fleet bookkeeping: time in state, panes that just vanished.
+    pub fleet: Mutex<crate::commands::fleet::FleetTracker>,
 }
 
 #[derive(Clone, Debug)]

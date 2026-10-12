@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod claude_config;
 pub mod clipboard;
+pub mod fleet;
 pub mod github;
 pub mod history;
 pub mod hotkeys;

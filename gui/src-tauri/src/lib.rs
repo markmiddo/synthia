@@ -430,6 +430,8 @@ pub fn run() {
                 app.state::<state::AppState>().watchers.lock().push(Box::new(watcher));
             }
 
+            commands::fleet::spawn_emitter(app.handle().clone());
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -578,7 +580,10 @@ pub fn run() {
             crate::native_term::commands::native_term_close_tab,
             crate::native_term::commands::native_term_rename_tab,
             crate::native_term::commands::native_term_list_tabs,
-            commands::shortcuts::get_shell_aliases
+            commands::shortcuts::get_shell_aliases,
+            commands::fleet::fleet_snapshot,
+            commands::fleet::fleet_focus,
+            commands::fleet::fleet_day
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
