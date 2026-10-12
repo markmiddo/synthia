@@ -85,7 +85,11 @@ export function NeedsYou({
   onConfirm,
   ledger = [],
   onDetail,
+  reviews = [],
+  onReview,
 }: {
+  reviews?: { id: string; title: string }[];
+  onReview?: (id: string) => void;
   ledger?: LedgerItem[];
   onDetail?: (item: LedgerItem, el: HTMLElement) => void;
   nodes: FleetNode[];
@@ -97,8 +101,8 @@ export function NeedsYou({
   const waiting = nodes.filter((n) => n.status === "needs-you");
   return (
     <section aria-label="Needs you">
-      <p className="lbl">NEEDS YOU{ledger.length + waiting.length + confirms.length > 0 ? ` · ${ledger.length + waiting.length + confirms.length}` : ""}</p>
-      {waiting.length === 0 && confirms.length === 0 && ledger.length === 0 && (
+      <p className="lbl">NEEDS YOU{ledger.length + reviews.length + waiting.length + confirms.length > 0 ? ` · ${ledger.length + reviews.length + waiting.length + confirms.length}` : ""}</p>
+      {waiting.length === 0 && confirms.length === 0 && ledger.length === 0 && reviews.length === 0 && (
         <div className="allclear">
           <i />
           Nothing is waiting on you.
@@ -117,6 +121,12 @@ export function NeedsYou({
             </button>
           </div>
         </div>
+      ))}
+      {reviews.map((r) => (
+        <button type="button" className="need-line" key={`rev-${r.id}`} onClick={() => onReview?.(r.id)}>
+          <i />
+          <span>Review: {r.title}</span>
+        </button>
       ))}
       {ledger.map((i) => (
         <button type="button" className="need-line" key={i.id} onClick={(e) => onDetail?.(i, e.currentTarget)}>

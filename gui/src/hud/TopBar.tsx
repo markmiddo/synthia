@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { lastSevenDays, stamp } from "./format";
 import { MOCK } from "./tauri";
+import { InboxButton } from "./Inbox";
 import { resetsText } from "./today";
 import type { FleetNode, UsageStats } from "./types";
 import { Wordmark } from "./Wordmark";
@@ -183,6 +184,8 @@ export function TopBar({
   day,
   today,
   onDay,
+  inboxNew,
+  onInbox,
 }: {
   nodes: FleetNode[];
   usage: UsageStats | null;
@@ -193,6 +196,8 @@ export function TopBar({
   day: string;
   today: string;
   onDay: (d: string) => void;
+  inboxNew: number;
+  onInbox: () => void;
 }) {
   const count = (s: FleetNode["status"]) => nodes.filter((n) => n.status === s).length;
   const total = nodes.length;
@@ -214,6 +219,7 @@ export function TopBar({
       {preview && <span className="example">PREVIEW DATA</span>}
       <ViewToggle view={view} onView={onView} />
       <DayMenu day={day} today={today} onDay={onDay} />
+      <InboxButton count={inboxNew} onClick={onInbox} />
       <div className="gauges" data-tauri-drag-region>
         <Gauge value={count("working")} total={total} label="working" color="var(--blue)" />
         <Gauge value={count("needs-you")} total={total} label="need you" color="var(--amber)" />

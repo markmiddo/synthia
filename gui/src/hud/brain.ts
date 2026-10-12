@@ -23,6 +23,8 @@ export interface BrainView {
   confirms: ConfirmAsk[];
   /** A short problem the user should see (e.g. an answer that could not be sent). */
   notice: string | null;
+  /** Counts up each time the brain pushes an `inbox` frame, so the HUD refreshes its inbox. */
+  inboxTick: number;
 }
 
 /** How long a notice stays up when nothing else clears it. */
@@ -35,6 +37,7 @@ export const INITIAL_VIEW: BrainView = {
   spoken: { text: "", live: false },
   confirms: [],
   notice: null,
+  inboxTick: 0,
 };
 
 export type Action =
@@ -82,6 +85,8 @@ export function reduce(view: BrainView, action: Action): BrainView {
           const ask = { id: String(f.id), question: String(f.question ?? "") };
           return { ...online, confirms: [...view.confirms.filter((c) => c.id !== ask.id), ask] };
         }
+        case "inbox":
+          return { ...online, inboxTick: view.inboxTick + 1 };
         case "confirm_done":
           return { ...online, confirms: view.confirms.filter((c) => c.id !== f.id) };
         default:
@@ -89,6 +94,13 @@ export function reduce(view: BrainView, action: Action): BrainView {
       }
     }
   }
+}
+
+/** How often "I am looking at the HUD" is repeated while the window is visible. */
+const PRESENCE_MS = 120_000;
+
+function windowActive(): boolean {
+  return document.visibilityState === "visible" && document.hasFocus();
 }
 
 export function useBrain(): { view: BrainView; confirmReply: (id: string, yes: boolean) => void } {
@@ -129,7 +141,11 @@ export function useBrain(): { view: BrainView; confirmReply: (id: string, yes: b
       if (closed) return;
       const ws = new WebSocket(DESK_URL);
       wsRef.current = ws;
-      ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token }));
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "auth", token }));
+        // The first presence frame goes right behind the key, so the brain knows from the start.
+        ws.send(JSON.stringify({ type: "presence", active: windowActive() }));
+      };
       ws.onmessage = (ev) => {
         attempt = 0;
         try {
@@ -158,6 +174,44 @@ export function useBrain(): { view: BrainView; confirmReply: (id: string, yes: b
       closed = true;
       if (timer) clearTimeout(timer);
       wsRef.current?.close();
+    };
+  }, []);
+
+  // Presence: tell the brain whether Mark is looking at the HUD, so it can choose the desk or Telegram.
+  // Sent on connect, on focus and blur, on hide or minimise, and every two minutes while active.
+  useEffect(() => {
+    if (MOCK) return;
+    let last: boolean | null = null;
+    const send = (active: boolean) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try {
+        ws.send(JSON.stringify({ type: "presence", active }));
+        last = active;
+      } catch {
+        /* the next tick tries again */
+      }
+    };
+    const sync = () => send(windowActive());
+    const tick = () => {
+      if (windowActive()) send(true);
+      else if (last !== false) send(false);
+    };
+    const every = setInterval(tick, PRESENCE_MS);
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+    document.addEventListener("visibilitychange", sync);
+    let off: (() => void) | undefined;
+    import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) => getCurrentWindow().onFocusChanged(({ payload }) => send(payload && windowActive())))
+      .then((un) => (off = un))
+      .catch(() => {});
+    return () => {
+      clearInterval(every);
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("blur", sync);
+      document.removeEventListener("visibilitychange", sync);
+      off?.();
     };
   }, []);
 

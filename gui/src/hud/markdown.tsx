@@ -1,15 +1,53 @@
 import type { ReactNode } from "react";
+import { call } from "./tauri";
 
-/** Inline `code` and **bold**. Nothing here ever becomes HTML, so a prompt cannot inject markup. */
+const INLINE = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
+
+/** Inline `code`, **bold** and [links](https://...). Nothing here ever becomes HTML, so a prompt or a
+ *  draft cannot inject markup, and a link opens in the browser, never inside the HUD. */
 function inline(text: string): ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) => {
+  return text.split(INLINE).map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) return <strong key={i}>{part.slice(2, -2)}</strong>;
     if (part.startsWith("`") && part.endsWith("`") && part.length > 2) return <code key={i}>{part.slice(1, -1)}</code>;
+    const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(part);
+    if (link) {
+      const url = link[2];
+      const web = /^https:\/\//.test(url);
+      return web ? (
+        <a
+          key={i}
+          className="md-link"
+          href={url}
+          rel="noreferrer noopener"
+          onClick={(e) => {
+            e.preventDefault();
+            call("open_url", { url }).catch(() => {});
+          }}
+        >
+          {link[1]}
+        </a>
+      ) : (
+        <span key={i}>{link[1]}</span>
+      );
+    }
     return part;
   });
 }
 
-/** Headings, bullets, numbered lists, bold and code: enough to read a role prompt comfortably. */
+function cells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((c) => c.trim());
+}
+
+const isRow = (l: string) => /^\s*\|.*\|\s*$/.test(l);
+const isRule = (l: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l) && l.includes("-");
+
+/** Headings, bullets, numbered lists, tables, code fences, bold, code and links: enough to read a
+ *  role prompt, a memory or a squad's summary comfortably. */
 export function Markdown({ text }: { text: string }) {
   const out: ReactNode[] = [];
   const lines = text.replace(/\r/g, "").split("\n");
@@ -25,8 +63,53 @@ export function Markdown({ text }: { text: string }) {
     out.push(list.ordered ? <ol key={out.length}>{items}</ol> : <ul key={out.length}>{items}</ul>);
     list = null;
   };
-  for (const raw of lines) {
-    const line = raw.trimEnd();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+    if (line.trimStart().startsWith("```")) {
+      flushPara();
+      flushList();
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].trimStart().startsWith("```")) body.push(lines[i++]);
+      out.push(
+        <pre key={out.length} className="md-pre">
+          {body.join("\n")}
+        </pre>,
+      );
+      continue;
+    }
+    if (isRow(line) && i + 1 < lines.length && isRule(lines[i + 1])) {
+      flushPara();
+      flushList();
+      const head = cells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && isRow(lines[i])) rows.push(cells(lines[i++]));
+      i--;
+      out.push(
+        <div className="md-table" key={out.length}>
+          <table>
+            <thead>
+              <tr>
+                {head.map((h, k) => (
+                  <th key={k}>{inline(h)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, k) => (
+                <tr key={k}>
+                  {head.map((_, c) => (
+                    <td key={c}>{inline(r[c] ?? "")}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
     const b = /^\s*[-*]\s+(.*)$/.exec(line);
     const n = /^\s*\d+[.)]\s+(.*)$/.exec(line);

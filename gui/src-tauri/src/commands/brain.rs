@@ -757,7 +757,7 @@ mod tests {
         let mut registry = HashMap::new();
         registry.insert(
             "w1:p2".to_string(),
-            Member { squad: "growth".into(), job: "j".into(), role: "growth-writer".into(), title: "Writer".into(), parent: None, ended_at: Some("2026-10-13".into()) },
+            Member { agent_name: String::new(), squad: "growth".into(), job: "j".into(), role: "growth-writer".into(), title: "Writer".into(), parent: None, ended_at: Some("2026-10-13".into()) },
         );
         let fleet = vec![("w9:p1".to_string(), "Admin panel PR 175".to_string()), ("w1:p2".to_string(), "ignored".to_string())];
         let a = Attribution { registry: &registry, fleet: &fleet, brain_cwd: "/home/u/dev/eventflo" };

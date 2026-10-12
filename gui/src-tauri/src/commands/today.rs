@@ -878,7 +878,7 @@ pub fn open_bug_dashboard() -> AppResult<()> {
 pub fn open_url(url: String) -> AppResult<()> {
     if !valid_github_url(&url) {
         return Err(AppError::Validation(
-            "I only open GitHub and Google Calendar links".into(),
+            "I only open https links".into(),
         ));
     }
     let mut child = std::process::Command::new("xdg-open")
@@ -894,18 +894,14 @@ pub fn open_url(url: String) -> AppResult<()> {
     Ok(())
 }
 
+/// Links the HUD opens in the browser: https only, plain URL characters, no spaces or quotes.
 pub fn valid_github_url(url: &str) -> bool {
-    [
-        "https://github.com/",
-        "https://calendar.google.com/",
-        "https://www.google.com/calendar/",
-    ]
-    .iter()
-    .any(|p| url.starts_with(p))
-        && url.len() <= 300
+    url.starts_with("https://")
+        && url.len() <= 600
+        && url.len() > "https://x".len()
         && url
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "/-_.#?=&%:~+".contains(c))
+            .all(|c| c.is_ascii_alphanumeric() || "/-_.#?=&%:~+@,;!*()".contains(c))
 }
 
 #[cfg(test)]
@@ -1020,9 +1016,12 @@ mod tests {
         assert!(valid_github_url(
             "https://www.google.com/calendar/event?eid=abc123"
         ));
-        assert!(!valid_github_url("https://evil.com/x"));
-        assert!(!valid_github_url("https://github.com.evil.com/x"));
-        assert!(!valid_github_url("https://github.com/a b; rm"));
+        assert!(valid_github_url("https://example.com/post/my-slug"));
+        assert!(!valid_github_url("http://example.com/x"));
+        assert!(!valid_github_url("file:///etc/passwd"));
+        assert!(!valid_github_url("javascript:alert(1)"));
+        assert!(!valid_github_url("https://github.com/a b"));
+        assert!(!valid_github_url("https://x.com/a'b"));
     }
 
     #[test]
