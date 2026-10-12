@@ -44,9 +44,11 @@ Synthia is a voice assistant + dev workstation companion for Linux with:
   - `gui/src-tauri/src/state.rs` - Tauri-managed `AppState`
   - `gui/src-tauri/src/paths.rs` - filename validation helper
   - `gui/src-tauri/src/yaml_writer.rs` - comment-preserving word-replacement writer
-- `tests/` - pytest test suite (733 tests)
+- `tests/` - pytest test suite (874 tests)
 - `docs/` - Documentation, specs, plans
 - `src/synthia/brain/` - mobile voice brain (Agent SDK concierge, job workers, Telegram transport); see `docs/brain.md`
+- `src/synthia/squads/` - squad engine (SDK-free): registry, job desks, hire/dismiss/stop, `synthia-squad` CLI; `src/synthia/herdr.py` wraps the herdr CLI
+- `squads/` - squad definitions installed with `synthia-squad install <squad>` (yaml plus Claude Code agent files)
 - `deploy/brain/` - systemd units and install script for the brain on middo247; `deploy/brain/desktop/synthia-brain.service` runs it on the desktop (`serve`: Telegram plus the desk websocket)
 
 ## Brand
@@ -108,7 +110,7 @@ source venv/bin/activate
 black --check src/ tests/       # Formatting
 isort --check src/ tests/       # Import ordering
 mypy src/synthia/ --ignore-missing-imports  # Type checking
-pytest tests/ --tb=short -q     # Tests (733 tests)
+pytest tests/ --tb=short -q     # Tests (874 tests)
 ```
 
 ### Rust GUI backend (when touching `gui/src-tauri/`)
@@ -202,5 +204,6 @@ synthia             # Same (if installed)
 synthia-dash        # TUI dashboard
 synthia-brain repl      # Text REPL against the voice brain (desktop testing)
 synthia-brain telegram  # Telegram voice transport only (old single-transport mode)
+synthia-squad start growth "<brief>"   # Run a squad job (also: status, stop, install; hire/ask/read/done from a director pane)
 synthia-brain serve     # Telegram plus the desk websocket the HUD and voice app use (assistant_backend: brain)
 ```

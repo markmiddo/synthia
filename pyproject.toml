@@ -84,6 +84,7 @@ Issues = "https://github.com/markmiddo/synthia/issues"
 synthia = "synthia.main:main"
 synthia-dash = "synthia.dashboard:main"
 synthia-brain = "synthia.brain.cli:main"
+synthia-squad = "synthia.squads.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
