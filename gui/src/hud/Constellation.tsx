@@ -15,7 +15,7 @@ export interface Placed {
 }
 
 const RING_H = 560;
-const WIDE_CLUSTER_H = 330;
+const WIDE_CLUSTER_H = 300;
 const NARROW_W = 560;
 const KID_STEP = 158;
 
@@ -26,6 +26,7 @@ export function place(
   nodes: FleetNode[],
   w: number,
   h: number,
+  avail: number = 0,
 ): { cx: number; cy: number; placed: Placed[]; height: number | null } {
   const ids = new Set(nodes.map((n) => n.paneId));
   const isKid = (n: FleetNode) => n.parent !== null && n.parent !== n.paneId && ids.has(n.parent);
@@ -41,7 +42,8 @@ export function place(
 
   const narrow = w < NARROW_W;
   const banded = heads.length > 0;
-  const ringH = banded ? (narrow ? Math.max(RING_H, ring.length * 130 + 200) : RING_H) : h;
+  const fitted = Math.max(400, Math.min(RING_H, avail - heads.length * WIDE_CLUSTER_H));
+  const ringH = banded ? (narrow ? Math.max(RING_H, ring.length * 130 + 200) : avail > 0 ? fitted : RING_H) : h;
   const cx = w / 2;
   const cy = ringH * 0.46;
   const two = ring.length > RING_LIMIT;
@@ -62,7 +64,7 @@ export function place(
   for (const head of heads) {
     const group = family.get(head.paneId) ?? [];
     const n = group.length;
-    const hp: Placed = { node: head, x: cx, y: top + 70, head: true };
+    const hp: Placed = { node: head, x: cx, y: top + 66, head: true };
     placed.push(hp);
     if (narrow) {
       group.forEach((node, i) => placed.push({ node, x: cx, y: hp.y + 130 + i * 112, from: hp }));
@@ -72,7 +74,7 @@ export function place(
       group.forEach((node, i) => {
         const off = n > 1 ? i - (n - 1) / 2 : 0;
         const edge = n > 1 ? Math.abs(off) / ((n - 1) / 2) : 0;
-        placed.push({ node, x: cx + off * step, y: hp.y + 170 + 36 * edge * edge, from: hp });
+        placed.push({ node, x: cx + off * step, y: hp.y + 150 + 30 * edge * edge, from: hp });
       });
       top += WIDE_CLUSTER_H;
     }
@@ -200,7 +202,7 @@ export function Constellation({
 }) {
   const [ref, { w, h }] = useSize();
   const nodes = fleet?.nodes ?? [];
-  const { cx, cy, placed, height } = place(nodes, w, h);
+  const { cx, cy, placed, height } = place(nodes, w, h, Math.max(0, window.innerHeight - 44));
   const rank = new Map(byAttention(nodes).map((n, i) => [n.paneId, i]));
   const note =
     fleet === null

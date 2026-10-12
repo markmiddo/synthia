@@ -138,7 +138,7 @@ function App() {
         </p>
       )}
       {screen === "company" && viewingToday ? (
-        <CompanyView fleet={fleet} now={now} onFocus={focus} request={jobRequest} />
+        <CompanyView fleet={fleet} now={now} onFocus={focus} request={jobRequest} brain={view} />
       ) : (
         <Constellation
           fleet={viewingToday ? fleet : past.status === "ready" ? past.fleet : null}

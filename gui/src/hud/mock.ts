@@ -15,12 +15,13 @@ const SQUAD = params.has("squad");
 /** Changes that arrive after load, so the activity feed has something to show. */
 let step = 0;
 
+const TYPES = ["Explore", "general-purpose", "bug-hunter", "mark-reviewer", "bob"];
 function subs(prefix: string, done: number, live: string[]) {
   const out = Array.from({ length: done }, (_, i) => ({
-    id: `${prefix}-d${i}`, description: `Finished task ${i + 1}`, agentType: "general-purpose", model: "opus", live: false,
+    id: `${prefix}-d${i}`, description: `Finished task ${i + 1}`, agentType: TYPES[i % TYPES.length], model: i % 2 ? "sonnet" : "opus", live: false,
   }));
   live.forEach((d, i) =>
-    out.push({ id: `${prefix}-l${i}`, description: d, agentType: "general-purpose", model: "opus", live: step < 1 || i === 0 }),
+    out.push({ id: `${prefix}-l${i}`, description: d, agentType: TYPES[(i + 2) % TYPES.length], model: i % 2 ? "sonnet" : "opus", live: step < 1 || i === 0 }),
   );
   return out;
 }
@@ -29,7 +30,7 @@ function fleet(): Fleet {
   const nodes: Fleet["nodes"] = [
     {
       paneId: "w1:p1", agent: "claude", status: "working", title: "Admin panel PR 175",
-      repo: "eventflo", cwd: "", session: "s1", sinceMs: t0 - 17 * min,
+      repo: "admin-panel", cwd: "/home/u/dev/eventflo/admin-panel", session: "s1", sinceMs: t0 - 17 * min,
       squad: null, job: null, role: null, roleTitle: null, parent: null,
       subagents: subs("a", 10, ["Multi-tier promoter unlock build", "Promoter code manual unlock fix"]),
     },
@@ -42,6 +43,12 @@ function fleet(): Fleet {
       paneId: "w1:p3", agent: "claude", status: step >= 2 ? "working" : "idle", title: "Remote working visa timing",
       repo: "personal", cwd: "", session: "s3", sinceMs: t0 - 81 * min,
       squad: null, job: null, role: null, roleTitle: null, parent: null, subagents: [],
+    },
+    {
+      paneId: "w1:p4", agent: "codex", status: "working", title: "Eva review loop",
+      repo: "eva-core", cwd: "/home/u/dev/eventflo/eva-core", session: "s4", sinceMs: t0 - 9 * min,
+      squad: null, job: null, role: null, roleTitle: null, parent: null,
+      subagents: subs("e", 2, ["Check queue retries"]),
     },
   ];
   if (SQUAD) {
