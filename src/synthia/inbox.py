@@ -303,4 +303,4 @@ def away_line(item: dict[str, Any], ok: bool = True) -> str:
         text += "."
     if detail:
         text += f" {detail}"
-    return f"{text} Say 'email it' to read it on your phone."
+    return f"{text} It's in your inbox at the desk."

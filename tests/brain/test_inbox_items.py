@@ -135,6 +135,6 @@ def test_short_lines():
     away = inbox.away_line(item)
     assert away.startswith("Growth: week of posts is ready for review (2 files).")
     assert "Two blog drafts ready, one cut." in away and "More text" not in away
-    assert away.endswith("Say 'email it' to read it on your phone.")
+    assert away.endswith("It's in your inbox at the desk.")
     assert "failed" in inbox.away_line({"title": "morning", "summary_md": ""}, ok=False)
     assert inbox.desk_line({"title": "morning"}) == "morning is done. It's in your inbox."

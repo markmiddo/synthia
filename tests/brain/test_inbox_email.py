@@ -200,14 +200,12 @@ def test_unknown_item_and_token_secret_never_in_errors(item):
     assert "SECRET" not in str(e.value)
 
 
-async def test_email_tool_latest(item, monkeypatch):
+async def test_brain_has_no_email_tool_only_list_inbox(item):
+    # Mark, 13 Oct 2026: no emails; everything is reviewed in the HUD inbox.
     from synthia.brain.job_tools import make_tools
 
-    seen = []
-    monkeypatch.setattr(inbox_email, "send_item", lambda i: seen.append(i) or "Emailed it.")
     tools = {t.name: t for t in make_tools(SimpleNamespace())}
-    out = await tools["email_inbox_item"].handler({"id": "latest"})
-    assert seen == [item["id"]] and out["content"][0]["text"] == "Emailed it."
+    assert "email_inbox_item" not in tools
     listed = await tools["list_inbox"].handler({})
     assert item["id"] in listed["content"][0]["text"]
 

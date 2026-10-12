@@ -295,7 +295,7 @@ async def test_away_mode_sends_one_short_text_and_leaves_the_desk_alone():
     sent = []
     assert await r.deliver_event(ev, await _away(sent)) is True
     assert len(sent) == 1 and len(sent[0]) < 300
-    assert "Say 'email it'" in sent[0] and "Two blog drafts are ready." in sent[0]
+    assert "in your inbox at the desk" in sent[0] and "Two blog drafts are ready." in sent[0]
     assert desk.pushed == [] and desk.inboxed == []
     assert inbox.get(ev.job.inbox_id)["notified"]["telegram"] is True
     # A requeue after a lost ack does not text a second time.

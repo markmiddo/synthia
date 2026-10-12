@@ -32,7 +32,6 @@ DEFAULT_ALLOWED_TOOLS = [
     "mcp__jobs__list_jobs",
     "mcp__jobs__cancel_job",
     "mcp__jobs__list_inbox",
-    "mcp__jobs__email_inbox_item",
     "mcp__herdr__fleet",
     "mcp__herdr__open_agent",
     "mcp__herdr__prompt_agent",

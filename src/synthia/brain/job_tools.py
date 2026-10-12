@@ -74,30 +74,7 @@ def make_tools(
             return _text("The inbox is empty.")
         return _text("\n".join(f"{i['id']}: {i['title']} ({i['state']})" for i in items))
 
-    @tool(
-        "email_inbox_item",
-        "Email one inbox item to Mark as a formatted HTML email (summary, drafts, images), "
-        "for when he wants to read it on his phone. Pass the item id, or 'latest' for the "
-        "newest item. It only ever goes to Mark's own address. Never paste the content into "
-        "an email or message yourself.",
-        {"id": str},
-    )
-    async def email_inbox_item(args: dict[str, Any]) -> dict[str, Any]:
-        from synthia.brain import inbox_email
-
-        item_id = str(args.get("id") or "latest").strip()
-        if item_id == "latest":
-            items = inbox.list_items()
-            if not items:
-                return _text("The inbox is empty.", is_error=True)
-            item_id = items[0]["id"]
-        try:
-            msg = await asyncio.to_thread(inbox_email.send_item, item_id)
-        except inbox_email.EmailError as exc:
-            return _text(str(exc), is_error=True)
-        return _text(msg)
-
-    return [dispatch_job, job_status, list_jobs, cancel_job, list_inbox, email_inbox_item]
+    return [dispatch_job, job_status, list_jobs, cancel_job, list_inbox]
 
 
 def build_jobs_server(
