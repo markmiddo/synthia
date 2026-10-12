@@ -2,6 +2,7 @@ id: growth
 name: Growth
 director: growth-director
 cap: 4                 # live specialists at once, director not counted
+review: required         # required: Mark approves before anything happens; fyi: squad decides and reports
 cwd: ~/dev/eventflo
 roles:
   growth-director:    {title: Marketing Director, model: claude-opus-5-5, hires: [growth-seo, growth-writer, growth-editor, growth-designer, studio-designer]}

@@ -328,3 +328,11 @@ def test_engine_imports_without_the_sdk():
         "sys.exit(1 if any(m.startswith('claude_agent_sdk') for m in sys.modules) else 0)"
     )
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
+def test_squad_review_mode_parsed_and_validated():
+    s = parse_squad({"id": "g", "director": "d", "review": "required", "roles": {"d": {}}})
+    assert s.review == "required"
+    assert parse_squad({"id": "o", "director": "d", "roles": {"d": {}}}).review == "fyi"
+    with pytest.raises(SquadError, match="review"):
+        parse_squad({"id": "x", "director": "d", "review": "maybe", "roles": {"d": {}}})

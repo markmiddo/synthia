@@ -222,3 +222,20 @@ class TestGetInboxItems:
         assert items[0]["filename"] == "third.pdf"
         assert items[1]["filename"] == "second.html"
         assert items[2]["filename"] == "first.txt"
+
+
+def test_review_mode_is_carried_and_defaults_to_fyi(tmp_path):
+    from synthia import inbox as _inbox
+
+    job = tmp_path / "jobs" / "2026-10-13-posts"
+    (job / "out").mkdir(parents=True)
+    (job / "out" / "summary.md").write_text("# Posts")
+    root = tmp_path / "inbox"
+    a = _inbox.create_from_squad(
+        job, "growth", "2026-10-13-posts", None, root=root, review="required"
+    )
+    assert a["review"] == "required"
+    job2 = tmp_path / "jobs" / "2026-10-13-sweep"
+    (job2 / "out").mkdir(parents=True)
+    b = _inbox.create_from_squad(job2, "office", "2026-10-13-sweep", None, root=root)
+    assert b["review"] == "fyi"

@@ -32,6 +32,9 @@ class Squad:
     cap: int
     cwd: Path
     roles: dict[str, Role]
+    # "required": Mark reviews the output before anything happens (public content).
+    # "fyi": the squad decided and acted; the inbox item is a report he can change.
+    review: str = "fyi"
 
     def role(self, role_id: str) -> Role:
         try:
@@ -73,6 +76,9 @@ def parse_squad(data: Any, source: str = "squad") -> Squad:
     except (TypeError, ValueError):
         raise SquadError(f"{source}: cap must be a number") from None
     cwd = Path(str(data.get("cwd") or "~")).expanduser()
+    review = str(data.get("review") or "fyi")
+    if review not in ("required", "fyi"):
+        raise SquadError(f"{source}: review must be 'required' or 'fyi'")
     return Squad(
         id=squad_id,
         name=str(data.get("name") or squad_id),
@@ -80,6 +86,7 @@ def parse_squad(data: Any, source: str = "squad") -> Squad:
         cap=cap,
         cwd=cwd,
         roles=roles,
+        review=review,
     )
 
 

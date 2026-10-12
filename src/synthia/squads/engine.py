@@ -342,7 +342,9 @@ class Engine:
             "digest": _summary_digest(path),
         }
         try:
-            item = inbox.create_from_squad(path, squad.id, m.job, m.agent_name, squad.name)
+            item = inbox.create_from_squad(
+                path, squad.id, m.job, m.agent_name, squad.name, review=squad.review
+            )
             event["inbox_id"] = item["id"]
         except Exception:  # the done signal must still go out if the inbox is unwritable
             logger.exception("could not create the inbox item for %s/%s", squad.id, m.job)

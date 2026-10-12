@@ -33,7 +33,7 @@ KINDS = {
     ".mp4": "mp4",
 }
 # Fields Python owns and may rewrite; everything else in an existing file is left alone.
-_OWNED = ("title", "summary_md", "desk", "deliverables", "director")
+_OWNED = ("title", "summary_md", "desk", "deliverables", "director", "review")
 
 
 def default_root() -> Path:
@@ -158,8 +158,13 @@ def create_from_squad(
     director: str | None,
     squad_name: str | None = None,
     root: Path | None = None,
+    review: str = "fyi",
 ) -> dict[str, Any]:
-    """Item for a finished squad job: out/summary.md plus out/* as deliverables."""
+    """Item for a finished squad job: out/summary.md plus out/* as deliverables.
+
+    `review` is "required" when Mark must approve before anything happens (public content),
+    or "fyi" when the squad already made its calls and the item is a report.
+    """
     root = root or default_root()
     job_path = Path(job_path)
     try:
@@ -176,6 +181,7 @@ def create_from_squad(
         desk=str(job_path),
         deliverables=deliverables_of(job_path),
         director=director,
+        review=review if review in ("required", "fyi") else "fyi",
     )
     return _upsert(root, fresh, "squad", squad, job)
 
@@ -192,6 +198,7 @@ def create_from_job(rec: Any, root: Path | None = None) -> dict[str, Any]:
         rec.name,
         rec.summary or "",
     )
+    fresh["review"] = "fyi"
     return _upsert(root, fresh, "job", None, rec.id)
 
 
