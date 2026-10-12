@@ -1,0 +1,9 @@
+[Unit]
+Description=Synthia Office squad: daily board sweep, weekdays 07:30
+
+[Timer]
+OnCalendar=Mon..Fri 07:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
