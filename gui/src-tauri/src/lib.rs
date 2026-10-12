@@ -363,7 +363,14 @@ pub fn run() {
             commands::today::today_meeting,
             commands::today::today_spend,
             commands::today::today_bugs,
-            commands::today::open_bug_dashboard
+            commands::today::open_bug_dashboard,
+            commands::brain::brain_overview,
+            commands::brain::brain_memories,
+            commands::brain::brain_memory,
+            commands::brain::brain_recalls,
+            commands::brain::brain_skills,
+            commands::brain::brain_connected,
+            commands::brain::brain_now
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

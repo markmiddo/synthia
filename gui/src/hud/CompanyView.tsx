@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatSince, statusColor, statusLabel } from "./format";
 import { call, reasonOf } from "./tauri";
 import type { BrainView } from "./brain";
-import { Engineering } from "./Engineering";
+import { Engineering, groupByRepo } from "./Engineering";
+import { BrainDrawer } from "./BrainDrawer";
+import { Hive, type HiveTeam } from "./Hive";
+import { useOverview } from "./hive";
 import { JobPanel } from "./JobPanel";
 import { RolePanel } from "./RolePanel";
 import { modelName, type Fleet, type FleetNode, type JobInfo, type RoleInfo, type SquadInfo } from "./types";
@@ -168,13 +171,77 @@ function StartJob({ squad, onStarted }: { squad: SquadInfo; onStarted: () => voi
   );
 }
 
+function hiveTeams(brain: BrainView, fleet: Fleet | null, squads: SquadInfo[]): HiveTeam[] {
+  const out: HiveTeam[] = [];
+  const state =
+    brain.link !== "online" ? "Offline" : brain.state === "thinking" ? "Thinking" : brain.state === "speaking" ? "Speaking" : "Standing by";
+  out.push({
+    key: "synthia",
+    eyebrow: "Chief of staff",
+    title: "Synthia",
+    meta: "Desk and Telegram",
+    chips: [{ label: state, live: brain.link === "online" && brain.state !== "idle" }],
+  });
+  const devs = groupByRepo(fleet?.nodes ?? []).flatMap((g) => g.nodes);
+  const repos = [...new Set(devs.map((d) => d.repo))].slice(0, 3);
+  const working = devs.filter((d) => d.status === "working");
+  const subs = devs.reduce((t, d) => t + d.subagents.filter((x) => x.live).length, 0);
+  out.push({
+    key: "engineering",
+    eyebrow: "Engineering",
+    title: devs.length === 0 ? "No developers running" : plural(devs.length, "developer"),
+    meta: repos.join(" · ") || "Nothing running",
+    chips: [
+      ...working.slice(0, 2).map((d) => ({ label: d.title, live: true })),
+      ...(subs > 0 ? [{ label: `+${subs} sub-agents`, live: false }] : []),
+    ],
+  });
+  for (const sq of squads) {
+    const director = sq.roles.find((r) => r.id === sq.director);
+    const others = sq.roles.filter((r) => r.id !== sq.director);
+    const liveRoles = new Set((fleet?.nodes ?? []).filter((n) => n.squad === sq.id && n.status !== "gone").map((n) => n.role));
+    const chips = [director, ...others]
+      .filter((r): r is RoleInfo => !!r && liveRoles.has(r.id))
+      .map((r) => ({ label: r.title || r.id, live: true }));
+    out.push({
+      key: sq.id,
+      eyebrow: `${sq.name} squad`,
+      title: director?.title || sq.name,
+      meta: others.map((r) => r.title || r.id).join(" · "),
+      chips: chips.length > 0 ? chips.slice(0, 3) : [{ label: "No live job", live: false }],
+    });
+  }
+  return out;
+}
+
 type Pick = { kind: "role"; squad: string; role: string } | { kind: "job"; squad: string; job: string };
 
-/** A collapsible department: a header with its counts, then whatever it holds. */
-function Dept({ name, counts, children }: { name: string; counts: string; children: React.ReactNode }) {
+/** A collapsible department. Picking its team card in the hive opens it and scrolls it into view. */
+function Dept({
+  name,
+  counts,
+  children,
+  deptKey,
+  selected,
+  signal,
+}: {
+  name: string;
+  counts: string;
+  children: React.ReactNode;
+  deptKey: string;
+  selected: string | null;
+  signal: number;
+}) {
   const [open, setOpen] = useState(true);
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (signal === 0 || selected !== deptKey) return;
+    setOpen(true);
+    const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    ref.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }, [signal, selected, deptKey]);
   return (
-    <section className="dept" aria-label={name}>
+    <section className={`dept${selected === deptKey ? " picked" : ""}`} aria-label={name} id={`dept-${deptKey}`} ref={ref}>
       <button type="button" className="dept-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <svg viewBox="0 0 10 10" aria-hidden="true" className={open ? "open" : ""}>
           <path d="M3 2l4 3-4 3" />
@@ -189,40 +256,6 @@ function Dept({ name, counts, children }: { name: string; counts: string; childr
 
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
-}
-
-/** Mark at the top, Synthia beneath as chief of staff. */
-function Leadership({ brain, fleet }: { brain: BrainView; fleet: Fleet | null }) {
-  const nodes = fleet?.nodes ?? [];
-  const working = nodes.filter((n) => n.status === "working").length;
-  const line =
-    brain.link !== "online"
-      ? "Her brain is not connected."
-      : brain.state === "thinking"
-        ? "Thinking it over…"
-        : brain.state === "speaking"
-          ? brain.spoken.text.slice(0, 120) || "Speaking."
-          : working > 0
-            ? `Standing by · ${plural(working, "agent")} working`
-            : "Standing by";
-  return (
-    <div className="leaders">
-      <div className="boss">
-        <b>Mark</b>
-        <span>Owner</span>
-      </div>
-      <i className="drop" />
-      <div className={`chief ${brain.link === "online" ? brain.state : "off"}`}>
-        <span className="chief-dot" />
-        <div>
-          <b>Synthia</b>
-          <span className="chief-role">Chief of staff</span>
-          <p>{line}</p>
-        </div>
-      </div>
-      <i className="drop" />
-    </div>
-  );
 }
 
 export function CompanyView({
@@ -240,6 +273,10 @@ export function CompanyView({
   brain: BrainView;
 }) {
   const [load, reload] = useSquads();
+  const overview = useOverview();
+  const [drawer, setDrawer] = useState(false);
+  const [teamSel, setTeamSel] = useState<string | null>(null);
+  const [signal, setSignal] = useState(0);
   const [pick, setPick] = useState<Pick | null>(null);
   const [seen, setSeen] = useState(0);
   if (request && request.n !== seen) {
@@ -251,6 +288,11 @@ export function CompanyView({
   const pickedRole = pick?.kind === "role" ? pickedSquad?.roles.find((r) => r.id === pick.role) : undefined;
   const panel = pick !== null && pickedSquad !== undefined && (pick.kind === "job" || pickedRole !== undefined);
 
+  const teams = hiveTeams(brain, fleet, squads);
+  const selectTeam = (key: string) => {
+    setTeamSel((t) => (t === key ? null : key));
+    setSignal((n) => n + 1);
+  };
   const note =
     load.status === "loading"
       ? "Reading your squads…"
@@ -261,9 +303,9 @@ export function CompanyView({
   return (
     <section className={`company${panel ? " editing" : ""}`} aria-label="Your organisation">
       <div className="co-scroll">
-        <Leadership brain={brain} fleet={fleet} />
+        <Hive teams={teams} overview={overview} selected={teamSel} onSelect={selectTeam} onOpenBrain={() => setDrawer(true)} />
         <div className="depts">
-          <Engineering fleet={fleet} now={now} onFocus={onFocus} Dept={Dept} />
+          <Engineering fleet={fleet} now={now} onFocus={onFocus} Dept={(p) => <Dept {...p} deptKey="engineering" selected={teamSel} signal={signal} />} />
           {squads.map((squad) => {
             const { director, team } = chartRows(squad);
             const roles = new Map(squad.roles.map((r) => [r.id, r]));
@@ -284,6 +326,9 @@ export function CompanyView({
             return (
               <Dept
                 key={squad.id}
+                deptKey={squad.id}
+                selected={teamSel}
+                signal={signal}
                 name={squad.name}
                 counts={members.length === 0 ? "no live job" : `${working} working · ${plural(members.length, "member")}`}
               >
@@ -321,6 +366,15 @@ export function CompanyView({
           </p>
         )}
       </div>
+      {drawer && (
+        <BrainDrawer
+          overview={overview}
+          agents={(fleet?.nodes ?? []).filter((n) => n.status !== "gone").length}
+          brainState={brain.state}
+          brainOnline={brain.link === "online"}
+          onClose={() => setDrawer(false)}
+        />
+      )}
       {panel && pick.kind === "role" && pickedSquad && pickedRole && (
         <RolePanel
           key={`${pick.squad}/${pick.role}`}
