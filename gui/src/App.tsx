@@ -132,6 +132,7 @@ function App() {
         <Spoken spoken={view.spoken} />
         <Scorecard
           today={todayData}
+          todayDate={today}
           nodes={nodes}
           chart={todayChart}
           fleet={fleet}
