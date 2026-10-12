@@ -194,9 +194,11 @@ def test_build_app_enables_concurrent_updates(parts):
     assert app.concurrent_updates > 1
 
 
-async def test_pump_events_survives_send_failure(parts):
+async def test_pump_events_survives_send_failure(parts, monkeypatch):
     brain, speech, bot, tr, ctx = parts
     from synthia.brain.concierge import SpokenEvent
+
+    monkeypatch.setattr(telegram_module, "EVENT_RETRY_DELAY_S", 0.01)
 
     bot.fail_send_voice_times = 1
     rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
@@ -332,3 +334,43 @@ async def test_pump_events_with_a_desk_client_still_requeues_when_no_chat(parts)
     pump.cancel()
     assert brain.requeued == [rec]
     assert brain.acked == []
+
+
+async def test_pump_events_requeues_on_push_failure_without_acking(parts, monkeypatch):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    monkeypatch.setattr(telegram_module, "EVENT_RETRY_DELAY_S", 0.01)
+    bot.fail_send_voice_times = 1
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert brain.requeued == [rec]
+    assert brain.acked == []
+
+
+async def test_losing_telegram_leg_says_where_it_was_answered(parts):
+    brain, speech, bot, tr, ctx = parts
+    tr.bot = bot
+    task = asyncio.create_task(tr.ask("run git push"))
+    await asyncio.sleep(0.01)
+    tr.resolved(False)  # the Router: the desk declined first
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert bot.texts[-1] == (1, "Answered at the desk: declined.")
+    # And a late "yes" is no longer taken as an answer to a live question.
+    assert tr._pending_confirm is None
+
+
+async def test_cancelled_telegram_leg_without_winner_says_cancelled(parts):
+    brain, speech, bot, tr, ctx = parts
+    tr.bot = bot
+    task = asyncio.create_task(tr.ask("run git push"))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert "cancelled" in bot.texts[-1][1]

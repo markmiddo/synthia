@@ -42,6 +42,7 @@ class Router:
             return False
         tasks = [asyncio.ensure_future(leg.ask(question)) for leg in legs]
         approved = False
+        winner: bool | None = None
         try:
             for done in asyncio.as_completed(tasks):
                 try:
@@ -50,9 +51,15 @@ class Router:
                     logger.exception("a confirmation leg failed")
                     continue
                 if answer is not None:
-                    approved = answer
+                    approved = winner = answer
                     break
         finally:
+            # Tell each leg still waiting how the question closed (None: nobody answered),
+            # so it can say so where the user is looking before it is cancelled.
+            for leg, t in zip(legs, tasks):
+                hook = getattr(leg, "resolved", None)
+                if not t.done() and callable(hook):
+                    hook(winner)
             for t in tasks:
                 t.cancel()
             for t in tasks:
@@ -63,12 +70,20 @@ class Router:
             journal.confirmation(question, approved)
         return approved
 
-    async def mirror_event(self, ev: Any) -> None:
-        """Copy a finished-job event to the desk. Best effort: never raises, never acks."""
-        if self.desk is None or not self.desk.has_clients or ev.job.id in self._mirrored:
-            return
+    async def mirror_event(self, ev: Any) -> bool:
+        """Copy a finished-job event to the desk. Never raises, never acks.
+
+        True when the desk has the event (now, or from an earlier attempt). False when
+        there was no client or the push failed, so a desk-only caller must not ack.
+        """
+        if ev.job.id in self._mirrored:
+            return True
+        if self.desk is None or not self.desk.has_clients:
+            return False
         try:
             await self.desk.push_event(ev.text or f"{ev.job.name} finished.")
-            self._mirrored.add(ev.job.id)
         except Exception:
             logger.exception("desk copy of a job event failed")
+            return False
+        self._mirrored.add(ev.job.id)
+        return True

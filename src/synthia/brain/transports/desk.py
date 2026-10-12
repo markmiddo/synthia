@@ -69,6 +69,8 @@ class DeskTransport:
         self._server: Server | None = None
         self._clients: set[ServerConnection] = set()
         self._pending: dict[str, asyncio.Future[bool | None]] = {}
+        # How the current question closed when another transport answered it first.
+        self._resolution: bool | None = None
         self._turns: set[asyncio.Task[None]] = set()
         self.state = "idle"
 
@@ -135,6 +137,7 @@ class DeskTransport:
             logger.warning("desk confirm with no client: %s", question)
             return None
         cid = uuid.uuid4().hex[:8]
+        self._resolution = None
         fut: asyncio.Future[bool | None] = asyncio.get_running_loop().create_future()
         self._pending[cid] = fut
         approved: bool | None = None
@@ -145,10 +148,17 @@ class DeskTransport:
             approved = None
         finally:
             self._pending.pop(cid, None)
+            if approved is None and self._resolution is not None:
+                # Another transport answered first: the card closes with the real answer.
+                approved = self._resolution
             # Tell every client the question is closed, so a stale card cannot linger and
             # swallow the next utterance as its answer.
             await self.broadcast({"type": "confirm_done", "id": cid, "approved": approved})
         return approved
+
+    def resolved(self, approved: bool | None) -> None:
+        """The Router closed this question: another transport answered (None: nobody)."""
+        self._resolution = approved
 
     async def confirm(self, question: str) -> bool:
         approved = bool(await self.ask(question))

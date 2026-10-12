@@ -176,6 +176,7 @@ class FakeTransport:
         self.delay = delay
         self.cancelled = False
         self.pushed = []
+        self.resolution = "unset"
 
     async def ask(self, question):
         self.asked.append(question)
@@ -189,6 +190,9 @@ class FakeTransport:
 
     async def push_event(self, text):
         self.pushed.append(text)
+
+    def resolved(self, approved):
+        self.resolution = approved
 
 
 def _router(origin, desk_connected=True, with_telegram=True, **kw):
@@ -258,6 +262,33 @@ async def test_mirror_event_copies_to_desk_once_and_never_raises():
     await r.mirror_event(SimpleNamespace(job=SimpleNamespace(id="c", name="n"), text="x"))
 
 
+async def test_mirror_event_reports_whether_the_desk_has_it():
+    r, desk, _ = _router(None)
+    ev = SimpleNamespace(job=SimpleNamespace(id="a", name="n"), text="Done.")
+    desk.has_clients = False
+    assert await r.mirror_event(ev) is False  # nobody to hear it: not delivered
+
+    desk.has_clients = True
+
+    async def boom(text):
+        raise RuntimeError("socket")
+
+    real, desk.push_event = desk.push_event, boom
+    assert await r.mirror_event(ev) is False  # push failed: not delivered
+    desk.push_event = real
+    assert await r.mirror_event(ev) is True
+    desk.has_clients = False
+    assert await r.mirror_event(ev) is True  # already copied: stays delivered across requeues
+    assert desk.pushed == ["Done."]
+
+
+async def test_losing_leg_is_told_the_winning_answer():
+    r, desk, tg = _router(None, desk={"delay": 0.2}, tg={"answer": False})
+    assert await r.confirm("q") is False
+    assert desk.cancelled and desk.resolution is False
+    assert tg.resolution == "unset"  # the winner is not told
+
+
 async def test_confirm_done_follows_every_confirm(desk):
     ws = await _client(desk)
     task = asyncio.create_task(desk.confirm("merge the PR"))
@@ -309,3 +340,44 @@ async def test_interrupt_frame_is_scoped_to_desk_turns(desk):
         await asyncio.sleep(0.02)
     assert desk.brain.interrupt_origins == ["desk"]
     await ws.close()
+
+
+async def test_desk_card_closes_with_the_real_answer_when_telegram_won(desk):
+    ws = await _client(desk)
+    task = asyncio.create_task(desk.ask("merge the PR"))
+    await _until(ws, "confirm")
+    desk.resolved(True)  # the Router: the phone approved first
+    task.cancel()
+    done = await _until(ws, "confirm_done")
+    assert done["approved"] is True
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_desk_only_pump_acks_only_when_the_desk_has_the_event(monkeypatch):
+    from synthia.brain import serve
+
+    monkeypatch.setattr("synthia.brain.concierge.EVENT_RETRY_DELAY_S", 0.01)
+    r, desk, _ = _router(None, with_telegram=False)
+    ev = SimpleNamespace(job=SimpleNamespace(id="a", name="n"), text="Done.")
+    calls = {"acked": [], "requeued": []}
+
+    class B:
+        async def events(self):
+            yield ev
+            await asyncio.sleep(3600)
+
+        def ack(self, job):
+            calls["acked"].append(job)
+
+        def requeue(self, job):
+            calls["requeued"].append(job)
+
+    async def boom(text):
+        raise RuntimeError("socket")
+
+    desk.push_event = boom
+    pump = asyncio.create_task(serve._pump_desk_events(B(), r))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert calls["acked"] == [] and calls["requeued"] == [ev.job]

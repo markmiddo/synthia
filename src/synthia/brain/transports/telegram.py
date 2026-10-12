@@ -76,6 +76,8 @@ class TelegramTransport:
         self.work_dir = work_dir
         self.bot: Any = None
         self._pending_confirm: asyncio.Future[bool] | None = None
+        # How the current question closed when another transport answered it first.
+        self._resolution: bool | None = None
         self._pump_task: asyncio.Task[None] | None = None
 
     # ---- helpers ----
@@ -199,15 +201,39 @@ class TelegramTransport:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[bool] = loop.create_future()
         self._pending_confirm = fut
+        self._resolution = None
         try:
             await self._speak(self.bot, self.chat_id, f"I want to {question}. Say yes to confirm.")
             return await asyncio.wait_for(fut, self.confirm_timeout_s)
         except asyncio.TimeoutError:
             await self._speak(self.bot, self.chat_id, "No confirmation, so I did not do it.")
             return None
+        except asyncio.CancelledError:
+            # Closed elsewhere (the desk answered, or the turn ended). Say so in text, or a
+            # late "yes" here would reach the model as a fresh request.
+            if self._pending_confirm is fut:
+                self._pending_confirm = None
+            await self._notify_closed()
+            raise
         finally:
             if self._pending_confirm is fut:
                 self._pending_confirm = None
+
+    def resolved(self, approved: bool | None) -> None:
+        """The Router closed this question: another transport answered (None: nobody)."""
+        self._resolution = approved
+
+    async def _notify_closed(self) -> None:
+        if self.bot is None or self.chat_id is None:
+            return
+        if self._resolution is None:
+            text = "That question was cancelled, so nothing was done."
+        else:
+            text = f"Answered at the desk: {'approved' if self._resolution else 'declined'}."
+        try:
+            await asyncio.wait_for(self.bot.send_message(chat_id=self.chat_id, text=text), 5)
+        except Exception as e:
+            logger.error("failed to tell the chat the question closed: %s", e)
 
     async def confirm(self, question: str) -> bool:
         approved = bool(await self.ask(question))
@@ -241,7 +267,11 @@ class TelegramTransport:
                     except asyncio.CancelledError:
                         raise
                     except Exception:
-                        logger.exception("event push failed")
+                        # Keep the event: its spoken text is cached, so the retry costs no
+                        # model turn, and the router remembers the desk already has its copy.
+                        logger.exception("event push failed; requeuing %s", ev.job.id)
+                        self.brain.requeue(ev.job)
+                        await asyncio.sleep(EVENT_RETRY_DELAY_S)
                         continue
             except asyncio.CancelledError:
                 raise

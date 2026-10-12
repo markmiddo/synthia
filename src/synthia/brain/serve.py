@@ -25,8 +25,12 @@ async def _pump_desk_events(brain: Any, router: Router) -> None:
                     brain.requeue(ev.job)
                     await asyncio.sleep(EVENT_RETRY_DELAY_S)
                     continue
-                await router.mirror_event(ev)
-                brain.ack(ev.job)
+                if await router.mirror_event(ev):
+                    brain.ack(ev.job)
+                else:
+                    # The push failed: keep the event (its spoken text is cached) and retry.
+                    brain.requeue(ev.job)
+                    await asyncio.sleep(EVENT_RETRY_DELAY_S)
         except asyncio.CancelledError:
             raise
         except Exception:
