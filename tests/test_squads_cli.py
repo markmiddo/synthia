@@ -64,3 +64,24 @@ def test_unknown_squad_is_an_error(env, capsys):
     eng, _, _, _ = env
     assert cli.main(["start", "nope", "b"], eng) == 1
     assert "no squad" in capsys.readouterr().err
+
+
+def test_outside_caller_can_ask_and_read_registered_agents_only(env, capsys):
+    eng, fake, _, mp = env
+    cli.main(["start", "growth", "b"], eng)
+    mp.setenv("HERDR_PANE_ID", "w1:p500")  # Mark's own pane, not in any squad
+    assert cli.main(["ask", "growth-director", "update from Mark"], eng) == 0
+    assert fake.prompts[-1] == ("growth-director", "update from Mark")
+    assert cli.main(["read", "growth-director"], eng) == 0
+    fake.panes["w1:p77"] = {"name": "marks-agent", "cwd": "/x"}
+    assert cli.main(["ask", "marks-agent", "hi"], eng) == 1
+    assert "not one of Synthia's agents" in capsys.readouterr().err
+
+
+def test_squad_member_stays_scoped_to_its_own_job(env, capsys):
+    eng, _, _, mp = env
+    cli.main(["start", "growth", "one", "--slug", "one"], eng)
+    cli.main(["start", "growth", "two", "--slug", "two"], eng)
+    mp.setenv("HERDR_PANE_ID", eng.registry.find_live("growth-director").pane_id)
+    assert cli.main(["ask", "growth-director-2", "hi"], eng) == 1
+    assert "not part of job" in capsys.readouterr().err

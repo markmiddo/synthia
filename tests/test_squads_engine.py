@@ -304,7 +304,7 @@ def test_shipped_squads_are_consistent():
         .hires
     )
     for sid, hires in {
-        "office": {"office-pm", "office-investor", "studio-designer"},
+        "office": {"office-pm", "office-dev-release", "studio-designer"},
         "release": {"release-faq", "release-video", "studio-designer"},
     }.items():
         sq = parse_squad(yaml.safe_load((root / sid / "squad.yaml").read_text()))

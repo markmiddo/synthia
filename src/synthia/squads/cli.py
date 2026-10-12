@@ -54,6 +54,21 @@ def _caller_job(engine: Engine) -> tuple[str, str]:
     return pane, m.job
 
 
+def _scope(engine: Engine) -> str | None:
+    """The caller's job when a squad member runs the command, else None.
+
+    Mark or Synthia (any pane outside a squad, or no herdr at all) may address any agent in
+    the registry; a squad member is held to its own job.
+    """
+    pane = os.environ.get("HERDR_PANE_ID", "")
+    try:
+        return _caller_job(engine)[1]
+    except SquadError:
+        if pane and engine.registry.get(pane) is not None:
+            raise
+        return None
+
+
 def run(args: argparse.Namespace, engine: Engine) -> str:
     cmd = args.cmd
     pane = os.environ.get("HERDR_PANE_ID", "")
@@ -61,17 +76,17 @@ def run(args: argparse.Namespace, engine: Engine) -> str:
         member = engine.member_for_pane(pane)
         return engine.hire(engine.job_path(member), args.role, args.brief, pane)
     if cmd == "ask":
-        _, job = _caller_job(engine)
+        job = _scope(engine)
         engine.ask(args.name, args.text, job)
         return f"sent to {args.name}"
     if cmd == "read":
-        _, job = _caller_job(engine)
+        job = _scope(engine)
         return engine.read(args.name, args.lines, job)
     if cmd == "wait":
-        _, job = _caller_job(engine)
+        job = _scope(engine)
         return engine.wait(args.name, args.timeout, job)
     if cmd == "dismiss":
-        _, job = _caller_job(engine)
+        job = _scope(engine)
         engine.dismiss(args.name, job)
         return f"dismissed {args.name}"
     if cmd == "log":
