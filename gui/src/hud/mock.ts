@@ -1,5 +1,5 @@
 // Fake data for previewing the HUD in a plain browser (dev only, see tauri.ts).
-import type { DayChart, Fleet, SynthiaState, UsageStats } from "./types";
+import type { DayChart, Fleet, SquadInfo, SynthiaState, UsageStats } from "./types";
 
 const now = () => Date.now();
 const min = 60_000;
@@ -9,6 +9,8 @@ const t0 = now();
 const params = new URLSearchParams(window.location.search);
 const EXTRA = Math.max(0, Number(params.get("n") ?? 0) - 3);
 const NEEDS = params.has("need");
+/** `?mock&squad` adds a live growth squad to the fleet and the Company view. */
+const SQUAD = params.has("squad");
 
 /** Changes that arrive after load, so the activity feed has something to show. */
 let step = 0;
@@ -28,15 +30,18 @@ function fleet(): Fleet {
     {
       paneId: "w1:p1", agent: "claude", status: "working", title: "Admin panel PR 175",
       repo: "eventflo", cwd: "", session: "s1", sinceMs: t0 - 17 * min,
+      squad: null, job: null, role: null, roleTitle: null, parent: null,
       subagents: subs("a", 10, ["Multi-tier promoter unlock build", "Promoter code manual unlock fix"]),
     },
     {
       paneId: "w1:p2", agent: "claude", status: NEEDS ? "needs-you" : "working", title: "Synthia to Jarvis brainstorm",
-      repo: "synthia", cwd: "", session: "s2", sinceMs: t0 - 1 * min, subagents: subs("b", 12, []),
+      repo: "synthia", cwd: "", session: "s2", sinceMs: t0 - 1 * min,
+      squad: null, job: null, role: null, roleTitle: null, parent: null, subagents: subs("b", 12, []),
     },
     {
       paneId: "w1:p3", agent: "claude", status: step >= 2 ? "working" : "idle", title: "Remote working visa timing",
-      repo: "personal", cwd: "", session: "s3", sinceMs: t0 - 81 * min, subagents: [],
+      repo: "personal", cwd: "", session: "s3", sinceMs: t0 - 81 * min,
+      squad: null, job: null, role: null, roleTitle: null, parent: null, subagents: [],
     },
   ];
   for (let i = 0; i < EXTRA; i++) {
@@ -44,6 +49,7 @@ function fleet(): Fleet {
       paneId: `w2:p${i}`, agent: "claude", status: i % 3 === 0 ? "working" : i % 3 === 1 ? "idle" : "done",
       title: i === 0 ? "A deliberately long agent title that has to wrap inside its card and then be cut off" : `Side quest ${i + 1}`,
       repo: "eventflo", cwd: "", session: `x${i}`, sinceMs: t0 - (5 + i * 7) * min,
+      squad: null, job: null, role: null, roleTitle: null, parent: null,
       subagents: i % 2 === 0 ? subs(`x${i}`, 2, ["Checking"]) : [],
     });
   }
@@ -82,6 +88,24 @@ function day(date: string): DayChart {
   };
 }
 
+const SQUADS: SquadInfo[] = SQUAD
+  ? [
+      {
+        id: "growth", name: "Growth", director: "growth-director", cap: 4, cwd: "~/dev/eventflo",
+        roles: [
+          { id: "growth-director", title: "Marketing Director", model: "claude-opus-5-5", hires: ["growth-seo", "growth-writer", "growth-editor"], description: "Runs the growth team.", prompt: "You run the growth team.\n\nHire specialists, review their work, deliver.", hasAgentFile: true },
+          { id: "growth-seo", title: "SEO Strategist", model: "claude-sonnet-5-5", hires: [], description: "Keywords and briefs.", prompt: "You find the topics worth writing.", hasAgentFile: true },
+          { id: "growth-writer", title: "Writer", model: "claude-sonnet-5-5", hires: [], description: "Drafts posts.", prompt: "You write the posts.", hasAgentFile: true },
+          { id: "growth-editor", title: "Editor and Fact-checker", model: "claude-haiku-5-5", hires: [], description: "Edits.", prompt: "You edit and check facts.", hasAgentFile: false },
+        ],
+        jobs: [
+          { id: "2026-10-13-week-of-posts", path: "/mock/job", state: "working", updatedMs: t0 - 2 * min, lastLog: "Writer is drafting post two of five" },
+          { id: "2026-10-06-launch-notes", path: "/mock/job2", state: "done", updatedMs: t0 - 7 * 24 * 60 * min, lastLog: "Delivered four posts" },
+        ],
+      },
+    ]
+  : [];
+
 export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const table: Record<string, unknown> = {
     fleet_snapshot: fleet(),
@@ -91,6 +115,9 @@ export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promis
     get_desk_token: "mock",
     get_hotkeys: ["none", "Key.alt_l"],
     get_synthia_state: { status: "ready", recording: false } satisfies SynthiaState,
+    squads_list: SQUADS,
+    squad_role_save: null,
+    squad_open_job: null,
     fleet_day: day(String(args?.date ?? "")),
   };
   return Promise.resolve((cmd in table ? table[cmd] : null) as T);

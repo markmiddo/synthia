@@ -12,6 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
+use super::squads::{read_registry, Dirs, Member};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -53,6 +54,13 @@ pub struct FleetNode {
     /// Epoch milliseconds when this pane entered its current status (first seen by us).
     pub since_ms: i64,
     pub subagents: Vec<SubAgent>,
+    /// Squad membership from the squad registry (all `None` for ordinary agents).
+    pub squad: Option<String>,
+    pub job: Option<String>,
+    pub role: Option<String>,
+    pub role_title: Option<String>,
+    /// Pane id of the director this specialist reports to.
+    pub parent: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Default)]
@@ -217,6 +225,7 @@ impl FleetTracker {
         agents: &[RawAgent],
         now_ms: i64,
         home: &Path,
+        registry: &HashMap<String, Member>,
         subagents_for: &dyn Fn(&RawAgent) -> Vec<SubAgent>,
     ) -> Vec<FleetNode> {
         let mut nodes = Vec::with_capacity(agents.len());
@@ -236,7 +245,14 @@ impl FleetTracker {
             } else {
                 a.terminal_title_stripped.trim().to_string()
             };
+            let member = registry.get(&a.pane_id);
+            let some = |s: &str| if s.is_empty() { None } else { Some(s.to_string()) };
             nodes.push(FleetNode {
+                squad: member.and_then(|m| some(&m.squad)),
+                job: member.and_then(|m| some(&m.job)),
+                role: member.and_then(|m| some(&m.role)),
+                role_title: member.and_then(|m| some(&m.title)),
+                parent: member.and_then(|m| m.parent.clone()),
                 pane_id: a.pane_id.clone(),
                 agent: a.agent.clone(),
                 status: map_status(&a.agent_status).to_string(),
@@ -280,6 +296,7 @@ fn build_fleet(
     raw: Result<String, String>,
     tracker: &mut FleetTracker,
     home: &Path,
+    registry: &HashMap<String, Member>,
     now: SystemTime,
 ) -> Fleet {
     let now_ms = now.duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
@@ -290,7 +307,7 @@ fn build_fleet(
         }
     };
     let projects = home.join(".claude").join("projects");
-    let nodes = tracker.update(&agents, now_ms, home, &|a: &RawAgent| {
+    let nodes = tracker.update(&agents, now_ms, home, registry, &|a: &RawAgent| {
         match (&a.agent[..], a.agent_session.as_ref().and_then(|s| s.value.as_deref())) {
             ("claude", Some(session)) => read_subagents(&projects, &a.cwd, session, now),
             _ => Vec::new(),
@@ -435,7 +452,8 @@ pub(super) fn home_dir() -> PathBuf {
 async fn collect(state: &AppState) -> Fleet {
     let raw = run_herdr(&["api", "snapshot"]).await;
     let mut tracker = state.fleet.lock();
-    build_fleet(raw, &mut tracker, &home_dir(), SystemTime::now())
+    let registry = read_registry(&Dirs::for_home(&home_dir()).desk);
+    build_fleet(raw, &mut tracker, &home_dir(), &registry, SystemTime::now())
 }
 
 /// Arguments for focusing a pane. Pane ids look like `w6521f9f5734061:p1Q0`.
@@ -638,7 +656,7 @@ mod tests {
     }
 
     fn fleet_at(tracker: &mut FleetTracker, raw: &str, secs: u64) -> Fleet {
-        build_fleet(Ok(raw.to_string()), tracker, Path::new(HOME), at(secs))
+        build_fleet(Ok(raw.to_string()), tracker, Path::new(HOME), &HashMap::new(), at(secs))
     }
 
     #[test]
@@ -688,6 +706,40 @@ mod tests {
         assert_eq!(after.nodes.len(), 1);
     }
 
+    fn member(squad: &str, role: &str, title: &str, parent: Option<&str>) -> Member {
+        Member {
+            squad: squad.into(),
+            job: "2026-10-13-posts".into(),
+            role: role.into(),
+            title: title.into(),
+            parent: parent.map(String::from),
+            ended_at: None,
+        }
+    }
+
+    #[test]
+    fn registry_members_are_attached_to_fleet_nodes_by_pane_id() {
+        let mut registry = HashMap::new();
+        registry.insert("w1:p1".to_string(), member("growth", "growth-director", "Director", None));
+        registry.insert("w1:p2".to_string(), member("growth", "growth-writer", "Writer", Some("w1:p1")));
+        registry.insert("w9:p9".to_string(), member("growth", "growth-seo", "SEO", Some("w1:p1")));
+        let mut tracker = FleetTracker::default();
+        let fleet = build_fleet(Ok(FIXTURE.to_string()), &mut tracker, Path::new(HOME), &registry, at(100));
+        let n = &fleet.nodes;
+        assert_eq!(n[0].squad.as_deref(), Some("growth"));
+        assert_eq!(n[0].role.as_deref(), Some("growth-director"));
+        assert_eq!(n[0].parent, None);
+        assert_eq!(n[1].role_title.as_deref(), Some("Writer"));
+        assert_eq!(n[1].parent.as_deref(), Some("w1:p1"));
+        assert_eq!(n[1].job.as_deref(), Some("2026-10-13-posts"));
+        // Ordinary agents carry nothing; registry entries with no pane are ignored.
+        assert!(n[2].squad.is_none() && n[2].role.is_none() && n[2].parent.is_none());
+        assert_eq!(n.len(), 4);
+        let json = serde_json::to_value(&fleet).unwrap();
+        assert_eq!(json["nodes"][1]["roleTitle"], "Writer");
+        assert!(json["nodes"][2]["squad"].is_null());
+    }
+
     #[test]
     fn herdr_failure_becomes_a_plain_reason_not_an_empty_chart() {
         let mut tracker = FleetTracker::default();
@@ -695,6 +747,7 @@ mod tests {
             Err("herdr is not installed or not on the PATH".into()),
             &mut tracker,
             Path::new(HOME),
+            &HashMap::new(),
             at(1),
         );
         assert!(!fleet.herdr_ok);
@@ -710,7 +763,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         write_sub(&dir, "agent-a", "Check the migration", 990, true);
         let mut tracker = FleetTracker::default();
-        let fleet = build_fleet(Ok(FIXTURE.to_string()), &mut tracker, &home, at(1_000));
+        let fleet = build_fleet(Ok(FIXTURE.to_string()), &mut tracker, &home, &HashMap::new(), at(1_000));
         assert_eq!(fleet.nodes[0].subagents.len(), 1);
         assert!(fleet.nodes[0].subagents[0].live);
         assert!(fleet.nodes[1].subagents.is_empty());

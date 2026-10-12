@@ -99,16 +99,34 @@ function WindowControls() {
   );
 }
 
+export type View = "constellation" | "company";
+
+function ViewToggle({ view, onView }: { view: View; onView: (v: View) => void }) {
+  return (
+    <div className="views" role="group" aria-label="View">
+      {(["constellation", "company"] as const).map((v) => (
+        <button key={v} type="button" aria-pressed={view === v} className={view === v ? "on" : ""} onClick={() => onView(v)}>
+          {v === "constellation" ? "Constellation" : "Company"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function TopBar({
   nodes,
   usage,
   now,
   preview,
+  view,
+  onView,
 }: {
   nodes: FleetNode[];
   usage: UsageStats | null;
   now: number;
   preview: boolean;
+  view: View;
+  onView: (v: View) => void;
 }) {
   const count = (s: FleetNode["status"]) => nodes.filter((n) => n.status === s).length;
   const total = nodes.length;
@@ -128,6 +146,7 @@ export function TopBar({
       </div>
       <span className="clock" data-tauri-drag-region>{stamp(now)}</span>
       {preview && <span className="example">PREVIEW DATA</span>}
+      <ViewToggle view={view} onView={onView} />
       <div className="gauges" data-tauri-drag-region>
         <Gauge value={count("working")} total={total} label="working" color="var(--blue)" />
         <Gauge value={count("needs-you")} total={total} label="need you" color="var(--amber)" />
