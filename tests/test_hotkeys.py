@@ -27,6 +27,15 @@ def _make_callbacks():
 # -- KEY_CODE_MAP -------------------------------------------------------------
 
 
+class TestDisabledHotkey:
+    def test_none_maps_to_a_code_no_key_sends(self):
+        from synthia.hotkeys import EvdevHotkeyListener
+
+        code = EvdevHotkeyListener.get_key_code("none")
+        assert code == EvdevHotkeyListener.DISABLED_KEY_CODE
+        assert code not in EvdevHotkeyListener.KEY_CODE_MAP.values()
+
+
 class TestKeyCodeMap:
     """Tests for EvdevHotkeyListener.KEY_CODE_MAP."""
 

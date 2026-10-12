@@ -17,6 +17,9 @@ from .display import is_wayland
 logger = logging.getLogger(__name__)
 
 
+DISABLED_HOTKEY = "none"
+
+
 class HotkeyListener(ABC):
     """Abstract base class for hotkey listeners."""
 
@@ -58,6 +61,8 @@ class EvdevHotkeyListener(HotkeyListener):
         "Key.shift_r": 54,  # KEY_RIGHTSHIFT
         "Key.shift_l": 42,  # KEY_LEFTSHIFT
     }
+    # "none" turns a hotkey off (e.g. dictation when Murmur owns it); -1 matches no key.
+    DISABLED_KEY_CODE = -1
 
     def __init__(
         self,
@@ -82,6 +87,8 @@ class EvdevHotkeyListener(HotkeyListener):
     @classmethod
     def get_key_code(cls, key_string: str) -> int:
         """Convert pynput key string to evdev key code."""
+        if key_string == DISABLED_HOTKEY:
+            return cls.DISABLED_KEY_CODE
         return cls.KEY_CODE_MAP.get(key_string, 97)  # Default to Right Ctrl
 
     def _find_keyboard_devices(self) -> list:

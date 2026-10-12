@@ -191,6 +191,13 @@ class TestValidateConfig:
         warnings = validate_config(cfg)
         assert any("dictation_key" in w for w in warnings)
 
+    def test_dictation_key_none_turns_dictation_off_without_warning(self):
+        """dictation_key "none" is valid (Murmur owns dictation); assistant_key "none" is not."""
+        cfg = {**DEFAULT_CONFIG, "dictation_key": "none"}
+        assert not any("dictation_key" in w for w in validate_config(cfg))
+        cfg = {**DEFAULT_CONFIG, "assistant_key": "none"}
+        assert any("assistant_key" in w for w in validate_config(cfg))
+
     def test_accepts_valid_hotkeys(self):
         """All VALID_HOTKEYS are accepted without warnings."""
         for key in VALID_HOTKEYS:

@@ -189,6 +189,8 @@ class Synthia:
         # Display friendly key names
         dictation_display = (
             self.config["dictation_key"].replace("Key.", "").replace("_", " ").title()
+            if self.config["dictation_key"] != "none"
+            else "off"
         )
         assistant_display = (
             self.config["assistant_key"].replace("Key.", "").replace("_", " ").title()

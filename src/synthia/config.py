@@ -109,6 +109,9 @@ def validate_config(config: ConfigDict) -> list[str]:
     # Hotkeys
     for key in ("dictation_key", "assistant_key"):
         val = config.get(key)
+        # Dictation can be turned off ("none") when another tool, such as Murmur, owns it.
+        if key == "dictation_key" and val == "none":
+            continue
         if val is not None and val not in VALID_HOTKEYS:
             warnings.append(
                 f"{key}={val!r} is not a known hotkey. "
