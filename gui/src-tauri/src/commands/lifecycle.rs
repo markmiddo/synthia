@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::error::{AppError, AppResult};
-use crate::state::AppState;
 use crate::get_runtime_state_path;
+use crate::state::AppState;
 
 /// The voice app runs as this systemd user unit.
 const VOICE_UNIT: &str = "synthia-voice.service";
@@ -50,7 +50,11 @@ pub fn start_synthia() -> AppResult<String> {
         return Err(AppError::Process(format!(
             "systemctl could not start {}: {}",
             VOICE_UNIT,
-            if why.is_empty() { "unknown error" } else { &why }
+            if why.is_empty() {
+                "unknown error"
+            } else {
+                &why
+            }
         )));
     }
     Ok("Synthia started".to_string())
@@ -58,9 +62,7 @@ pub fn start_synthia() -> AppResult<String> {
 
 #[tauri::command]
 pub fn stop_synthia(state: tauri::State<'_, AppState>) -> AppResult<String> {
-    let _ = Command::new("pkill")
-        .args(["-f", "synthia.main"])
-        .output();
+    let _ = Command::new("pkill").args(["-f", "synthia.main"]).output();
 
     let mut proc = state.synthia_process.lock();
     *proc = None;

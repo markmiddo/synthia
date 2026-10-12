@@ -147,7 +147,9 @@ fn repo_name(cwd: &str, home: &Path) -> String {
 
 /// Claude names a project directory after the cwd with `/` and `.` replaced by `-`.
 fn project_dir_name(cwd: &str) -> String {
-    cwd.chars().map(|c| if c == '/' || c == '.' { '-' } else { c }).collect()
+    cwd.chars()
+        .map(|c| if c == '/' || c == '.' { '-' } else { c })
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -167,19 +169,31 @@ fn mtime(path: &Path) -> Option<SystemTime> {
 
 /// Sub-agents of one Claude session, newest first, capped. Live means the transcript
 /// was modified in the last minute.
-fn read_subagents(projects_root: &Path, cwd: &str, session: &str, now: SystemTime) -> Vec<SubAgent> {
+fn read_subagents(
+    projects_root: &Path,
+    cwd: &str,
+    session: &str,
+    now: SystemTime,
+) -> Vec<SubAgent> {
     if session.is_empty() || session.contains('/') || session.contains("..") {
         return Vec::new();
     }
-    let dir = projects_root.join(project_dir_name(cwd)).join(session).join("subagents");
+    let dir = projects_root
+        .join(project_dir_name(cwd))
+        .join(session)
+        .join("subagents");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
     let mut metas: Vec<(SystemTime, String, PathBuf, bool)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-        let Some(stem) = name.strip_suffix(".meta.json") else { continue };
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(stem) = name.strip_suffix(".meta.json") else {
+            continue;
+        };
         let transcript = dir.join(format!("{stem}.jsonl"));
         let modified = mtime(&transcript).or_else(|| mtime(&path));
         let Some(modified) = modified else { continue };
@@ -193,7 +207,8 @@ fn read_subagents(projects_root: &Path, cwd: &str, session: &str, now: SystemTim
     metas
         .into_iter()
         .filter_map(|(_, id, path, live)| {
-            let meta: SubAgentMeta = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+            let meta: SubAgentMeta =
+                serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
             Some(SubAgent {
                 id,
                 description: meta.description,
@@ -246,7 +261,13 @@ impl FleetTracker {
                 a.terminal_title_stripped.trim().to_string()
             };
             let member = registry.get(&a.pane_id);
-            let some = |s: &str| if s.is_empty() { None } else { Some(s.to_string()) };
+            let some = |s: &str| {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            };
             nodes.push(FleetNode {
                 squad: member.and_then(|m| some(&m.squad)),
                 job: member.and_then(|m| some(&m.job)),
@@ -277,11 +298,14 @@ impl FleetTracker {
                 for s in &mut frozen.subagents {
                     s.live = false;
                 }
-                self.gone.insert(prev.pane_id.clone(), (frozen, now_ms + GONE_GRACE_MS));
+                self.gone
+                    .insert(prev.pane_id.clone(), (frozen, now_ms + GONE_GRACE_MS));
             }
         }
-        self.gone.retain(|pane, (_, expires)| *expires > now_ms && !present.contains(&pane.as_str()));
-        self.since.retain(|pane, _| present.contains(&pane.as_str()));
+        self.gone
+            .retain(|pane, (_, expires)| *expires > now_ms && !present.contains(&pane.as_str()));
+        self.since
+            .retain(|pane, _| present.contains(&pane.as_str()));
 
         self.last_nodes = nodes.clone();
         let mut gone: Vec<&(FleetNode, i64)> = self.gone.values().collect();
@@ -299,21 +323,33 @@ fn build_fleet(
     registry: &HashMap<String, Member>,
     now: SystemTime,
 ) -> Fleet {
-    let now_ms = now.duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    let now_ms = now
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
     let agents = match raw.and_then(|r| parse_snapshot(&r)) {
         Ok(a) => a,
         Err(error) => {
-            return Fleet { nodes: Vec::new(), herdr_ok: false, error: Some(error) };
+            return Fleet {
+                nodes: Vec::new(),
+                herdr_ok: false,
+                error: Some(error),
+            };
         }
     };
     let projects = home.join(".claude").join("projects");
-    let nodes = tracker.update(&agents, now_ms, home, registry, &|a: &RawAgent| {
-        match (&a.agent[..], a.agent_session.as_ref().and_then(|s| s.value.as_deref())) {
-            ("claude", Some(session)) => read_subagents(&projects, &a.cwd, session, now),
-            _ => Vec::new(),
-        }
+    let nodes = tracker.update(&agents, now_ms, home, registry, &|a: &RawAgent| match (
+        &a.agent[..],
+        a.agent_session.as_ref().and_then(|s| s.value.as_deref()),
+    ) {
+        ("claude", Some(session)) => read_subagents(&projects, &a.cwd, session, now),
+        _ => Vec::new(),
     });
-    Fleet { nodes, herdr_ok: true, error: None }
+    Fleet {
+        nodes,
+        herdr_ok: true,
+        error: None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +397,10 @@ fn merge_day(chart: &mut DayChart, fleet: &Fleet, now_ms: i64) -> bool {
         let key = n.session.clone().unwrap_or_else(|| n.pane_id.clone());
         let node = chart.nodes.entry(key).or_insert_with(|| {
             changed = true;
-            DayNode { first_seen: now_ms, ..DayNode::default() }
+            DayNode {
+                first_seen: now_ms,
+                ..DayNode::default()
+            }
         });
         if node.last_status != n.status || node.title != n.title || node.pane_id != n.pane_id {
             changed = true;
@@ -376,7 +415,10 @@ fn merge_day(chart: &mut DayChart, fleet: &Fleet, now_ms: i64) -> bool {
         for s in &n.subagents {
             let sub = node.subagents.entry(s.id.clone()).or_insert_with(|| {
                 changed = true;
-                DaySubAgent { first_seen: now_ms, ..DaySubAgent::default() }
+                DaySubAgent {
+                    first_seen: now_ms,
+                    ..DaySubAgent::default()
+                }
             });
             if sub.last_live != s.live {
                 changed = true;
@@ -407,9 +449,10 @@ fn read_day(dir: &Path, date: &str) -> AppResult<DayChart> {
     crate::paths::validate_filename(&name)?;
     match std::fs::read_to_string(dir.join(&name)) {
         Ok(text) => Ok(serde_json::from_str(&text)?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Ok(DayChart { date: date.to_string(), nodes: BTreeMap::new() })
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DayChart {
+            date: date.to_string(),
+            nodes: BTreeMap::new(),
+        }),
         Err(e) => Err(e.into()),
     }
 }
@@ -461,7 +504,9 @@ fn focus_args(pane_id: &str) -> AppResult<Vec<String>> {
     let ok = !pane_id.is_empty()
         && pane_id.len() <= 64
         && !pane_id.starts_with('-')
-        && pane_id.chars().all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '_' || c == '-');
+        && pane_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '_' || c == '-');
     if !ok {
         return Err(AppError::Validation(format!("bad pane id: {pane_id}")));
     }
@@ -481,7 +526,10 @@ pub async fn fleet_snapshot(state: tauri::State<'_, AppState>) -> Result<Fleet, 
 pub async fn fleet_focus(pane_id: String) -> AppResult<()> {
     let args = focus_args(&pane_id)?;
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    run_herdr(&refs).await.map(|_| ()).map_err(AppError::Process)
+    run_herdr(&refs)
+        .await
+        .map(|_| ())
+        .map_err(AppError::Process)
 }
 
 #[tauri::command]
@@ -543,7 +591,8 @@ mod tests {
     const HOME: &str = "/home/user";
 
     fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("synthia-fleet-{name}-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("synthia-fleet-{name}-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -559,7 +608,10 @@ mod tests {
         assert_eq!(agents[0].pane_id, "w1:p1");
         assert_eq!(agents[0].terminal_title_stripped, "Gallery drafts PR");
         assert_eq!(
-            agents[0].agent_session.as_ref().and_then(|s| s.value.as_deref()),
+            agents[0]
+                .agent_session
+                .as_ref()
+                .and_then(|s| s.value.as_deref()),
             Some("11111111-1111-4111-8111-111111111111")
         );
         assert!(agents[3].agent_session.is_none());
@@ -567,7 +619,9 @@ mod tests {
 
     #[test]
     fn rejects_a_malformed_snapshot_with_a_reason() {
-        assert!(parse_snapshot("not json").unwrap_err().contains("unexpected herdr snapshot"));
+        assert!(parse_snapshot("not json")
+            .unwrap_err()
+            .contains("unexpected herdr snapshot"));
         assert!(parse_snapshot("{\"result\":{}}").is_err());
     }
 
@@ -585,9 +639,15 @@ mod tests {
     fn repo_is_first_segment_under_eventflo_else_last_segment() {
         let home = Path::new(HOME);
         assert_eq!(repo_name("/home/user/dev/eventflo/eva-ai", home), "eva-ai");
-        assert_eq!(repo_name("/home/user/dev/eventflo/eva-ai/src/deep", home), "eva-ai");
+        assert_eq!(
+            repo_name("/home/user/dev/eventflo/eva-ai/src/deep", home),
+            "eva-ai"
+        );
         assert_eq!(repo_name("/home/user/dev/eventflo", home), "eventflo");
-        assert_eq!(repo_name("/home/user/dev/misc/synthia/.worktrees/jarvis-see", home), "jarvis-see");
+        assert_eq!(
+            repo_name("/home/user/dev/misc/synthia/.worktrees/jarvis-see", home),
+            "jarvis-see"
+        );
         assert_eq!(repo_name("/home/user/dev/personal", home), "personal");
     }
 
@@ -620,7 +680,10 @@ mod tests {
     #[test]
     fn finds_subagents_with_liveness_newest_first() {
         let root = temp("subs");
-        let dir = root.join("-home-user-dev-misc-synthia").join("sess-1").join("subagents");
+        let dir = root
+            .join("-home-user-dev-misc-synthia")
+            .join("sess-1")
+            .join("subagents");
         fs::create_dir_all(&dir).unwrap();
         write_sub(&dir, "agent-old", "Old research", 1_000, true);
         write_sub(&dir, "agent-live", "Build the HUD", 10_000, true);
@@ -648,7 +711,10 @@ mod tests {
             write_sub(&dir, &format!("agent-{i:02}"), "x", 1_000 + i, true);
         }
         fs::write(dir.join("agent-bad.meta.json"), "{not json").unwrap();
-        assert_eq!(read_subagents(&root, "/p", "s", at(5_000)).len(), SUBAGENT_CAP);
+        assert_eq!(
+            read_subagents(&root, "/p", "s", at(5_000)).len(),
+            SUBAGENT_CAP
+        );
         assert!(read_subagents(&root, "/p", "missing", at(5_000)).is_empty());
         assert!(read_subagents(&root, "/p", "../escape", at(5_000)).is_empty());
         assert!(read_subagents(&root, "/p", "", at(5_000)).is_empty());
@@ -656,7 +722,13 @@ mod tests {
     }
 
     fn fleet_at(tracker: &mut FleetTracker, raw: &str, secs: u64) -> Fleet {
-        build_fleet(Ok(raw.to_string()), tracker, Path::new(HOME), &HashMap::new(), at(secs))
+        build_fleet(
+            Ok(raw.to_string()),
+            tracker,
+            Path::new(HOME),
+            &HashMap::new(),
+            at(secs),
+        )
     }
 
     #[test]
@@ -702,7 +774,11 @@ mod tests {
         assert_eq!(during.nodes.len(), 4);
         assert!(during.nodes[1..].iter().all(|n| n.status == "gone"));
         assert_eq!(during.nodes[1].since_ms, 110_000);
-        let after = fleet_at(&mut tracker, one_left, 110 + GONE_GRACE_MS as u64 / 1000 + 1);
+        let after = fleet_at(
+            &mut tracker,
+            one_left,
+            110 + GONE_GRACE_MS as u64 / 1000 + 1,
+        );
         assert_eq!(after.nodes.len(), 1);
     }
 
@@ -720,11 +796,26 @@ mod tests {
     #[test]
     fn registry_members_are_attached_to_fleet_nodes_by_pane_id() {
         let mut registry = HashMap::new();
-        registry.insert("w1:p1".to_string(), member("growth", "growth-director", "Director", None));
-        registry.insert("w1:p2".to_string(), member("growth", "growth-writer", "Writer", Some("w1:p1")));
-        registry.insert("w9:p9".to_string(), member("growth", "growth-seo", "SEO", Some("w1:p1")));
+        registry.insert(
+            "w1:p1".to_string(),
+            member("growth", "growth-director", "Director", None),
+        );
+        registry.insert(
+            "w1:p2".to_string(),
+            member("growth", "growth-writer", "Writer", Some("w1:p1")),
+        );
+        registry.insert(
+            "w9:p9".to_string(),
+            member("growth", "growth-seo", "SEO", Some("w1:p1")),
+        );
         let mut tracker = FleetTracker::default();
-        let fleet = build_fleet(Ok(FIXTURE.to_string()), &mut tracker, Path::new(HOME), &registry, at(100));
+        let fleet = build_fleet(
+            Ok(FIXTURE.to_string()),
+            &mut tracker,
+            Path::new(HOME),
+            &registry,
+            at(100),
+        );
         let n = &fleet.nodes;
         assert_eq!(n[0].squad.as_deref(), Some("growth"));
         assert_eq!(n[0].role.as_deref(), Some("growth-director"));
@@ -752,7 +843,10 @@ mod tests {
         );
         assert!(!fleet.herdr_ok);
         assert!(fleet.nodes.is_empty());
-        assert_eq!(fleet.error.as_deref(), Some("herdr is not installed or not on the PATH"));
+        assert_eq!(
+            fleet.error.as_deref(),
+            Some("herdr is not installed or not on the PATH")
+        );
     }
 
     #[test]
@@ -763,11 +857,20 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         write_sub(&dir, "agent-a", "Check the migration", 990, true);
         let mut tracker = FleetTracker::default();
-        let fleet = build_fleet(Ok(FIXTURE.to_string()), &mut tracker, &home, &HashMap::new(), at(1_000));
+        let fleet = build_fleet(
+            Ok(FIXTURE.to_string()),
+            &mut tracker,
+            &home,
+            &HashMap::new(),
+            at(1_000),
+        );
         assert_eq!(fleet.nodes[0].subagents.len(), 1);
         assert!(fleet.nodes[0].subagents[0].live);
         assert!(fleet.nodes[1].subagents.is_empty());
-        assert!(fleet.nodes[3].subagents.is_empty(), "only claude agents have sub-agents");
+        assert!(
+            fleet.nodes[3].subagents.is_empty(),
+            "only claude agents have sub-agents"
+        );
         fs::remove_dir_all(home).ok();
     }
 
@@ -775,15 +878,24 @@ mod tests {
     fn day_merge_keeps_first_seen_and_flags_real_changes_only() {
         let mut tracker = FleetTracker::default();
         let fleet = fleet_at(&mut tracker, FIXTURE, 100);
-        let mut chart = DayChart { date: "2026-10-12".into(), nodes: BTreeMap::new() };
+        let mut chart = DayChart {
+            date: "2026-10-12".into(),
+            nodes: BTreeMap::new(),
+        };
         assert!(merge_day(&mut chart, &fleet, 100_000));
         assert_eq!(chart.nodes.len(), 4);
         let key = "11111111-1111-4111-8111-111111111111";
         assert_eq!(chart.nodes[key].first_seen, 100_000);
         assert_eq!(chart.nodes[key].last_status, "working");
-        assert!(chart.nodes.contains_key("w1:p4"), "no session falls back to the pane id");
+        assert!(
+            chart.nodes.contains_key("w1:p4"),
+            "no session falls back to the pane id"
+        );
 
-        assert!(!merge_day(&mut chart, &fleet, 130_000), "only lastSeen moved");
+        assert!(
+            !merge_day(&mut chart, &fleet, 130_000),
+            "only lastSeen moved"
+        );
         assert_eq!(chart.nodes[key].first_seen, 100_000);
         assert_eq!(chart.nodes[key].last_seen, 130_000);
 
@@ -799,7 +911,10 @@ mod tests {
         let dir = temp("day");
         let mut tracker = FleetTracker::default();
         let fleet = fleet_at(&mut tracker, FIXTURE, 100);
-        let mut chart = DayChart { date: "2026-10-12".into(), nodes: BTreeMap::new() };
+        let mut chart = DayChart {
+            date: "2026-10-12".into(),
+            nodes: BTreeMap::new(),
+        };
         merge_day(&mut chart, &fleet, 100_000);
         write_day(&dir, &chart).unwrap();
         assert_eq!(read_day(&dir, "2026-10-12").unwrap(), chart);
@@ -813,7 +928,14 @@ mod tests {
     #[test]
     fn day_reads_reject_anything_but_a_date() {
         let dir = temp("baddate");
-        for bad in ["../etc/passwd", "2026-13-40", "2026-10-1", "", "2026-10-12.json", "latest"] {
+        for bad in [
+            "../etc/passwd",
+            "2026-13-40",
+            "2026-10-1",
+            "",
+            "2026-10-12.json",
+            "latest",
+        ] {
             assert!(read_day(&dir, bad).is_err(), "{bad} should be rejected");
         }
         fs::remove_dir_all(dir).ok();

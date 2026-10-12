@@ -47,7 +47,8 @@ pub fn valid_id(id: &str) -> bool {
     !b.is_empty()
         && b.len() <= 32
         && b[0].is_ascii_lowercase()
-        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
 }
 
 fn check_id(kind: &str, id: &str) -> AppResult<()> {
@@ -94,7 +95,9 @@ static REGISTRY_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Parse registry.json text.
 pub fn parse_registry(text: &str) -> Result<HashMap<String, Member>, String> {
-    serde_json::from_str::<RegistryFile>(text).map(|f| f.members).map_err(|e| e.to_string())
+    serde_json::from_str::<RegistryFile>(text)
+        .map(|f| f.members)
+        .map_err(|e| e.to_string())
 }
 
 /// Live registry members by pane id. A missing or corrupt file is fine: no squads are shown.
@@ -108,7 +111,9 @@ pub fn read_registry(desk: &Path) -> HashMap<String, Member> {
     match parse_registry(&text) {
         Ok(m) => {
             REGISTRY_WARNED.store(false, Ordering::Relaxed);
-            m.into_iter().filter(|(_, v)| v.ended_at.is_none()).collect()
+            m.into_iter()
+                .filter(|(_, v)| v.ended_at.is_none())
+                .collect()
         }
         Err(e) => {
             if !REGISTRY_WARNED.swap(true, Ordering::Relaxed) {
@@ -217,8 +222,12 @@ fn read_agent_file(dirs: &Dirs, role: &str) -> Option<AgentFile> {
     let text = std::fs::read_to_string(path).ok()?;
     let (fm, body) = split_frontmatter(&text);
     Some(AgentFile {
-        description: fm.and_then(|f| frontmatter_value(f, "description")).unwrap_or_default(),
-        model: fm.and_then(|f| frontmatter_value(f, "model")).unwrap_or_default(),
+        description: fm
+            .and_then(|f| frontmatter_value(f, "description"))
+            .unwrap_or_default(),
+        model: fm
+            .and_then(|f| frontmatter_value(f, "model"))
+            .unwrap_or_default(),
         body: body.trim_start_matches('\n').to_string(),
     })
 }
@@ -226,7 +235,9 @@ fn read_agent_file(dirs: &Dirs, role: &str) -> Option<AgentFile> {
 /// Rewrite an agent file: set `model:` in the frontmatter and/or replace the body.
 fn rewrite_agent_file(existing: &str, model: Option<&str>, prompt: Option<&str>) -> String {
     let (fm, body) = split_frontmatter(existing);
-    let mut fm_lines: Vec<String> = fm.map(|f| f.lines().map(String::from).collect()).unwrap_or_default();
+    let mut fm_lines: Vec<String> = fm
+        .map(|f| f.lines().map(String::from).collect())
+        .unwrap_or_default();
     if let Some(m) = model {
         match fm_lines.iter().position(|l| l.starts_with("model:")) {
             Some(i) => fm_lines[i] = format!("model: {m}"),
@@ -263,25 +274,46 @@ fn str_of(v: Option<&serde_yaml::Value>) -> String {
 fn parse_squad(dirs: &Dirs, text: &str, file_stem: &str) -> AppResult<SquadInfo> {
     let doc: serde_yaml::Value = serde_yaml::from_str(text)?;
     let id = str_of(doc.get("id"));
-    let id = if id.is_empty() { file_stem.to_string() } else { id };
+    let id = if id.is_empty() {
+        file_stem.to_string()
+    } else {
+        id
+    };
     check_id("squad", &id)?;
-    let roles_map = doc.get("roles").and_then(|r| r.as_mapping()).cloned().unwrap_or_default();
+    let roles_map = doc
+        .get("roles")
+        .and_then(|r| r.as_mapping())
+        .cloned()
+        .unwrap_or_default();
     let mut roles = Vec::new();
     for (k, v) in &roles_map {
-        let Some(role_id) = k.as_str().filter(|r| valid_id(r)) else { continue };
+        let Some(role_id) = k.as_str().filter(|r| valid_id(r)) else {
+            continue;
+        };
         let agent = read_agent_file(dirs, role_id);
         let model_yaml = str_of(v.get("model"));
         let hires = v
             .get("hires")
             .and_then(|h| h.as_sequence())
-            .map(|s| s.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .map(|s| {
+                s.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         roles.push(RoleInfo {
             id: role_id.to_string(),
             title: str_of(v.get("title")),
-            model: if model_yaml.is_empty() { agent.as_ref().map(|a| a.model.clone()).unwrap_or_default() } else { model_yaml },
+            model: if model_yaml.is_empty() {
+                agent.as_ref().map(|a| a.model.clone()).unwrap_or_default()
+            } else {
+                model_yaml
+            },
             hires,
-            description: agent.as_ref().map(|a| a.description.clone()).unwrap_or_default(),
+            description: agent
+                .as_ref()
+                .map(|a| a.description.clone())
+                .unwrap_or_default(),
             prompt: agent.as_ref().map(|a| a.body.clone()).unwrap_or_default(),
             has_agent_file: agent.is_some(),
         });
@@ -309,7 +341,9 @@ fn mtime_ms(path: &Path) -> i64 {
 
 fn recent_jobs(desk: &Path, squad: &str) -> Vec<JobInfo> {
     let jobs_dir = desk.join(squad).join("jobs");
-    let Ok(rd) = std::fs::read_dir(&jobs_dir) else { return Vec::new() };
+    let Ok(rd) = std::fs::read_dir(&jobs_dir) else {
+        return Vec::new();
+    };
     let mut ids: Vec<String> = rd
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
@@ -322,8 +356,9 @@ fn recent_jobs(desk: &Path, squad: &str) -> Vec<JobInfo> {
         .map(|id| {
             let dir = jobs_dir.join(&id);
             let status_path = dir.join("status.json");
-            let status: Option<serde_json::Value> =
-                std::fs::read_to_string(&status_path).ok().and_then(|t| serde_json::from_str(&t).ok());
+            let status: Option<serde_json::Value> = std::fs::read_to_string(&status_path)
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok());
             let state = status
                 .as_ref()
                 .and_then(|s| s.get("state"))
@@ -350,7 +385,9 @@ fn recent_jobs(desk: &Path, squad: &str) -> Vec<JobInfo> {
 }
 
 pub fn list_squads(dirs: &Dirs) -> Vec<SquadInfo> {
-    let Ok(rd) = std::fs::read_dir(&dirs.config) else { return Vec::new() };
+    let Ok(rd) = std::fs::read_dir(&dirs.config) else {
+        return Vec::new();
+    };
     let mut files: Vec<PathBuf> = rd
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -359,11 +396,18 @@ pub fn list_squads(dirs: &Dirs) -> Vec<SquadInfo> {
     files.sort();
     let mut out = Vec::new();
     for f in files {
-        let stem = f.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+        let stem = f
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
         if !valid_id(&stem) {
             continue;
         }
-        match std::fs::read_to_string(&f).map_err(AppError::from).and_then(|t| parse_squad(dirs, &t, &stem)) {
+        match std::fs::read_to_string(&f)
+            .map_err(AppError::from)
+            .and_then(|t| parse_squad(dirs, &t, &stem))
+        {
             Ok(s) => out.push(s),
             Err(e) => eprintln!("squads: skipping {}: {e}", f.display()),
         }
@@ -379,10 +423,14 @@ fn plain_scalar_ok(s: &str) -> bool {
     let lower = s.to_ascii_lowercase();
     !s.is_empty()
         && s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '.' | '-'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '.' | '-'))
         && !s.ends_with(' ')
         && s.parse::<f64>().is_err()
-        && !matches!(lower.as_str(), "yes" | "no" | "true" | "false" | "null" | "on" | "off" | "y" | "n")
+        && !matches!(
+            lower.as_str(),
+            "yes" | "no" | "true" | "false" | "null" | "on" | "off" | "y" | "n"
+        )
 }
 
 fn flow_scalar(s: &str) -> String {
@@ -398,12 +446,16 @@ fn flow_value(v: &serde_yaml::Value) -> String {
     match v {
         serde_yaml::Value::String(s) => flow_scalar(s),
         serde_yaml::Value::Sequence(items) => {
-            format!("[{}]", items.iter().map(flow_value).collect::<Vec<_>>().join(", "))
+            format!(
+                "[{}]",
+                items.iter().map(flow_value).collect::<Vec<_>>().join(", ")
+            )
         }
         serde_yaml::Value::Bool(b) => b.to_string(),
         serde_yaml::Value::Number(n) => n.to_string(),
         serde_yaml::Value::Null => "null".into(),
-        other => serde_json::to_string(&serde_yaml::to_string(other).unwrap_or_default()).unwrap_or_default(),
+        other => serde_json::to_string(&serde_yaml::to_string(other).unwrap_or_default())
+            .unwrap_or_default(),
     }
 }
 
@@ -431,7 +483,9 @@ fn edit_role_yaml(text: &str, role: &str, fields: &RoleFields) -> AppResult<Stri
         let Some(close) = rest.find('}') else { break };
         let inner = &rest[..=close];
         let tail = &rest[close + 1..];
-        let Ok(mut map) = serde_yaml::from_str::<serde_yaml::Mapping>(inner) else { break };
+        let Ok(mut map) = serde_yaml::from_str::<serde_yaml::Mapping>(inner) else {
+            break;
+        };
         apply_fields(&mut map, fields);
         let prefix_len = line.len() - rest.len();
         let new_inner = format!(
@@ -471,7 +525,10 @@ fn apply_fields(map: &mut serde_yaml::Mapping, fields: &RoleFields) {
         if h.is_empty() {
             map.remove("hires");
         } else {
-            map.insert(Value::String("hires".into()), Value::Sequence(h.iter().cloned().map(Value::String).collect()));
+            map.insert(
+                Value::String("hires".into()),
+                Value::Sequence(h.iter().cloned().map(Value::String).collect()),
+            );
         }
     }
 }
@@ -485,7 +542,11 @@ pub fn save_role(dirs: &Dirs, squad: &str, role: &str, fields: &RoleFields) -> A
         }
     }
     if let Some(t) = &fields.title {
-        if t.trim().is_empty() || t.chars().count() > MAX_TITLE_CHARS || t.contains('\n') || t.contains('\r') {
+        if t.trim().is_empty()
+            || t.chars().count() > MAX_TITLE_CHARS
+            || t.contains('\n')
+            || t.contains('\r')
+        {
             return Err(AppError::Validation("title must be one short line".into()));
         }
     }
@@ -511,7 +572,9 @@ pub fn save_role(dirs: &Dirs, squad: &str, role: &str, fields: &RoleFields) -> A
         for h in hires {
             check_id("role", h)?;
             if !roles.contains_key(h.as_str()) {
-                return Err(AppError::Validation(format!("{h} is not a role in {squad}")));
+                return Err(AppError::Validation(format!(
+                    "{h} is not a role in {squad}"
+                )));
             }
         }
     }
@@ -525,11 +588,16 @@ pub fn save_role(dirs: &Dirs, squad: &str, role: &str, fields: &RoleFields) -> A
         std::fs::create_dir_all(&dirs.agents)?;
         let agent_path = dirs.agents.join(format!("{role}.md"));
         if agent_path.exists() && !is_inside(&dirs.agents, &agent_path) {
-            return Err(AppError::Path(format!("agent file for {role} resolves outside the agents folder")));
+            return Err(AppError::Path(format!(
+                "agent file for {role} resolves outside the agents folder"
+            )));
         }
         let existing = std::fs::read_to_string(&agent_path).unwrap_or_else(|_| {
             let title = fields.title.clone().unwrap_or_else(|| role.to_string());
-            format!("---\nname: {role}\ndescription: {}\n---\n", flow_scalar(&title))
+            format!(
+                "---\nname: {role}\ndescription: {}\n---\n",
+                flow_scalar(&title)
+            )
         });
         atomic_write(
             &agent_path,
@@ -545,7 +613,9 @@ pub fn save_role(dirs: &Dirs, squad: &str, role: &str, fields: &RoleFields) -> A
 
 /// The job folder to open: must exist and be `<desk>/<squad>/jobs/<job>` after resolving symlinks.
 pub fn validate_job_path(desk: &Path, path: &str) -> AppResult<PathBuf> {
-    let root = desk.canonicalize().map_err(|_| AppError::NotFound("squads desk".into()))?;
+    let root = desk
+        .canonicalize()
+        .map_err(|_| AppError::NotFound("squads desk".into()))?;
     let real = Path::new(path)
         .canonicalize()
         .map_err(|_| AppError::NotFound(format!("job folder: {path}")))?;
@@ -607,7 +677,8 @@ pub fn valid_job_id(id: &str) -> bool {
     !b.is_empty()
         && b.len() <= 64
         && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
-        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
 }
 
 /// `<desk>/<squad>/jobs/<job>`, validated to exist and to stay inside the desk.
@@ -630,7 +701,9 @@ pub fn find_job(desk: &Path, job: &str) -> AppResult<(String, PathBuf)> {
     }
     let rd = std::fs::read_dir(desk).map_err(|_| AppError::NotFound("squads desk".into()))?;
     for e in rd.filter_map(|e| e.ok()) {
-        let Ok(squad) = e.file_name().into_string() else { continue };
+        let Ok(squad) = e.file_name().into_string() else {
+            continue;
+        };
         if !valid_id(&squad) {
             continue;
         }
@@ -652,13 +725,17 @@ fn thumb_for(path: &Path, size: u64) -> Option<String> {
         _ => return None,
     };
     let bytes = std::fs::read(path).ok()?;
-    Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    Some(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 pub fn job_detail(desk: &Path, squad: &str, job: &str) -> AppResult<JobDetail> {
     let dir = job_dir(desk, squad, job)?;
-    let status: Option<serde_json::Value> =
-        std::fs::read_to_string(dir.join("status.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
+    let status: Option<serde_json::Value> = std::fs::read_to_string(dir.join("status.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
     let state = status
         .as_ref()
         .and_then(|s| s.get("state"))
@@ -672,8 +749,17 @@ pub fn job_detail(desk: &Path, squad: &str, job: &str) -> AppResult<JobDetail> {
         .map(|a| {
             a.iter()
                 .map(|e| {
-                    let f = |k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                    LogEntry { at: f("at"), who: f("who"), text: f("text") }
+                    let f = |k: &str| {
+                        e.get(k)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    LogEntry {
+                        at: f("at"),
+                        who: f("who"),
+                        text: f("text"),
+                    }
                 })
                 .collect()
         })
@@ -686,12 +772,20 @@ pub fn job_detail(desk: &Path, squad: &str, job: &str) -> AppResult<JobDetail> {
     if let Ok(rd) = std::fs::read_dir(dir.join("out")) {
         for e in rd.filter_map(|e| e.ok()) {
             let path = e.path();
-            let Ok(name) = e.file_name().into_string() else { continue };
-            let Ok(meta) = std::fs::metadata(&path) else { continue };
+            let Ok(name) = e.file_name().into_string() else {
+                continue;
+            };
+            let Ok(meta) = std::fs::metadata(&path) else {
+                continue;
+            };
             if !meta.is_file() || name.starts_with('.') || !is_inside(&dir.join("out"), &path) {
                 continue;
             }
-            let ext = path.extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase();
+            let ext = path
+                .extension()
+                .and_then(|x| x.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             let kind = match ext.as_str() {
                 "png" | "jpg" | "jpeg" => "image",
                 "md" => "md",
@@ -722,9 +816,15 @@ pub fn job_detail(desk: &Path, squad: &str, job: &str) -> AppResult<JobDetail> {
 /// The deliverable file to open: a plain filename in `out/` with an openable extension.
 pub fn deliverable_path(desk: &Path, squad: &str, job: &str, name: &str) -> AppResult<PathBuf> {
     crate::paths::validate_filename(name)?;
-    let ext = Path::new(name).extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase();
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|x| x.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if !OPENABLE.contains(&ext.as_str()) {
-        return Err(AppError::Validation(format!("I won't open {name} from here")));
+        return Err(AppError::Validation(format!(
+            "I won't open {name} from here"
+        )));
     }
     let out = job_dir(desk, squad, job)?.join("out");
     let path = out.join(name);
@@ -751,7 +851,11 @@ pub fn start_args(squad: &str, brief: &str) -> AppResult<Vec<String>> {
         return Err(AppError::Validation("that brief is too long".into()));
     }
     // A leading dash would be read as an option.
-    let brief = if brief.starts_with('-') { format!("Brief: {brief}") } else { brief.to_string() };
+    let brief = if brief.starts_with('-') {
+        format!("Brief: {brief}")
+    } else {
+        brief.to_string()
+    };
     Ok(vec!["start".into(), squad.into(), brief])
 }
 
@@ -772,10 +876,20 @@ fn squad_bin(home: &Path) -> PathBuf {
 async fn run_squad(args: Vec<String>) -> AppResult<String> {
     let home = super::fleet::home_dir();
     let mut cmd = tokio::process::Command::new(squad_bin(&home));
-    cmd.args(&args).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    cmd.args(&args)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
     let out = match tokio::time::timeout(std::time::Duration::from_secs(45), cmd.output()).await {
-        Err(_) => return Err(AppError::Process("synthia-squad did not answer within 45 seconds".into())),
-        Ok(Err(e)) => return Err(AppError::Process(format!("could not run synthia-squad: {e}"))),
+        Err(_) => {
+            return Err(AppError::Process(
+                "synthia-squad did not answer within 45 seconds".into(),
+            ))
+        }
+        Ok(Err(e)) => {
+            return Err(AppError::Process(format!(
+                "could not run synthia-squad: {e}"
+            )))
+        }
         Ok(Ok(o)) => o,
     };
     if out.status.success() {
@@ -783,8 +897,19 @@ async fn run_squad(args: Vec<String>) -> AppResult<String> {
     }
     let err = String::from_utf8_lossy(&out.stderr);
     let err = err.trim();
-    let err = if err.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err.to_string() };
-    let tail: String = err.chars().rev().take(600).collect::<Vec<_>>().into_iter().rev().collect();
+    let err = if err.is_empty() {
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    } else {
+        err.to_string()
+    };
+    let tail: String = err
+        .chars()
+        .rev()
+        .take(600)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     Err(AppError::Process(tail))
 }
 
@@ -889,7 +1014,18 @@ mod tests {
         for ok in ["a", "growth-writer", "a_b-9", &"a".repeat(32)] {
             assert!(valid_id(ok), "{ok}");
         }
-        for bad in ["", "A", "1a", "-a", "a b", "a/b", "../x", "a.b", &"a".repeat(33), "é"] {
+        for bad in [
+            "",
+            "A",
+            "1a",
+            "-a",
+            "a b",
+            "a/b",
+            "../x",
+            "a.b",
+            &"a".repeat(33),
+            "é",
+        ] {
             assert!(!valid_id(bad), "{bad}");
         }
     }
@@ -900,7 +1036,10 @@ mod tests {
         let squads = list_squads(&dirs);
         assert_eq!(squads.len(), 1);
         let s = &squads[0];
-        assert_eq!((s.id.as_str(), s.name.as_str(), s.director.as_str(), s.cap), ("growth", "Growth", "growth-director", 4));
+        assert_eq!(
+            (s.id.as_str(), s.name.as_str(), s.director.as_str(), s.cap),
+            ("growth", "Growth", "growth-director", 4)
+        );
         assert_eq!(s.roles.len(), 3);
         assert_eq!(s.roles[0].hires, ["growth-writer", "growth-seo"]);
         assert_eq!(s.roles[0].model, "claude-opus-5-5");
@@ -941,21 +1080,32 @@ mod tests {
         assert!(yaml.starts_with("# growth squad\n"));
         assert!(yaml.contains("  growth-director:    {title: Marketing Director"));
         assert!(yaml.contains("# boss"));
-        assert!(yaml.contains("growth-writer:      {title: \"Senior Writer: long form\", model: claude-haiku-5-5}"));
+        assert!(yaml.contains(
+            "growth-writer:      {title: \"Senior Writer: long form\", model: claude-haiku-5-5}"
+        ));
         let agent = fs::read_to_string(dirs.agents.join("growth-writer.md")).unwrap();
         assert!(agent.contains("model: claude-haiku-5-5"));
         assert!(agent.contains("tools: Read, Write"));
         assert!(agent.ends_with("---\nNew prompt.\n\nSecond paragraph.\n"));
         let s = &list_squads(&dirs)[0];
         let w = &s.roles[1];
-        assert_eq!((w.title.as_str(), w.model.as_str()), ("Senior Writer: long form", "claude-haiku-5-5"));
+        assert_eq!(
+            (w.title.as_str(), w.model.as_str()),
+            ("Senior Writer: long form", "claude-haiku-5-5")
+        );
         assert_eq!(w.prompt, "New prompt.\n\nSecond paragraph.\n");
 
         // Hires on the director, and clearing them.
-        let hires = RoleFields { hires: Some(vec!["growth-seo".into()]), ..Default::default() };
+        let hires = RoleFields {
+            hires: Some(vec!["growth-seo".into()]),
+            ..Default::default()
+        };
         save_role(&dirs, "growth", "growth-director", &hires).unwrap();
         assert_eq!(list_squads(&dirs)[0].roles[0].hires, ["growth-seo"]);
-        let none = RoleFields { hires: Some(vec![]), ..Default::default() };
+        let none = RoleFields {
+            hires: Some(vec![]),
+            ..Default::default()
+        };
         save_role(&dirs, "growth", "growth-director", &none).unwrap();
         assert!(list_squads(&dirs)[0].roles[0].hires.is_empty());
         fs::remove_dir_all(home).ok();
@@ -969,7 +1119,10 @@ mod tests {
             "id: ops\nname: Ops\ndirector: ops-lead\nroles:\n  ops-lead:\n    title: Lead\n    model: claude-opus-5-5\n",
         )
         .unwrap();
-        let f = RoleFields { title: Some("Chief".into()), ..Default::default() };
+        let f = RoleFields {
+            title: Some("Chief".into()),
+            ..Default::default()
+        };
         save_role(&dirs, "ops", "ops-lead", &f).unwrap();
         assert_eq!(list_squads(&dirs)[0].roles[0].title, "Chief");
         fs::remove_dir_all(home).ok();
@@ -978,7 +1131,10 @@ mod tests {
     #[test]
     fn role_save_creates_missing_agent_file() {
         let (home, dirs) = fixture();
-        let f = RoleFields { prompt: Some("Lead the team.".into()), ..Default::default() };
+        let f = RoleFields {
+            prompt: Some("Lead the team.".into()),
+            ..Default::default()
+        };
         save_role(&dirs, "growth", "growth-seo", &f).unwrap();
         let agent = fs::read_to_string(dirs.agents.join("growth-seo.md")).unwrap();
         assert!(agent.starts_with("---\nname: growth-seo\n"));
@@ -989,20 +1145,35 @@ mod tests {
     #[test]
     fn role_save_rejects_bad_input() {
         let (home, dirs) = fixture();
-        let ok = RoleFields { title: Some("X".into()), ..Default::default() };
+        let ok = RoleFields {
+            title: Some("X".into()),
+            ..Default::default()
+        };
         assert!(save_role(&dirs, "../growth", "growth-writer", &ok).is_err());
         assert!(save_role(&dirs, "growth", "../../etc/passwd", &ok).is_err());
         assert!(save_role(&dirs, "growth", "Growth-Writer", &ok).is_err());
         assert!(save_role(&dirs, "growth", "nobody", &ok).is_err());
         assert!(save_role(&dirs, "nosquad", "growth-writer", &ok).is_err());
-        let bad_model = RoleFields { model: Some("gpt-9".into()), ..Default::default() };
+        let bad_model = RoleFields {
+            model: Some("gpt-9".into()),
+            ..Default::default()
+        };
         assert!(save_role(&dirs, "growth", "growth-writer", &bad_model).is_err());
-        let bad_hire = RoleFields { hires: Some(vec!["stranger".into()]), ..Default::default() };
+        let bad_hire = RoleFields {
+            hires: Some(vec!["stranger".into()]),
+            ..Default::default()
+        };
         assert!(save_role(&dirs, "growth", "growth-director", &bad_hire).is_err());
-        let bad_title = RoleFields { title: Some("a\nb".into()), ..Default::default() };
+        let bad_title = RoleFields {
+            title: Some("a\nb".into()),
+            ..Default::default()
+        };
         assert!(save_role(&dirs, "growth", "growth-writer", &bad_title).is_err());
         // Nothing was changed by the rejected saves.
-        assert_eq!(fs::read_to_string(dirs.config.join("growth.yaml")).unwrap(), YAML);
+        assert_eq!(
+            fs::read_to_string(dirs.config.join("growth.yaml")).unwrap(),
+            YAML
+        );
         fs::remove_dir_all(home).ok();
     }
 
@@ -1012,7 +1183,10 @@ mod tests {
         let outside = home.join("outside.md");
         fs::write(&outside, "secret").unwrap();
         std::os::unix::fs::symlink(&outside, dirs.agents.join("growth-seo.md")).unwrap();
-        let f = RoleFields { prompt: Some("x".into()), ..Default::default() };
+        let f = RoleFields {
+            prompt: Some("x".into()),
+            ..Default::default()
+        };
         assert!(save_role(&dirs, "growth", "growth-seo", &f).is_err());
         assert_eq!(fs::read_to_string(&outside).unwrap(), "secret");
         fs::remove_dir_all(home).ok();
@@ -1074,13 +1248,22 @@ mod tests {
         assert_eq!(stop_args("2026-10-13-x").unwrap(), ["stop", "2026-10-13-x"]);
         assert!(stop_args("x; rm -rf /").is_err());
         assert!(stop_args("").is_err());
-        assert_eq!(start_args("growth", "  write posts  ").unwrap(), ["start", "growth", "write posts"]);
-        assert_eq!(start_args("growth", "--force").unwrap()[2], "Brief: --force");
+        assert_eq!(
+            start_args("growth", "  write posts  ").unwrap(),
+            ["start", "growth", "write posts"]
+        );
+        assert_eq!(
+            start_args("growth", "--force").unwrap()[2],
+            "Brief: --force"
+        );
         assert!(start_args("Growth", "x").is_err());
         assert!(start_args("../x", "x").is_err());
         assert!(start_args("growth", "   ").is_err());
         assert!(start_args("growth", &"x".repeat(MAX_BRIEF_CHARS + 1)).is_err());
-        assert_eq!(start_args("growth", "a \"quoted\" $(thing)").unwrap()[2], "a \"quoted\" $(thing)");
+        assert_eq!(
+            start_args("growth", "a \"quoted\" $(thing)").unwrap()[2],
+            "a \"quoted\" $(thing)"
+        );
     }
 
     #[test]
@@ -1093,12 +1276,19 @@ mod tests {
         fs::write(job.join("out/hero.png"), [137, 80, 78, 71]).unwrap();
         fs::write(job.join("out/.hidden"), "x").unwrap();
         let d = job_detail(&dirs.desk, "growth", "2026-10-13-week-of-posts").unwrap();
-        assert_eq!((d.state.as_str(), d.brief.as_str()), ("working", "Write five posts."));
+        assert_eq!(
+            (d.state.as_str(), d.brief.as_str()),
+            ("working", "Write five posts.")
+        );
         assert_eq!(d.log[0].text, "drafting");
         assert_eq!(d.log[1].text, "briefed");
         let names: Vec<&str> = d.deliverables.iter().map(|x| x.name.as_str()).collect();
         assert_eq!(names, ["hero.png", "post-1.md"]);
-        assert!(d.deliverables[0].thumb.as_deref().unwrap().starts_with("data:image/png;base64,"));
+        assert!(d.deliverables[0]
+            .thumb
+            .as_deref()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
         assert!(d.deliverables[1].thumb.is_none());
         fs::remove_dir_all(home).ok();
     }

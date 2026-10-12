@@ -77,7 +77,8 @@ mod tests {
 
     #[test]
     fn write_word_replacements_replaces_section_in_place() {
-        let input = "use_local_stt: true\nword_replacements:\n  old: new\n  foo: bar\n# trailing comment\n";
+        let input =
+            "use_local_stt: true\nword_replacements:\n  old: new\n  foo: bar\n# trailing comment\n";
         let pairs = vec![("hello".to_string(), "hi".to_string())];
         let out = write_word_replacements(input, &pairs);
         assert!(out.contains("use_local_stt: true"));

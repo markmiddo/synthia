@@ -25,7 +25,9 @@ pub fn get_hotkeys() -> AppResult<(String, String)> {
 
     for line in content.lines() {
         if line.starts_with("dictation_key:") {
-            dictation_key = line.split(':').nth(1)
+            dictation_key = line
+                .split(':')
+                .nth(1)
                 .map(|s| s.trim().trim_matches('"').to_string())
                 .unwrap_or(dictation_key);
             // Convert from pynput format to display format
@@ -37,7 +39,9 @@ pub fn get_hotkeys() -> AppResult<(String, String)> {
                 .replace("Key.shift_r", "Right Shift")
                 .replace("Key.shift_l", "Left Shift");
         } else if line.starts_with("assistant_key:") {
-            assistant_key = line.split(':').nth(1)
+            assistant_key = line
+                .split(':')
+                .nth(1)
                 .map(|s| s.trim().trim_matches('"').to_string())
                 .unwrap_or(assistant_key);
             // Convert from pynput format to display format
@@ -142,10 +146,7 @@ pub fn save_word_replacements(replacements: Vec<WordReplacement>) -> AppResult<S
     let content = fs::read_to_string(&config_path)
         .map_err(|e| AppError::Io(format!("Failed to read config: {}", e)))?;
 
-    let pairs: Vec<(String, String)> = replacements
-        .into_iter()
-        .map(|r| (r.from, r.to))
-        .collect();
+    let pairs: Vec<(String, String)> = replacements.into_iter().map(|r| (r.from, r.to)).collect();
     let new_content = crate::yaml_writer::write_word_replacements(&content, &pairs);
 
     fs::write(&config_path, new_content.trim_end())
