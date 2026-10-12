@@ -52,6 +52,11 @@ _DESK_TRAY_STATUS = {
 }
 
 
+def needs_keyboard(dictation_key: str, assistant_key: str) -> bool:
+    """Whether Synthia has any hotkey of its own to listen for."""
+    return dictation_key != DISABLED_HOTKEY or assistant_key != DISABLED_HOTKEY
+
+
 def use_murmur_stt(config: dict[str, Any]) -> bool:
     """Murmur hears the desk assistant key (only meaningful with the brain backend)."""
     return config.get("assistant_backend") == "brain" and config.get("stt_source") == "murmur"
@@ -563,9 +568,12 @@ class Synthia:
         logger.info("Use Ctrl+C to exit")
 
         # Handle Ctrl+C gracefully
+        stopped = threading.Event()
+
         def signal_handler(sig, frame):
             logger.info("Interrupted, exiting...")
             self.running = False
+            stopped.set()
             self.hotkey_listener.stop()
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -582,9 +590,14 @@ class Synthia:
         if self.murmur:
             self.murmur.start()
 
-        # Start the hotkey listener (auto-detects Wayland vs X11)
-        self.hotkey_listener.start()
-        self.hotkey_listener.join()
+        if needs_keyboard(self.config["dictation_key"], self.assistant_key_string):
+            # Start the hotkey listener (auto-detects Wayland vs X11)
+            self.hotkey_listener.start()
+            self.hotkey_listener.join()
+        else:
+            # Murmur hears both keys: there is no keyboard for Synthia to watch.
+            logger.info("No Synthia hotkeys (Murmur owns them); waiting for Murmur")
+            stopped.wait()
 
         # Cleanup
         if self.murmur:

@@ -375,3 +375,11 @@ def test_state_file_carries_stt_source_and_talk_key(tmp_path, monkeypatch):
     assert state["stt_source"] == "murmur" and state["talk_key"] == "Left Alt"
     s._on_murmur_hotkey("")
     assert json.loads((tmp_path / "synthia-state.json").read_text())["talk_key"] == ""
+
+
+def test_no_keyboard_needed_when_murmur_owns_both_keys():
+    from synthia.main import needs_keyboard
+
+    assert needs_keyboard("none", "none") is False
+    assert needs_keyboard("Key.alt_r", "none") is True
+    assert needs_keyboard("none", "Key.alt_l") is True
