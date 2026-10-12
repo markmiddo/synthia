@@ -27,15 +27,25 @@ export function statusLabel(status: Status, sinceMs: number, nowMs: number): str
   }
 }
 
+/** Blue working, amber needs you, slate everything else (red is kept for faults). */
 export function statusColor(status: Status): string {
   switch (status) {
     case "working":
-      return "var(--work)";
+      return "var(--blue)";
     case "needs-you":
-      return "var(--need)";
+      return "var(--amber)";
     default:
-      return "var(--done)";
+      return "var(--slate)";
   }
+}
+
+/** "Mon 12 Oct · 18:46" */
+export function stamp(ms: number): string {
+  const d = new Date(ms);
+  const part = (o: Intl.DateTimeFormatOptions, t: string) =>
+    new Intl.DateTimeFormat([], o).formatToParts(d).find((p) => p.type === t)?.value ?? "";
+  const day = `${part({ weekday: "short" }, "weekday")} ${part({ day: "numeric" }, "day")} ${part({ month: "short" }, "month")}`;
+  return `${day} · ${clock(ms)}`;
 }
 
 const RANK: Record<Status, number> = { "needs-you": 0, working: 1, idle: 2, done: 3, gone: 4 };
@@ -49,7 +59,7 @@ export function byAttention<T extends { status: Status }>(nodes: T[]): T[] {
 }
 
 export function clock(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 /** YYYY-MM-DD in local time, for the day picker. */

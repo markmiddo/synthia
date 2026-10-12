@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
+import { useActivity } from "./hud/activity";
 import { useBrain } from "./hud/brain";
 import { Connection } from "./hud/Connection";
-import { CountsBar } from "./hud/CountsBar";
+import { Constellation } from "./hud/Constellation";
 import { DayPicker } from "./hud/DayPicker";
+import { Feed } from "./hud/Feed";
 import { localDate } from "./hud/format";
 import { useFleet, useNow, useSynthiaState, useTalkKey, useUsage, useVoiceRunning } from "./hud/hooks";
-import { NeedsYou } from "./hud/NeedsYou";
+import { NeedsYou, Spoken } from "./hud/Left";
 import { Orb, orbState } from "./hud/Orb";
-import { OrgTree, PastTree, type PastDay } from "./hud/OrgTree";
-import { Spoken } from "./hud/Spoken";
-import { call, reasonOf } from "./hud/tauri";
+import { call, MOCK, reasonOf } from "./hud/tauri";
+import { Timeline, type DayState } from "./hud/Timeline";
+import { TopBar } from "./hud/TopBar";
 import type { DayChart } from "./hud/types";
 import "./hud/tokens.css";
 import "./hud/hud.css";
@@ -22,24 +24,31 @@ function App() {
   const { state: voice, error: voiceStateError } = useSynthiaState();
   const { running, start, error: voiceError } = useVoiceRunning();
   const now = useNow();
+  const activity = useActivity(fleet);
 
   const today = localDate(new Date(now));
   const [day, setDay] = useState(today);
-  const [past, setPast] = useState<PastDay>({ status: "loading" });
+  const [chart, setChart] = useState<DayState>({ status: "loading" });
   const [focusError, setFocusError] = useState<string | null>(null);
   const viewingToday = day === today;
 
+  // Today's lanes follow the fleet: reload when something changes, and every minute.
+  const fleetKey = fleet ? fleet.nodes.map((n) => `${n.paneId}:${n.status}:${n.subagents.length}`).join("|") : "";
+  const minute = Math.floor(now / 60_000);
   useEffect(() => {
-    if (viewingToday) return;
     let alive = true;
-    setPast({ status: "loading" });
     call<DayChart>("fleet_day", { date: day })
-      .then((chart) => alive && setPast({ status: "ready", chart }))
-      .catch((e) => alive && setPast({ status: "error", reason: reasonOf(e) }));
+      .then((c) => alive && setChart({ status: "ready", chart: c }))
+      .catch((e) => alive && setChart({ status: "error", reason: reasonOf(e) }));
     return () => {
       alive = false;
     };
-  }, [day, viewingToday]);
+  }, [day, viewingToday ? fleetKey : "", viewingToday ? minute : 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pick = (d: string) => {
+    setChart({ status: "loading" });
+    setDay(d);
+  };
 
   const focus = useCallback((paneId: string) => {
     call("fleet_focus", { paneId })
@@ -51,6 +60,12 @@ function App() {
 
   return (
     <main className="hud">
+      <div className="sweep" aria-hidden="true" />
+      <span className="bracket tl" />
+      <span className="bracket tr" />
+      <span className="bracket bl" />
+      <span className="bracket br" />
+      <TopBar nodes={nodes} usage={usage} now={now} preview={MOCK} />
       <aside className="left">
         <Orb state={orbState(voice.recording, view.state)} talkKey={talkKey} />
         <Connection
@@ -66,29 +81,16 @@ function App() {
           ]}
         />
         <Spoken spoken={view.spoken} link={view.link} talkKey={talkKey} />
-        <NeedsYou
-          nodes={nodes}
-          confirms={view.confirms}
-          now={now}
-          onFocus={focus}
-          onConfirm={confirmReply}
-        />
+        <NeedsYou nodes={nodes} confirms={view.confirms} now={now} onFocus={focus} onConfirm={confirmReply} />
       </aside>
-      <section className="right">
-        <CountsBar nodes={nodes} usage={usage} />
-        {!viewingToday ? (
-          <PastTree day={past} />
-        ) : fleet === null ? (
-          <p className="empty">Looking for your agents…</p>
-        ) : (
-          <OrgTree
-            nodes={nodes}
-            now={now}
-            onFocus={focus}
-            herdrDown={fleet.herdrOk ? undefined : { error: fleet.error }}
-          />
-        )}
-        <DayPicker selected={day} onSelect={setDay} />
+      <Constellation fleet={fleet} now={now} onFocus={focus} />
+      <Feed items={activity} />
+      <section className="day" aria-label="Timeline">
+        <div className="day-head">
+          <p className="lbl">{viewingToday ? "TODAY" : "THAT DAY"}</p>
+          <DayPicker selected={day} onSelect={pick} />
+        </div>
+        <Timeline day={chart} now={now} today={viewingToday} />
       </section>
     </main>
   );
