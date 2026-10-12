@@ -105,6 +105,13 @@ pub fn save_hotkeys(dictation_key: String, assistant_key: String) -> AppResult<S
     Ok("Hotkeys saved".to_string())
 }
 
+/// Only the `word_replacements` map of config.yaml; every other key is ignored.
+#[derive(Deserialize, Default)]
+struct WordReplacementsYaml {
+    #[serde(default)]
+    word_replacements: std::collections::HashMap<String, String>,
+}
+
 #[tauri::command]
 pub fn get_word_replacements() -> Vec<WordReplacement> {
     let config_path = get_config_path();
@@ -116,7 +123,7 @@ pub fn get_word_replacements() -> Vec<WordReplacement> {
     // Parse via serde_yaml — falls back to empty on malformed config rather
     // than crashing the GUI. The React side expects a `Vec<WordReplacement>`
     // (ordered), so we sort the HashMap keys for stable display.
-    let cfg: crate::config::SynthiaConfigYaml = match serde_yaml::from_str(&content) {
+    let cfg: WordReplacementsYaml = match serde_yaml::from_str(&content) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
