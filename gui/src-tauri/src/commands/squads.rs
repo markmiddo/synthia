@@ -124,6 +124,14 @@ pub fn read_registry(desk: &Path) -> HashMap<String, Member> {
     }
 }
 
+/// Every registry member, ended ones included: attribution of an old recall needs them.
+pub fn read_registry_all(desk: &Path) -> HashMap<String, Member> {
+    std::fs::read_to_string(desk.join("registry.json"))
+        .ok()
+        .and_then(|t| parse_registry(&t).ok())
+        .unwrap_or_default()
+}
+
 // ---------------------------------------------------------------------------
 // Wire types
 // ---------------------------------------------------------------------------

@@ -139,8 +139,7 @@ function day(date: string): DayChart {
   };
 }
 
-const SQUADS: SquadInfo[] = SQUAD
-  ? [
+const SQUADS: SquadInfo[] = [
       {
         id: "growth", name: "Growth", director: "growth-director", cap: 4, cwd: "~/dev/eventflo",
         roles: [
@@ -155,8 +154,26 @@ const SQUADS: SquadInfo[] = SQUAD
           { id: "2026-10-06-launch-notes", path: "/mock/job2", state: "done", updatedMs: t0 - 7 * 24 * 60 * min, lastLog: "Delivered four posts" },
         ],
       },
+    
+      {
+        id: "office", name: "Office", director: "office-chief", cap: 3, cwd: "~/dev/eventflo",
+        roles: [
+          { id: "office-chief", title: "Chief of Staff", model: "claude-opus-5-5", hires: ["office-pm", "office-dev-release"], description: "Runs the office team.", prompt: "You run the office team.", hasAgentFile: true },
+          { id: "office-pm", title: "Project Manager", model: "claude-sonnet-5-5", hires: [], description: "Board hygiene.", prompt: "You keep the boards clean.", hasAgentFile: true },
+          { id: "office-dev-release", title: "Dev Release Writer", model: "claude-sonnet-5-5", hires: [], description: "Monthly update.", prompt: "You write the update.", hasAgentFile: true },
+        ],
+        jobs: [{ id: "2026-10-13-board-sweep", path: "/mock/job3", state: "working", updatedMs: t0 - 4 * min, lastLog: "Moved 7 double-listed cards" }],
+      },
+      {
+        id: "release", name: "Release", director: "release-lead", cap: 3, cwd: "~/dev/eventflo",
+        roles: [
+          { id: "release-lead", title: "Release Lead", model: "claude-opus-5-5", hires: ["release-faq", "release-video"], description: "Runs a release.", prompt: "You run the release.", hasAgentFile: true },
+          { id: "release-faq", title: "Help Centre Writer", model: "claude-sonnet-5-5", hires: [], description: "Help articles.", prompt: "You update the help centre.", hasAgentFile: true },
+          { id: "release-video", title: "Video Editor", model: "claude-sonnet-5-5", hires: [], description: "Walkthrough edits.", prompt: "You edit the video.", hasAgentFile: true },
+        ],
+        jobs: [],
+      },
     ]
-  : [];
 
 const JOB: JobDetail = {
   id: "2026-10-13-week-of-posts", squad: "growth", path: "/mock/job", state: "working",
@@ -226,8 +243,74 @@ const SPEND = { ok: true, percent: 6.2, points: [0, 0.4, 1.1, 1.6, 2.9, 3.4, 4.8
 const BUGS = { ok: true, asOf: new Date(t0 - 24 * 60 * min).toISOString().slice(0, 10), leftToFix: 42, high: 5, noFix: 38, planned: 13, fixInProgress: 4, awaitingQa: 22, awaitingRelease: 37 };
 const SQUAD_OUT = { deliverables: 4, jobsFinished: 1 };
 
+const MEM_ROWS = [
+  { kind: "feedback", name: "Never use Codex for building", description: "Mark, 12 Sep 2026: builds and fix rounds stay on Claude. Codex reviews are fine.", used: 4, teams: ["Engineering", "Synthia"] },
+  { kind: "feedback", name: "Competitor fees are verified and cited", description: "Any competitor fee or pricing claim is re-checked on their own page the day it is written, and cited.", used: 6, teams: ["Growth"] },
+  { kind: "feedback", name: "Bug dashboard shows production bugs only", description: "Lead with left to fix; QA and audit catches are one grey footnote.", used: 2, teams: ["Office", "Synthia"] },
+  { kind: "project", name: "Offline scanning must ship", description: "Hard requirement after the Altitude connectivity failure.", used: 1, teams: ["Engineering", "Growth"] },
+  { kind: "project", name: "Board cleanup, 26 Sep", description: "139 shipped issues closed and the rules Mark approved for stale cards.", used: 3, teams: ["Office"] },
+  { kind: "reference", name: "Nano Banana Pro image generation", description: "Gemini image endpoint, the body-shape gotcha and where the key lives.", used: 3, teams: ["Growth"] },
+  { kind: "reference", name: "Ledger panel", description: "Done, Calls made, Waiting on Mark. Every reported item is logged there.", used: 22, teams: ["Synthia", "Engineering"] },
+  { kind: "feedback", name: "Build on Claude first, offload at 80%", description: "Kimi or OpenCode only when weekly usage passes about 80% with lots of week left.", used: 1, teams: ["Synthia"] },
+].map((m, i) => ({ path: `/mock/memory/${i}.md`, modifiedMs: t0 - (i + 1) * 3 * 60 * min, recalls7d: m.used, recalledToday: Math.min(m.used, 3), teams7d: m.teams, kind: m.kind, name: m.name, description: m.description }));
+
+const RECALL_HISTORY = [
+  { m: 3, team: "synthia", label: "Synthia", title: "Decide and report", kind: "read" },
+  { m: 14, team: "synthia", label: "Synthia", title: "Telegram voice timeouts count as delivered", kind: "write" },
+  { m: 22, team: "growth", label: "Growth · Designer", title: "Nano Banana Pro image generation", kind: "read" },
+  { m: 41, team: "office", label: "Office · Project Manager", title: "One board per issue", kind: "read" },
+  { m: 55, team: "engineering", label: "Engineering · Admin panel PR 175", title: "V1/V2 wiring landmines", kind: "read" },
+  { m: 80, team: "growth", label: "Growth · Editor", title: "Competitor fees are verified and cited", kind: "read" },
+  { m: 130, team: "synthia", label: "Synthia", title: "Squads build plan decisions", kind: "write" },
+].map((r) => ({ atMs: t0 - r.m * min, kind: r.kind, title: r.title, file: "/mock/memory/x.md", team: { key: r.team, label: r.label }, who: "" })).reverse();
+
+const LIVE_TEAMS: [string, string][] = [["synthia", "Synthia"], ["engineering", "Engineering · Admin panel PR 175"], ["growth", "Growth · Writer"], ["office", "Office · Project Manager"]];
+const LAST_BY_TEAM = {
+  synthia: { title: "Decide and report", atMs: t0 - 3 * min, kind: "read" },
+  engineering: { title: "V1/V2 wiring landmines", atMs: t0 - 55 * min, kind: "read" },
+  growth: { title: "Competitor fees, verified and cited", atMs: t0 - 22 * min, kind: "read" },
+  office: { title: "One board per issue", atMs: t0 - 41 * min, kind: "read" },
+  release: { title: "Help Centre fields", atMs: t0 - 26 * 60 * min, kind: "read" },
+};
+
+/** Data for the hive and the brain drawer. New recalls keep arriving so the pulses are lively. */
+function hiveMock(args?: Record<string, unknown>): Record<string, unknown> {
+  const since = Number(args?.since ?? 0);
+  const fresh = since > Date.now() - 60_000;
+  const live = fresh && Math.random() < 0.7
+    ? [0, 1].slice(0, 1 + Math.floor(Math.random() * 2)).map(() => {
+        const [key, label] = LIVE_TEAMS[Math.floor(Math.random() * LIVE_TEAMS.length)];
+        const write = Math.random() < 0.2;
+        return { atMs: Date.now(), kind: write ? "write" : "read", title: write ? "New note" : "Ledger panel", file: "/mock/memory/x.md", team: { key, label }, who: "" };
+      })
+    : [];
+  const q = String(args?.query ?? "").toLowerCase();
+  return {
+    brain_overview: {
+      total: 1108, recalledToday: 42, writtenToday: 9, vaultNotes: 63, skills: 102, roles: 17, claudeMd: 6, squads: 3, connectors: 12,
+      kinds: [{ kind: "reference", count: 582 }, { kind: "project", count: 284 }, { kind: "feedback", count: 211 }, { kind: "bug", count: 25 }, { kind: "other", count: 6 }],
+      lastByTeam: LAST_BY_TEAM,
+    },
+    brain_memories: MEM_ROWS.filter((m) => !q || m.name.toLowerCase().includes(q) || m.description.toLowerCase().includes(q)),
+    brain_memory: { name: "Competitor fees are verified and cited", kind: "feedback", description: "", body: "## Rule\n\nAny competitor fee or pricing claim is **re-checked** on their own page the day it is written, and cited.\n\n- Fetch the live page, not a cached one\n- Quote the fee exactly\n- Add the URL to the draft\n\n**Why:** a wrong competitor number is the fastest way to lose a promoter's trust." },
+    brain_recalls: fresh ? live : RECALL_HISTORY,
+    brain_skills: {
+      skills: ["project-management", "seo-dataforseo", "branded-deck", "remotion", "customer-success", "weekly-report", "nano-banana-pro", "build"].map((n) => ({ name: n, description: `The ${n} playbook the teams lean on.` })),
+      roles: ["growth-director", "growth-seo", "growth-writer", "growth-editor", "growth-designer", "office-chief", "office-pm", "release-lead", "release-faq", "release-video", "studio-designer", "bob", "bug-hunter", "mark-planner", "mark-reviewer"],
+      claudeMd: 6, squads: 3,
+    },
+    brain_connected: { local: ["astrology", "lightpanda", "tavily", "eva-core"], claudeAi: ["Gmail", "Google Calendar", "Notion", "Google Drive", "Claude Docs", "Slack", "eventflo"] },
+    brain_now: {
+      sessionId: "25f51e0e-2254-4c12-b639-d393282ba59b", sessionDate: new Date(t0).toISOString().slice(0, 10), sessionModifiedMs: t0 - 12 * min,
+      journal: { name: new Date(t0).toISOString().slice(0, 10), text: "# Walk journal\n\n- 07:12 Mark asked what was running; four agents, none blocked.\n- 07:40 Dispatched a worker for the board sweep.\n- 08:05 Board sweep finished, 7 cards moved." },
+      ledgerDone: 14, ledgerCalls: 5, ledgerWaiting: 2,
+    },
+  };
+}
+
 export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const table: Record<string, unknown> = {
+    ...hiveMock(args),
     fleet_snapshot: fleet(),
     get_usage_stats: usage,
     get_status: "running",

@@ -1,5 +1,6 @@
 //! Tauri IPC command handlers grouped by domain.
 
+pub mod brain;
 pub mod desk;
 pub mod fleet;
 pub mod history;

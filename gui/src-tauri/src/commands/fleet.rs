@@ -235,6 +235,11 @@ pub struct FleetTracker {
 }
 
 impl FleetTracker {
+    /// The most recent nodes, for callers outside the poll loop (recall attribution).
+    pub fn latest_nodes(&self) -> Vec<FleetNode> {
+        self.last_nodes.clone()
+    }
+
     fn update(
         &mut self,
         agents: &[RawAgent],
