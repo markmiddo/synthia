@@ -29,6 +29,7 @@ class JobRecord:
     pid: int | None = None
     status: str = "queued"
     delivered: bool = False
+    inbox_id: str = ""
 
 
 @dataclass

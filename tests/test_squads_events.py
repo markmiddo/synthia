@@ -66,3 +66,15 @@ def test_corrupt_offset_file(tmp_path):
     (tmp_path / "state" / "off").write_text("not json")
     (tmp_path / "events.jsonl").write_text(line(1))
     assert len(tail(tmp_path).poll()) == 1
+
+
+def test_event_record_carries_the_inbox_id_and_makes_one_for_old_events(tmp_path):
+    from synthia import inbox
+    from synthia.brain.squad_events import event_record
+
+    assert event_record({"squad": "growth", "job": "j", "inbox_id": "abc"}).inbox_id == "abc"
+    job = tmp_path / "growth" / "jobs" / "2026-10-13-x"
+    (job / "out").mkdir(parents=True)
+    (job / "out" / "summary.md").write_text("Done.")
+    rec = event_record({"squad": "growth", "job": job.name, "desk": str(job)})
+    assert inbox.get(rec.inbox_id)["summary_md"] == "Done."

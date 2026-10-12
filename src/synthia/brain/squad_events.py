@@ -6,14 +6,32 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
+from synthia import inbox
 from synthia.brain.jobs import JobRecord
 from synthia.squads.events import EventTail
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_S = 5.0
+
+
+def _inbox_id(ev: dict[str, Any]) -> str:
+    """The event's inbox item; events from before the inbox existed get one made now."""
+    if ev.get("inbox_id"):
+        return str(ev["inbox_id"])
+    if not ev.get("desk"):
+        return ""
+    try:
+        item = inbox.create_from_squad(
+            Path(str(ev["desk"])), str(ev.get("squad") or ""), str(ev.get("job") or ""), None
+        )
+    except Exception:
+        logger.exception("could not create an inbox item for a squad event")
+        return ""
+    return str(item["id"])
 
 
 def event_record(ev: dict[str, Any]) -> JobRecord:
@@ -29,6 +47,7 @@ def event_record(ev: dict[str, Any]) -> JobRecord:
         ok=True,
         summary=_spoken_summary(ev, squad),
         status=str(ev.get("kind") or "review"),
+        inbox_id=_inbox_id(ev),
     )
 
 

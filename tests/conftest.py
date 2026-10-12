@@ -63,3 +63,9 @@ def clean_env(monkeypatch):
     """Remove display-related env vars for clean testing."""
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     monkeypatch.delenv("DISPLAY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_inbox(tmp_path, monkeypatch):
+    """Never let a test write to the real HUD inbox."""
+    monkeypatch.setenv("SYNTHIA_INBOX_DIR", str(tmp_path / "_inbox_items"))

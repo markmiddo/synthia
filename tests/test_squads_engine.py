@@ -166,6 +166,12 @@ def test_done_writes_review_state_and_event(env):
     ev = json.loads(lines[0])
     assert ev["squad"] == "growth" and ev["job"] == info.job and ev["text"] == text
     assert ev["digest"] == "# Posts\nTwo posts ready." and ev["desk"] == str(info.path)
+    from synthia import inbox
+
+    item = inbox.get(ev["inbox_id"])
+    assert item["source"] == "squad" and item["squad"] == "growth" and item["state"] == "new"
+    assert item["summary_md"] == "# Posts\nTwo posts ready.\n"
+    assert item["director"] == "growth-director" and item["desk"] == str(info.path)
 
 
 def test_done_refused_for_specialist(env):

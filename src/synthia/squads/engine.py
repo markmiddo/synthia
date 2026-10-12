@@ -7,6 +7,7 @@ module, so tests use a fake. Only panes in the registry are ever closed.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import date
@@ -17,9 +18,12 @@ from typing import Any
 import yaml
 
 from synthia import herdr as _herdr
+from synthia import inbox
 from synthia.squads import desk
 from synthia.squads.model import DEFAULT_CONFIG_DIR, Squad, SquadError, load_squad
 from synthia.squads.registry import DEFAULT_ROOT, Member, Registry, now_iso
+
+logger = logging.getLogger(__name__)
 
 WORKSPACE = "squads"
 EVENTS_FILE = "events.jsonl"
@@ -337,6 +341,11 @@ class Engine:
             "desk": str(path),
             "digest": _summary_digest(path),
         }
+        try:
+            item = inbox.create_from_squad(path, squad.id, m.job, m.agent_name, squad.name)
+            event["inbox_id"] = item["id"]
+        except Exception:  # the done signal must still go out if the inbox is unwritable
+            logger.exception("could not create the inbox item for %s/%s", squad.id, m.job)
         self.root.mkdir(parents=True, exist_ok=True)
         line = (json.dumps(event) + "\n").encode()
         fd = os.open(self.root / EVENTS_FILE, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
