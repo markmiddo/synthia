@@ -112,8 +112,14 @@ class Engine:
         pane = self._open_pane(cwd, near)
         try:
             self.herdr.start_claude(name, pane, model, agent)
-        except Exception:
+        except Exception as exc:
             self._close_quietly(pane)
+            if "agent_not_ready" in str(exc):
+                # Usually Claude's "do you trust this folder?" prompt for a cwd it has not seen.
+                raise SquadError(
+                    f"{name} stopped at a startup question in {cwd} (often the folder-trust "
+                    "prompt). Open Claude there once and trust the folder, then retry."
+                ) from exc
             raise
         return pane
 
@@ -160,7 +166,11 @@ class Engine:
         )
         director = squad.role(squad.director)
         name = self._unique_name(f"{squad.id}-director", numbered=False)
-        pane = self._launch(name, str(squad.cwd), director.model, director.id, None)
+        try:
+            pane = self._launch(name, str(squad.cwd), director.model, director.id, None)
+        except Exception as exc:
+            desk.set_state(path, "stopped", "synthia", f"director failed to start: {exc}")
+            raise
         self.registry.add(
             pane,
             Member(name, squad.id, job, director.id, director.title, None, started_at=now_iso()),

@@ -51,9 +51,11 @@ def test_start_job_makes_desk_registers_and_prompts(env):
 def test_start_failure_closes_pane_and_registers_nothing(env):
     eng, fake, _ = env
     fake.fail_start = True
-    with pytest.raises(Exception, match="agent_not_ready"):
+    with pytest.raises(SquadError, match="startup question"):
         start(eng)
     assert fake.closed and eng.registry.live() == []
+    job = eng.root / "growth" / "jobs" / "2026-10-13-week-of-posts" / "status.json"
+    assert json.loads(job.read_text())["state"] == "stopped"
 
 
 def test_second_job_gets_unique_director_name(env):
