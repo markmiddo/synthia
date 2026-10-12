@@ -125,12 +125,42 @@ class Rendered:
 
 
 def render_item(item: dict[str, Any]) -> Rendered:
-    """Build the HTML body, with CID references for images, from an inbox item."""
+    """Build the HTML body, with CID references for images, from an inbox item.
+
+    A blog post's cover (an image with the same file stem as its payload JSON) goes on top
+    of that post, the way the HUD shows it; other images follow as their own sections.
+    """
     out = Rendered()
     body = [f"<h1>{_esc(item.get('title', ''))}</h1>", md_html(str(item.get("summary_md") or ""))]
     other: list[str] = []
-    for d in item.get("deliverables") or []:
-        path, name, kind = Path(d.get("path", "")), str(d.get("name", "")), d.get("kind")
+    deliverables = [d for d in item.get("deliverables") or [] if isinstance(d, dict)]
+    covers = {
+        Path(str(d.get("path", ""))).stem: d
+        for d in deliverables
+        if d.get("kind") in ("png", "jpg")
+    }
+    used: set[str] = set()
+
+    def image_html(d: dict[str, Any]) -> str | None:
+        path, name, kind = Path(str(d.get("path", ""))), str(d.get("name", "")), d.get("kind")
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            other.append(f"{_esc(name)} (could not be read)")
+            return None
+        mime = "image/png" if kind == "png" else "image/jpeg"
+        if len(raw) > MAX_IMAGE_BYTES:
+            shrunk = _shrink_image(raw, mime)
+            if shrunk is None:
+                other.append(f"{_esc(name)} (image over 2 MB, not attached; see it in the HUD)")
+                return None
+            raw, mime = shrunk
+        cid = make_msgid(domain="synthia.local")[1:-1]
+        out.images.append((cid, raw, mime, name))
+        return f"<img src='cid:{cid}' alt='{_esc(name)}'>"
+
+    for d in deliverables:
+        path, name, kind = Path(str(d.get("path", ""))), str(d.get("name", "")), d.get("kind")
         if kind in ("md", "json"):
             try:
                 text = path.read_text(errors="replace")[:TEXT_LIMIT]
@@ -146,32 +176,28 @@ def render_item(item: dict[str, Any]) -> Rendered:
                     data = None
                 if _is_payload(data):
                     section = render_payload(data)
+                    cover = covers.get(path.stem)
+                    if cover is not None:
+                        img = image_html(cover)
+                        used.add(str(cover.get("path")))
+                        if img:
+                            section = img + section
                 else:
                     pretty = json.dumps(data, indent=2) if data is not None else text
                     section = f"<pre>{_esc(pretty)}</pre>"
             body.append(f"<div class='file'><p class='note'>{_esc(name)}</p>{section}</div>")
         elif kind in ("png", "jpg"):
-            try:
-                raw = path.read_bytes()
-            except OSError:
-                other.append(f"{_esc(name)} (could not be read)")
-                continue
-            mime = "image/png" if kind == "png" else "image/jpeg"
-            if len(raw) > MAX_IMAGE_BYTES:
-                shrunk = _shrink_image(raw, mime)
-                if shrunk is None:
-                    other.append(f"{_esc(name)} (image over 2 MB, not attached; see it in the HUD)")
-                    continue
-                raw, mime = shrunk
-            cid = make_msgid(domain="synthia.local")[1:-1]
-            out.images.append((cid, raw, mime, name))
-            body.append(
-                f"<div class='file'><p class='note'>{_esc(name)}</p>"
-                f"<img src='cid:{cid}' alt='{_esc(name)}'></div>"
-            )
+            continue  # placed with its post, or in the pass below
         else:
             size = d.get("bytes")
             other.append(f"{_esc(name)}" + (f" ({int(size) // 1024} KB)" if size else ""))
+    for d in deliverables:
+        if d.get("kind") in ("png", "jpg") and str(d.get("path")) not in used:
+            img = image_html(d)
+            if img:
+                body.append(
+                    f"<div class='file'><p class='note'>{_esc(str(d.get('name', '')))}</p>{img}</div>"
+                )
     if other:
         body.append(
             "<div class='file'><p class='note'>Also on the desk, not in this email:</p><ul>"

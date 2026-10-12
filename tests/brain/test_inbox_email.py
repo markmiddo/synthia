@@ -220,3 +220,27 @@ def test_plain_text_part_has_no_css():
     plain = msg.get_body(preferencelist=("plain",)).get_content()
     assert "font:" not in plain and "{" not in plain
     assert "Two posts" in plain
+
+
+def test_cover_sits_above_its_post(tmp_path):
+    import json as _json
+
+    from synthia.brain.inbox_email import render_item
+
+    (tmp_path / "post.json").write_text(_json.dumps({"title": "Doof guide", "body": "Hi"}))
+    (tmp_path / "post.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    (tmp_path / "other.png").write_bytes(b"\x89PNG\r\n\x1a\nfake2")
+    item = {
+        "title": "Growth",
+        "summary_md": "ok",
+        "deliverables": [
+            {"path": str(tmp_path / "post.json"), "name": "post.json", "kind": "json"},
+            {"path": str(tmp_path / "post.png"), "name": "post.png", "kind": "png"},
+            {"path": str(tmp_path / "other.png"), "name": "other.png", "kind": "png"},
+        ],
+    }
+    r = render_item(item)
+    assert len(r.images) == 2
+    first_img = r.html.index("<img")
+    assert first_img < r.html.index("Doof guide</h1>")
+    assert r.html.count("<img") == 2
