@@ -62,7 +62,7 @@ class TelegramTransport:
         confirm_timeout_s: int,
         work_dir: Path,
         desk: Any = None,
-        mirror_event: Callable[[Any], Awaitable[None]] | None = None,
+        mirror_event: Callable[[Any], Awaitable[bool]] | None = None,
     ) -> None:
         self.brain = brain
         # When serving both transports the desk server's life is tied to this application's.
