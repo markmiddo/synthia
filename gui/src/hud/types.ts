@@ -18,6 +18,13 @@ export interface FleetNode {
   session: string | null;
   sinceMs: number;
   subagents: SubAgent[];
+  /** Squad registry fields; all null for an ordinary agent. */
+  squad: string | null;
+  job: string | null;
+  role: string | null;
+  roleTitle: string | null;
+  /** Pane id of the director a specialist reports to. */
+  parent: string | null;
 }
 
 export interface Fleet {
@@ -66,4 +73,41 @@ export interface SynthiaState {
   stt_source?: string | null;
   /** Murmur's assistant key label: missing/null = unknown, "" = none set in Murmur. */
   talk_key?: string | null;
+}
+
+export const MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] as const;
+
+export interface RoleInfo {
+  id: string;
+  title: string;
+  model: string;
+  hires: string[];
+  description: string;
+  prompt: string;
+  hasAgentFile: boolean;
+}
+
+export interface JobInfo {
+  id: string;
+  path: string;
+  state: string;
+  updatedMs: number;
+  lastLog: string | null;
+}
+
+export interface SquadInfo {
+  id: string;
+  name: string;
+  director: string;
+  cap: number;
+  cwd: string;
+  roles: RoleInfo[];
+  jobs: JobInfo[];
+}
+
+export interface RoleFields {
+  title?: string;
+  model?: string;
+  hires?: string[];
+  prompt?: string;
 }

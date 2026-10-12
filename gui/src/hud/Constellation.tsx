@@ -8,25 +8,58 @@ export interface Placed {
   node: FleetNode;
   x: number;
   y: number;
+  /** Where its link starts: the director for a squad specialist, otherwise the core. */
+  from?: Placed;
 }
 
-/** Nodes sit on an ellipse around the core; past eight they use two. Pure, for the layout. */
+/** Distance from a director to its specialists. */
+const CLUSTER_R = 215;
+
+/** Nodes sit on an ellipse around the core; past eight they use two. Squad specialists are not on
+ *  the ring: they fan out around their director, away from the core. Pure, for the layout. */
 export function place(nodes: FleetNode[], w: number, h: number): { cx: number; cy: number; placed: Placed[] } {
   const cx = w / 2;
   const cy = h * 0.46;
-  const two = nodes.length > RING_LIMIT;
+  const ids = new Set(nodes.map((n) => n.paneId));
+  const isKid = (n: FleetNode) => n.parent !== null && n.parent !== n.paneId && ids.has(n.parent);
+  const tops = nodes.filter((n) => !isKid(n));
+  const kids = nodes.filter(isKid);
+  const two = tops.length > RING_LIMIT;
   const rx = two ? Math.min(w * 0.4, 440) : Math.min(w * 0.36, 380);
   const ry = two ? Math.min(h * 0.4, 360) : Math.min(h * 0.34, 230);
-  const outer = two ? Math.ceil(nodes.length / 2) : nodes.length;
-  const placed = nodes.map((node, i) => {
+  const outer = two ? Math.ceil(tops.length / 2) : tops.length;
+  const placed: Placed[] = tops.map((node, i) => {
     const onInner = two && i >= outer;
-    const count = onInner ? nodes.length - outer : outer;
+    const count = onInner ? tops.length - outer : outer;
     const k = onInner ? i - outer : i;
     const scale = onInner ? 0.55 : 1;
     const ang = -Math.PI / 2 + (k + (onInner ? 1 : 0.5)) * ((2 * Math.PI) / count) + 0.35;
     return { node, x: cx + rx * scale * Math.cos(ang), y: cy + ry * scale * Math.sin(ang) };
   });
-  if (two) relax(placed, w, h);
+  const byId = new Map(placed.map((p) => [p.node.paneId, p]));
+  const family = new Map<string, FleetNode[]>();
+  for (const k of kids) family.set(k.parent as string, [...(family.get(k.parent as string) ?? []), k]);
+  // A kid whose parent is itself a kid (a malformed registry) hangs off the ring node it was placed under.
+  for (const [parentId, group] of family) {
+    let parent = byId.get(parentId);
+    if (!parent) {
+      const up = kids.find((k) => k.paneId === parentId);
+      parent = up && byId.get(up.parent as string);
+    }
+    if (!parent) {
+      group.forEach((node) => placed.push({ node, x: cx, y: cy }));
+      continue;
+    }
+    const out = Math.atan2(parent.y - cy, parent.x - cx);
+    const span = Math.min(2.7, 0.8 * (group.length - 1));
+    group.forEach((node, i) => {
+      const ang = group.length === 1 ? out : out - span / 2 + (span * i) / (group.length - 1);
+      const p: Placed = { node, x: parent.x + CLUSTER_R * Math.cos(ang), y: parent.y + CLUSTER_R * Math.sin(ang), from: parent };
+      placed.push(p);
+      byId.set(node.paneId, p);
+    });
+  }
+  if (two || kids.length > 0) relax(placed, w, h);
   return { cx, cy, placed };
 }
 
@@ -98,9 +131,10 @@ function Node({ p, now, rank, onFocus }: { p: Placed; now: number; rank: number;
         ))}
       </span>
       <div className="card">
-        <b title={n.title}>{n.title}</b>
+        {n.squad && n.role && !n.parent && <i className="squad-tag">{n.squad} squad</i>}
+        <b title={n.title}>{n.roleTitle ?? n.title}</b>
         <span>
-          {n.repo} · <em>{statusLabel(n.status, n.sinceMs, now)}</em>
+          {n.squad ?? n.repo} · <em>{statusLabel(n.status, n.sinceMs, now)}</em>
         </span>
         {(live.length > 0 || done > 0) && (
           <div className="chips">
@@ -121,7 +155,7 @@ function Node({ p, now, rank, onFocus }: { p: Placed; now: number; rank: number;
     order: rank,
     ["--c" as string]: statusColor(n.status),
   };
-  const cls = `node ${n.status === "working" ? "working" : n.status === "needs-you" ? "need" : "idle"}`;
+  const cls = `node${n.parent ? " kid" : ""} ${n.status === "working" ? "working" : n.status === "needs-you" ? "need" : "idle"}`;
   return gone ? (
     <div className={cls} style={style}>
       {body}
@@ -159,10 +193,11 @@ export function Constellation({
   return (
     <section ref={ref} className={`stage${nodes.length > RING_LIMIT ? " many" : ""}`} aria-label="Your agents">
       <svg aria-hidden="true">
-        {placed.map(({ node, x, y }) => {
+        {placed.map(({ node, x, y, from }) => {
           const working = node.status === "working";
-          const d = link(cx, cy, x, y);
-          const back = `M${x},${y} Q${(cx + x) / 2 + (y - cy) * 0.18},${(cy + y) / 2 - (x - cx) * 0.18} ${cx},${cy}`;
+          const [sx, sy] = from ? [from.x, from.y] : [cx, cy];
+          const d = link(sx, sy, x, y);
+          const back = `M${x},${y} Q${(sx + x) / 2 + (y - sy) * 0.18},${(sy + y) / 2 - (x - sx) * 0.18} ${sx},${sy}`;
           return (
             <g key={node.paneId}>
               <path d={d} className={`link${working ? " live" : ""}`} />

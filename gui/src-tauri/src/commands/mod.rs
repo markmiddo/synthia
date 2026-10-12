@@ -7,4 +7,5 @@ pub mod hotkeys;
 pub mod lifecycle;
 pub mod overlay;
 pub mod remote;
+pub mod squads;
 pub mod usage;

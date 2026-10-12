@@ -39,7 +39,7 @@ Synthia is a voice assistant + dev workstation companion for Linux with:
 - `gui/` - Tauri desktop GUI (Rust + React)
   - `gui/src/hud/` - the HUD (direction D "Jarvis, legible"); Sora is bundled locally, no network fonts
   - `gui/src-tauri/src/lib.rs` - thin orchestrator (tray, state watcher, command registration)
-  - `gui/src-tauri/src/commands/*.rs` - IPC handlers: `fleet` (herdr snapshot, sub-agents, day record), `desk` (brain token), `lifecycle`, `overlay`, `usage`, `history`, `hotkeys`, `remote`
+  - `gui/src-tauri/src/commands/*.rs` - IPC handlers: `fleet` (herdr snapshot, sub-agents, day record, squad registry merge), `squads` (squads_list, squad_role_save, squad_open_job: Company view), `desk` (brain token), `lifecycle`, `overlay`, `usage`, `history`, `hotkeys`, `remote`
   - `gui/src-tauri/src/error.rs` - typed `AppError` (manual Serialize preserves React wire format)
   - `gui/src-tauri/src/state.rs` - Tauri-managed `AppState`
   - `gui/src-tauri/src/paths.rs` - filename validation helper
@@ -119,7 +119,7 @@ pytest tests/ --tb=short -q     # Tests (874 tests)
 cd gui/src-tauri
 cargo build --release
 cargo clippy --all-targets -- -D warnings   # zero warnings policy
-cargo test --lib                            # 27 tests
+cargo test --lib                            # 38 tests
 ```
 
 The Rust side maintains a strict clippy gate. New code should not introduce warnings.

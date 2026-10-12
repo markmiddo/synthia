@@ -343,7 +343,10 @@ pub fn run() {
             commands::desk::get_desk_token,
             commands::fleet::fleet_snapshot,
             commands::fleet::fleet_focus,
-            commands::fleet::fleet_day
+            commands::fleet::fleet_day,
+            commands::squads::squads_list,
+            commands::squads::squad_role_save,
+            commands::squads::squad_open_job
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -971,3 +971,444 @@ div.node {
     transition: none !important;
   }
 }
+
+/* ---- view toggle (drag bar) ---- */
+
+.views {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.views button {
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.views button:hover {
+  color: var(--ink);
+}
+
+.views button.on {
+  background: rgba(124, 196, 255, 0.16);
+  color: var(--ink);
+}
+
+/* ---- squads in the constellation ---- */
+
+.squad-tag {
+  display: block;
+  font-style: normal;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 3px;
+}
+
+.node.kid .card {
+  border-color: rgba(143, 240, 255, 0.28);
+}
+
+/* ---- company view ---- */
+
+.company {
+  position: relative;
+  z-index: 1;
+  min-height: 540px;
+  display: flex;
+  min-width: 0;
+}
+
+.co-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 28px 28px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.company .lbl {
+  margin: 0 0 10px;
+}
+
+.squad > header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.squad h2,
+.co-panel h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 500;
+}
+
+.squad > header span {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.org {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 26px;
+}
+
+.org-top {
+  display: flex;
+  justify-content: center;
+}
+
+.org-team {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  position: relative;
+}
+
+.org-team.under {
+  margin-top: 30px;
+  padding-top: 0;
+}
+
+/* The lines from the director down to each role. */
+.org-team.under::before {
+  content: "";
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  height: 16px;
+  border-left: 1px solid var(--line-hi);
+}
+
+.org-team.under .role::before {
+  content: "";
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  height: 14px;
+  border-left: 1px solid var(--line-hi);
+}
+
+.org-team.under .role::after {
+  content: "";
+  position: absolute;
+  top: -14px;
+  left: -7px;
+  right: -7px;
+  border-top: 1px solid var(--line-hi);
+}
+
+.org-team.under .role:first-child::after {
+  left: 50%;
+}
+
+.org-team.under .role:last-child::after {
+  right: 50%;
+}
+
+.org-team.under .role:only-child::after {
+  display: none;
+}
+
+.role {
+  --c: var(--slate);
+  position: relative;
+  width: 214px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  padding: 11px 14px 12px;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+
+.role:hover,
+.role.selected {
+  border-color: var(--blue);
+  transform: translateY(-2px);
+}
+
+.role.lit {
+  border-color: color-mix(in srgb, var(--c) 70%, transparent);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--c) 22%, transparent);
+}
+
+.role-dot {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 0 4px rgba(74, 93, 120, 0.22);
+}
+
+.role.lit .role-dot {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent), 0 0 14px var(--c);
+}
+
+.role b {
+  font-weight: 600;
+  font-size: 14.5px;
+  line-height: 1.3;
+  padding-right: 18px;
+}
+
+.role-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.role-meta em {
+  font-style: normal;
+  color: var(--c);
+}
+
+.role-hires {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.jobs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.jobs li {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 0;
+  border-top: 1px solid rgba(44, 74, 116, 0.3);
+}
+
+.jobs li div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.jobs b {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs div span {
+  font-size: 12.5px;
+  color: var(--soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs time {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.job-state {
+  font-size: 11.5px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-hi);
+  color: var(--soft);
+}
+
+.job-state.s-working {
+  color: var(--blue);
+  border-color: rgba(124, 196, 255, 0.5);
+}
+
+.job-state.s-review {
+  color: var(--amber);
+  border-color: rgba(255, 198, 109, 0.5);
+}
+
+.job-state.s-done {
+  color: var(--green);
+  border-color: rgba(111, 227, 165, 0.45);
+}
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--blue);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.co-quiet {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.co-empty {
+  margin: 80px auto 0;
+  max-width: 420px;
+  text-align: center;
+  color: var(--soft);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.co-empty code {
+  font-family: ui-monospace, "DejaVu Sans Mono", monospace;
+  font-size: 12.5px;
+  color: var(--cyan);
+  background: rgba(10, 19, 34, 0.7);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+.co-error {
+  color: var(--red);
+  font-size: 12.5px;
+}
+
+.co-ok {
+  color: var(--green);
+  font-size: 12.5px;
+}
+
+.co-panel {
+  flex: none;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 22px 22px;
+  border-left: 1px solid var(--line);
+  background: rgba(6, 11, 20, 0.55);
+  overflow-y: auto;
+}
+
+.co-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.co-panel-head .lbl {
+  margin-bottom: 4px;
+}
+
+.co-panel label,
+.co-panel legend {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.co-panel fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.co-panel label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--soft);
+}
+
+.co-panel input:not([type="checkbox"]),
+.co-panel select,
+.co-panel textarea {
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: rgba(10, 19, 34, 0.8);
+  border: 1px solid var(--line-hi);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+.co-panel input:focus-visible,
+.co-panel select:focus-visible,
+.co-panel textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+.co-panel label.grow {
+  flex: 1;
+  min-height: 220px;
+}
+
+.co-panel textarea {
+  flex: 1;
+  min-height: 200px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.co-live {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--cyan);
+}
+
+.co-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.co-actions .primary {
+  background: rgba(124, 196, 255, 0.18);
+  border: 1px solid var(--blue);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 20px;
+  cursor: pointer;
+}
+
+.co-actions .primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

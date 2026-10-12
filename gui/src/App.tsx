@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useActivity } from "./hud/activity";
 import { useBrain } from "./hud/brain";
 import { Connection } from "./hud/Connection";
+import { CompanyView } from "./hud/CompanyView";
 import { Constellation } from "./hud/Constellation";
 import { DayPicker } from "./hud/DayPicker";
 import { Feed } from "./hud/Feed";
@@ -20,7 +21,7 @@ import { NeedsYou, Spoken } from "./hud/Left";
 import { Orb, orbState } from "./hud/Orb";
 import { call, MOCK, reasonOf } from "./hud/tauri";
 import { Timeline, type DayState } from "./hud/Timeline";
-import { TopBar } from "./hud/TopBar";
+import { TopBar, type View } from "./hud/TopBar";
 import type { DayChart } from "./hud/types";
 import "./hud/tokens.css";
 import "./hud/hud.css";
@@ -38,6 +39,21 @@ function App() {
   const today = localDate(new Date(now));
   const [day, setDay] = useState(today);
   const [chart, setChart] = useState<DayState>({ status: "loading" });
+  const [screen, setScreen] = useState<View>(() => {
+    try {
+      return localStorage.getItem("synthia.hud.view") === "company" ? "company" : "constellation";
+    } catch {
+      return "constellation";
+    }
+  });
+  const pickView = useCallback((v: View) => {
+    setScreen(v);
+    try {
+      localStorage.setItem("synthia.hud.view", v);
+    } catch {
+      /* the choice just will not be remembered */
+    }
+  }, []);
   const [focusError, setFocusError] = useState<string | null>(null);
   const viewingToday = day === today;
 
@@ -74,7 +90,7 @@ function App() {
       <span className="bracket tr" />
       <span className="bracket bl" />
       <span className="bracket br" />
-      <TopBar nodes={nodes} usage={usage} now={now} preview={MOCK} />
+      <TopBar nodes={nodes} usage={usage} now={now} preview={MOCK} view={screen} onView={pickView} />
       <aside className="left">
         <Orb state={orbState(voice.recording, view.state)} talkKey={talkKey} />
         <Connection
@@ -93,7 +109,11 @@ function App() {
         <Spoken spoken={view.spoken} />
         <NeedsYou nodes={nodes} confirms={view.confirms} now={now} onFocus={focus} onConfirm={confirmReply} />
       </aside>
-      <Constellation fleet={fleet} now={now} onFocus={focus} />
+      {screen === "company" ? (
+        <CompanyView fleet={fleet} now={now} onFocus={focus} />
+      ) : (
+        <Constellation fleet={fleet} now={now} onFocus={focus} />
+      )}
       <Feed items={activity} />
       <section className="day" aria-label="Timeline">
         <div className="day-head">
