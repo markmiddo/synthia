@@ -88,7 +88,7 @@ export function NeedsYou({
   reviews = [],
   onReview,
 }: {
-  reviews?: { id: string; title: string }[];
+  reviews?: { id: string; title: string; label: string }[];
   onReview?: (id: string) => void;
   ledger?: LedgerItem[];
   onDetail?: (item: LedgerItem, el: HTMLElement) => void;
@@ -125,7 +125,7 @@ export function NeedsYou({
       {reviews.map((r) => (
         <button type="button" className="need-line" key={`rev-${r.id}`} onClick={() => onReview?.(r.id)}>
           <i />
-          <span>Review: {r.title}</span>
+          <span>{r.label}: {r.title}</span>
         </button>
       ))}
       {ledger.map((i) => (

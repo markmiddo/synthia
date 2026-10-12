@@ -130,7 +130,7 @@ export function Scorecard({
   reviews,
   onReview,
 }: {
-  reviews: { id: string; title: string }[];
+  reviews: { id: string; title: string; label: string }[];
   onReview: (id: string) => void;
   today: Today;
   todayDate: string;

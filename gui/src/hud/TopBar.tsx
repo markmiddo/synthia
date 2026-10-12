@@ -185,6 +185,7 @@ export function TopBar({
   today,
   onDay,
   inboxNew,
+  inboxReports,
   onInbox,
 }: {
   nodes: FleetNode[];
@@ -197,6 +198,7 @@ export function TopBar({
   today: string;
   onDay: (d: string) => void;
   inboxNew: number;
+  inboxReports: number;
   onInbox: () => void;
 }) {
   const count = (s: FleetNode["status"]) => nodes.filter((n) => n.status === s).length;
@@ -219,7 +221,7 @@ export function TopBar({
       {preview && <span className="example">PREVIEW DATA</span>}
       <ViewToggle view={view} onView={onView} />
       <DayMenu day={day} today={today} onDay={onDay} />
-      <InboxButton count={inboxNew} onClick={onInbox} />
+      <InboxButton count={inboxNew} reports={inboxReports} onClick={onInbox} />
       <div className="gauges" data-tauri-drag-region>
         <Gauge value={count("working")} total={total} label="working" color="var(--blue)" />
         <Gauge value={count("needs-you")} total={total} label="need you" color="var(--amber)" />

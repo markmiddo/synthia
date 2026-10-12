@@ -51,6 +51,10 @@ pub struct FeedbackEntry {
     pub routed_to: String,
     /// The revision job started for it, when there was one.
     pub job: Option<String>,
+    /// `answer` for a yes/no answer to a "Needs you" question; absent for ordinary feedback.
+    pub kind: Option<String>,
+    /// "yes" or "no", for an answer.
+    pub answer: Option<String>,
 }
 
 /// Wire shape (snake_case, as stored). Every field is optional so an older or newer file still lists.
@@ -76,6 +80,9 @@ pub struct InboxItem {
     pub deliverables: Vec<Deliverable>,
     #[serde(default)]
     pub director: String,
+    /// `required` (public content Mark must approve) or `fyi` (a report). Missing counts as fyi.
+    #[serde(default)]
+    pub review: String,
     #[serde(default)]
     pub state: String,
     pub note: Option<String>,
@@ -200,10 +207,14 @@ pub fn write_decision(dir: &Path, id: &str, state: &str, note: Option<Option<Str
 /// Mark an item sent back and append one round to its `feedback` thread, in one write.
 pub fn write_feedback(dir: &Path, id: &str, entry: &FeedbackEntry) -> AppResult<InboxItem> {
     let entry_json = serde_json::to_value(entry)?;
+    let is_answer = entry.kind.as_deref() == Some("answer");
     update_item(dir, id, |obj| {
-        obj.insert("state".into(), "sent_back".into());
-        obj.insert("note".into(), entry.note.clone().into());
-        obj.insert("decided_at".into(), entry.at.clone().into());
+        // Answering a question does not decide the item; only feedback marks it sent back.
+        if !is_answer {
+            obj.insert("state".into(), "sent_back".into());
+            obj.insert("note".into(), entry.note.clone().into());
+            obj.insert("decided_at".into(), entry.at.clone().into());
+        }
         let thread = obj.entry("feedback").or_insert_with(|| serde_json::Value::Array(Vec::new()));
         if let Some(arr) = thread.as_array_mut() {
             arr.push(entry_json);
@@ -355,6 +366,17 @@ pub fn feedback_message(item: &InboxItem, target: Option<&FeedbackTarget>, note:
     format!("Mark sent this back{}.\n{what}\nMark's note, word for word: {note}\n{instruction}", if item.title.is_empty() { String::new() } else { format!(" ({})", item.title) })
 }
 
+/// A decided call Mark wants changed, from a report's `## Calls I made` list.
+pub fn call_message(call: &str, note: &str) -> String {
+    format!("Mark wants to change this call: {call}. His note: {note}. Undo or adjust it, and report what you changed.")
+}
+
+/// Mark's yes or no to a `## Needs you` question.
+pub fn answer_message(question: &str, answer: &str, note: &str) -> String {
+    let note = if note.is_empty() { "none" } else { note };
+    format!("Mark answered: {question} → {answer}. Note: {note}")
+}
+
 /// Arguments for `synthia-squad`: ask the live director, or start a revision job.
 pub fn send_back_args(item: &InboxItem, message: &str, live_director: Option<&str>) -> Vec<String> {
     match live_director {
@@ -433,9 +455,20 @@ pub struct SendBack {
     pub job: Option<String>,
 }
 
+/// Feedback to a squad, Mark's change to a call, or his answer to a question.
+/// `mode` is `revise` (default), `call` or `answer`; `answer` is "yes" or "no" for the last.
 #[tauri::command]
-pub async fn inbox_send_back(id: String, note: String, target: Option<FeedbackTarget>) -> AppResult<SendBack> {
-    let note = clean_note(&note)?;
+pub async fn inbox_send_back(id: String, note: String, target: Option<FeedbackTarget>, mode: Option<String>, answer: Option<String>) -> AppResult<SendBack> {
+    let mode = mode.unwrap_or_else(|| "revise".into());
+    if !["revise", "call", "answer"].contains(&mode.as_str()) {
+        return Err(AppError::Validation(format!("bad mode: {mode}")));
+    }
+    let note = if mode == "answer" && note.trim().is_empty() { String::new() } else { clean_note(&note)? };
+    let answer = match (mode.as_str(), answer.as_deref()) {
+        ("answer", Some(a @ ("yes" | "no"))) => Some(a.to_string()),
+        ("answer", _) => return Err(AppError::Validation("answer yes or no".into())),
+        _ => None,
+    };
     let dir = items_dir(&home());
     let item = get_item(&dir, &id)?;
     super::squads::check_squad_id(&item.squad)?;
@@ -450,7 +483,12 @@ pub async fn inbox_send_back(id: String, note: String, target: Option<FeedbackTa
     let role_title = live
         .as_deref()
         .and_then(|a| registry.values().find(|m| m.agent_name == a).map(|m| if m.title.is_empty() { m.role.clone() } else { m.title.clone() }));
-    let message = feedback_message(&item, target.as_ref(), &note);
+    let title = target.as_ref().map(|t| t.title.as_str()).unwrap_or_default();
+    let message = match mode.as_str() {
+        "call" => call_message(title, &note),
+        "answer" => answer_message(title, answer.as_deref().unwrap_or_default(), &note),
+        _ => feedback_message(&item, target.as_ref(), &note),
+    };
     let args = send_back_args(&item, &message, live.as_deref());
     let slug = job_slug(&item.job);
     let result = super::squads::run_squad(args).await;
@@ -460,7 +498,16 @@ pub async fn inbox_send_back(id: String, note: String, target: Option<FeedbackTa
         (_, Err(_)) => ("not delivered".to_string(), None),
     };
     // The round is recorded whether or not the squad could be reached, so nothing Mark wrote is lost.
-    write_feedback(&dir, &id, &FeedbackEntry { at: now_iso(), target, note, routed_to: routed_to.clone(), job: job.clone() })?;
+    let entry = FeedbackEntry {
+        at: now_iso(),
+        target,
+        note,
+        routed_to: routed_to.clone(),
+        job: job.clone(),
+        kind: (mode == "answer").then(|| "answer".to_string()),
+        answer,
+    };
+    write_feedback(&dir, &id, &entry)?;
     match result {
         Ok(out) => Ok(SendBack { how: if live.is_some() { "asked" } else { "started" }.into(), detail: out, routed_to, job }),
         Err(AppError::Process(e)) => Err(AppError::Process(format!("It is marked sent back, but I could not reach the squad: {e}"))),
@@ -695,10 +742,10 @@ mod tests {
         let d = temp();
         fs::write(d.join("growth-1.json"), FULL).unwrap();
         let target = Some(FeedbackTarget { path: Some("/d/job/out/a.json".into()), title: "Bush doof guide".into() });
-        let one = FeedbackEntry { at: "2026-10-13T09:41:00Z".into(), target, note: "too formal".into(), routed_to: "Marketing Director".into(), job: None };
+        let one = FeedbackEntry { at: "2026-10-13T09:41:00Z".into(), target, note: "too formal".into(), routed_to: "Marketing Director".into(), job: None, ..Default::default() };
         let after = write_feedback(&d, "growth-1", &one).unwrap();
         assert_eq!((after.state.as_str(), after.note.as_deref(), after.feedback.len()), ("sent_back", Some("too formal"), 1));
-        let two = FeedbackEntry { at: "2026-10-13T10:00:00Z".into(), target: None, note: "still off".into(), routed_to: "revision job".into(), job: Some("2026-10-13-revise-week-of-posts".into()) };
+        let two = FeedbackEntry { at: "2026-10-13T10:00:00Z".into(), target: None, note: "still off".into(), routed_to: "revision job".into(), job: Some("2026-10-13-revise-week-of-posts".into()), ..Default::default() };
         let after = write_feedback(&d, "growth-1", &two).unwrap();
         assert_eq!(after.feedback.len(), 2);
         assert_eq!(after.feedback[0].target.as_ref().unwrap().title, "Bush doof guide");
@@ -753,5 +800,31 @@ mod tests {
         registry.insert("p2".into(), m("growth-director-2", None, None));
         registry.insert("p3".into(), m("growth-writer-1", Some("p2"), None));
         assert_eq!(live_director(&item, &registry).as_deref(), Some("growth-director-2"));
+    }
+
+    #[test]
+    fn call_changes_and_answers_have_their_own_messages_and_answers_do_not_decide() {
+        assert_eq!(
+            call_message("Closed 3 stale cards", "Reopen the oldest"),
+            "Mark wants to change this call: Closed 3 stale cards. His note: Reopen the oldest. Undo or adjust it, and report what you changed."
+        );
+        assert_eq!(answer_message("Enable the timers?", "yes", "weekdays only"), "Mark answered: Enable the timers? → yes. Note: weekdays only");
+        assert_eq!(answer_message("Enable the timers?", "no", ""), "Mark answered: Enable the timers? → no. Note: none");
+        let d = temp();
+        fs::write(d.join("growth-1.json"), FULL).unwrap();
+        let ans = FeedbackEntry {
+            at: "2026-10-13T09:00:00Z".into(),
+            target: Some(FeedbackTarget { path: None, title: "Enable the timers?".into() }),
+            note: String::new(),
+            routed_to: "Marketing Director".into(),
+            job: None,
+            kind: Some("answer".into()),
+            answer: Some("yes".into()),
+        };
+        let after = write_feedback(&d, "growth-1", &ans).unwrap();
+        assert_eq!(after.state, "new", "an answer leaves the item's state alone");
+        assert!(after.note.is_none() && after.decided_at.is_none());
+        assert_eq!((after.feedback[0].kind.as_deref(), after.feedback[0].answer.as_deref()), (Some("answer"), Some("yes")));
+        fs::remove_dir_all(d).ok();
     }
 }

@@ -339,7 +339,7 @@ const IMAGES: Record<string, string> = {
 const iso = (ago: number) => new Date(t0 - ago * min).toISOString();
 let INBOX: Record<string, unknown>[] = [
   {
-    version: 1, id: "growth-week-of-posts", created_at: iso(14), source: "squad", squad: "growth", job: "2026-10-13-week-of-posts",
+    version: 1, id: "growth-week-of-posts", review: "required", created_at: iso(14), source: "squad", squad: "growth", job: "2026-10-13-week-of-posts",
     title: "Growth: week of posts", director: "growth-director", state: "new", note: null, decided_at: null, desk: "/mock/inbox/growth",
     summary_md: "## Two drafts are ready\n\nThe editor passed both and every competitor claim was re-checked on the day.\n\n- **How to sell out your first gig**: fan-side search term first\n- **Resale without the headache**: links to the help article\n\nCovers are 16:9, no text in the image. See the [brief](https://example.com/brief).",
     deliverables: [
@@ -350,13 +350,19 @@ let INBOX: Record<string, unknown>[] = [
     ],
   },
   {
-    version: 1, id: "office-board-cleanup", created_at: iso(62), source: "squad", squad: "office", job: "2026-10-13-board-sweep",
+    version: 1, id: "office-board-cleanup", review: "fyi", created_at: iso(62), source: "squad", squad: "office", job: "2026-10-13-board-sweep",
     title: "Office: board cleanup", director: "office-chief", state: "new", note: null, decided_at: null, desk: "/mock/inbox/office",
-    summary_md: "The sweep finished. Everything is in the report below, with two proposals that need your yes.",
+    summary_md: "# Board cleanup\n\nThe sweep finished. Seven double-listed cards are fixed and three stale ones are closed.\n\n## Calls I made\n\n- Closed 3 stale cards: they were merged weeks ago. Undo: reopen them from the board archive.\n- Moved 7 double-listed cards to one board: one board per issue. Undo: move them back from the activity log.\n- Left the 90-day-old cards open: no owner to ask. Undo: none needed.",
     deliverables: [{ path: "/mock/inbox/office/out/board-cleanup.md", name: "board-cleanup.md", kind: "md", bytes: 900 }],
   },
   {
-    version: 1, id: "growth-covers", created_at: iso(30), source: "squad", squad: "growth", job: "2026-10-13-covers",
+    version: 1, id: "office-pm-questions", review: "fyi", created_at: iso(9), source: "squad", squad: "office", job: "2026-10-13-timers",
+    title: "Office: timers and nudges", director: "office-chief", state: "new", note: null, decided_at: null, desk: "/mock/inbox/office",
+    summary_md: "# Timers and nudges\n\nBoth timers are written and tested, but not switched on.\n\n## Needs you\n\n- Switch on the weekday 7:30 board sweep timer?\n- Send Syed the friendly nudge about the two merged fixes still in triage?\n\n## Calls I made\n\n- Wrote the nudge as a draft only: nudges stay drafts unless told to send. Undo: delete the draft in Slack.",
+    deliverables: [],
+  },
+  {
+    version: 1, id: "growth-covers", review: "required", created_at: iso(30), source: "squad", squad: "growth", job: "2026-10-13-covers",
     title: "Growth: covers", director: "growth-director", state: "sent_back", note: "Warmer is fine, but lose the vans.", decided_at: iso(20), desk: "/mock/inbox/growth",
     summary_md: "# Blog covers, 13 October 2026\n\nBoth covers are done. Each image took one try. No post text was changed.\n\n- **Bush doof guide**: dusty campsite at golden hour, 16:9 (2752 x 1536), no text\n- **Resale**: a punter queues at dusk outside a brick venue",
     feedback: [{ at: iso(20), target: { path: "/mock/inbox/growth/out/how-to-sell-out-your-first-gig-cover.png", title: "Cover: How to sell out your first gig" }, note: "Warmer is fine, but lose the vans.", routed_to: "revision job", job: "2026-10-13-revise-covers" }],
@@ -366,12 +372,12 @@ let INBOX: Record<string, unknown>[] = [
     ],
   },
   {
-    version: 1, id: "growth-revise-covers", created_at: iso(3), source: "squad", squad: "growth", job: "2026-10-13-revise-covers",
+    version: 1, id: "growth-revise-covers", review: "required", created_at: iso(3), source: "squad", squad: "growth", job: "2026-10-13-revise-covers",
     title: "Growth: revise covers", director: "growth-director", state: "new", note: null, decided_at: null, desk: "/mock/inbox/growth",
     summary_md: "The bush doof cover is redone without the vans.", deliverables: [],
   },
   {
-    version: 1, id: "release-faq-v31", created_at: iso(60 * 20), source: "squad", squad: "release", job: "2026-10-12-v31-faq",
+    version: 1, id: "release-faq-v31", review: "required", created_at: iso(60 * 20), source: "squad", squad: "release", job: "2026-10-12-v31-faq",
     title: "Release: v3.1 Help Centre updates", director: "release-lead", state: "approved", note: null, decided_at: iso(60 * 19), desk: "/mock/inbox/release",
     summary_md: "Four articles updated, two new ones drafted.", deliverables: [],
   },
@@ -392,6 +398,11 @@ function inboxMock(cmd: string, args?: Record<string, unknown>): unknown {
     case "inbox_send_back": {
       const cur = INBOX.find((i) => i.id === id);
       const tgt = args?.target as { path: string | null; title: string } | null;
+      if (args?.mode === "answer") {
+        const ans = { at: new Date().toISOString(), target: tgt, note: String(args?.note ?? ""), routed_to: "Chief of Staff", job: null, kind: "answer", answer: args?.answer };
+        patch({ feedback: [...(((INBOX.find((i) => i.id === id)?.feedback) as unknown[]) ?? []), ans] });
+        return { how: "asked", detail: "", routed_to: "Chief of Staff", job: null };
+      }
       const live = SQUAD && cur?.squad === "growth";
       const entry = { at: new Date().toISOString(), target: tgt, note: String(args?.note), routed_to: live ? "Marketing Director" : "revision job", job: live ? null : `${new Date().toISOString().slice(0, 10)}-revise-${String(cur?.job).slice(11)}` };
       patch({ state: "sent_back", note: args?.note, decided_at: entry.at, feedback: [...(((cur?.feedback) as unknown[]) ?? []), entry] });
