@@ -76,7 +76,7 @@ export function useSynthiaState(): { state: SynthiaState; error: string | null }
   return { state, error };
 }
 
-/** Whether the voice app (Right Alt / Right Ctrl) is running. */
+/** Whether the voice app (the talk key) is running. */
 export function useVoiceRunning(): {
   running: boolean | null;
   start: () => void;
@@ -117,4 +117,24 @@ export function useVoiceRunning(): {
       });
   };
   return { running, start, error };
+}
+
+const KEY_NAMES: Record<string, string> = {
+  "Key.alt_l": "Left Alt",
+  "Key.alt_r": "Right Alt",
+  "Key.ctrl_l": "Left Ctrl",
+  "Key.ctrl_r": "Right Ctrl",
+  "Key.shift_l": "Left Shift",
+  "Key.shift_r": "Right Shift",
+};
+
+/** The talk key from the voice app's config, in words ("Left Alt"). */
+export function useTalkKey(): string {
+  const [key, setKey] = useState("your talk key");
+  useEffect(() => {
+    call<[string, string]>("get_hotkeys")
+      .then(([, assistant]) => setKey(KEY_NAMES[assistant] ?? assistant))
+      .catch(() => undefined); // keep the neutral wording; nothing else depends on it
+  }, []);
+  return key;
 }

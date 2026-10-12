@@ -4,7 +4,7 @@ import { Connection } from "./hud/Connection";
 import { CountsBar } from "./hud/CountsBar";
 import { DayPicker } from "./hud/DayPicker";
 import { localDate } from "./hud/format";
-import { useFleet, useNow, useSynthiaState, useUsage, useVoiceRunning } from "./hud/hooks";
+import { useFleet, useNow, useSynthiaState, useTalkKey, useUsage, useVoiceRunning } from "./hud/hooks";
 import { NeedsYou } from "./hud/NeedsYou";
 import { Orb, orbState } from "./hud/Orb";
 import { OrgTree, PastTree, type PastDay } from "./hud/OrgTree";
@@ -17,6 +17,7 @@ import "./hud/hud.css";
 function App() {
   const { view, confirmReply } = useBrain();
   const fleet = useFleet();
+  const talkKey = useTalkKey();
   const usage = useUsage();
   const { state: voice, error: voiceStateError } = useSynthiaState();
   const { running, start, error: voiceError } = useVoiceRunning();
@@ -51,19 +52,20 @@ function App() {
   return (
     <main className="hud">
       <aside className="left">
-        <Orb state={orbState(voice.recording, view.state)} />
+        <Orb state={orbState(voice.recording, view.state)} talkKey={talkKey} />
         <Connection
           brain={view}
           fleet={fleet}
           voiceRunning={running}
           onStartVoice={start}
+          talkKey={talkKey}
           notes={[
             ...(focusError ? [focusError] : []),
             ...(voiceError ? [voiceError] : []),
             ...(voiceStateError ? [`I can't read the voice state: ${voiceStateError}`] : []),
           ]}
         />
-        <Spoken spoken={view.spoken} link={view.link} />
+        <Spoken spoken={view.spoken} link={view.link} talkKey={talkKey} />
         <NeedsYou
           nodes={nodes}
           confirms={view.confirms}

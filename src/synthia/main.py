@@ -125,7 +125,8 @@ class Synthia:
             desk_port = int(self.config.get("brain_desk_port", DEFAULT_PORT))
             self.desk_voice = DeskVoice(
                 client_factory=lambda on_frame: BrainClient(on_frame, port=desk_port),
-                speak=self.tts.speak,
+                # Mark asked; answer even when background speech is muted.
+                speak=lambda text: self.tts.speak(text, ignore_mute=True),
                 stop_speaking=self.tts.cancel,
                 on_state=self._on_desk_state,
             )

@@ -152,17 +152,18 @@ class TextToSpeech:
 
         return chunks if chunks else [text]
 
-    def speak(self, text: str) -> bool:
+    def speak(self, text: str, ignore_mute: bool = False) -> bool:
         """Convert text to speech and play it.
 
         Serialized across processes via speech_lock so concurrent agents
-        never overlap.
+        never overlap. The runtime mute silences background speech (agents);
+        a reply to something Mark just asked passes ignore_mute=True.
         """
         if not text:
             return False
 
         gen = self._gen
-        if is_voice_muted():
+        if not ignore_mute and is_voice_muted():
             logger.debug("TTS muted via runtime state; skipping speak")
             return False
 
@@ -171,7 +172,7 @@ class TextToSpeech:
                 return False
             # Re-check mute after waiting in queue: user may have muted while
             # this call was blocked behind another speaker.
-            if is_voice_muted():
+            if not ignore_mute and is_voice_muted():
                 logger.debug("TTS muted while waiting for lock; skipping")
                 return False
             try:

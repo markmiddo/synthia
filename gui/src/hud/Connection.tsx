@@ -6,12 +6,20 @@ interface Props {
   fleet: Fleet | null;
   voiceRunning: boolean | null;
   onStartVoice: () => void;
+  talkKey: string;
   /** Other problems already phrased for the user (focus failed, voice app unreadable...). */
   notes?: string[];
 }
 
 /** One plain-words line per problem; renders nothing when everything is reachable. */
-export function Connection({ brain, fleet, voiceRunning, onStartVoice, notes = [] }: Props) {
+export function Connection({
+  brain,
+  fleet,
+  voiceRunning,
+  onStartVoice,
+  talkKey,
+  notes = [],
+}: Props) {
   const lines: string[] = [];
   if (brain.link === "offline" && brain.reason) lines.push(brain.reason);
   if (brain.notice) lines.push(brain.notice);
@@ -26,7 +34,7 @@ export function Connection({ brain, fleet, voiceRunning, onStartVoice, notes = [
       ))}
       {voiceDown && (
         <p>
-          The voice app isn't running, so Right Alt won't work.{" "}
+          The voice app isn't running, so {talkKey} won't work.{" "}
           <button type="button" className="link" onClick={onStartVoice}>
             Start it
           </button>

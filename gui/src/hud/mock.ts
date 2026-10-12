@@ -68,6 +68,7 @@ export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promis
     get_status: "running",
     get_voice_muted: false,
     get_desk_token: "mock",
+    get_hotkeys: ["none", "Key.alt_l"],
     get_synthia_state: { status: "ready", recording: false } satisfies SynthiaState,
     fleet_day: day(String(args?.date ?? "")),
   };

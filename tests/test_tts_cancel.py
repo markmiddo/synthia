@@ -90,3 +90,12 @@ def test_a_cancel_before_a_new_speak_does_not_silence_it(_isolated):
     t.cancel()
     assert t.speak("Hello there, friend.") is True
     assert _isolated == ["piper", "aplay"]
+
+
+def test_background_mute_silences_speech_but_not_a_direct_reply(_isolated, monkeypatch):
+    monkeypatch.setattr(tts_module, "is_voice_muted", lambda: True)
+    t = _piper()
+    assert t.speak("An agent finished.") is False
+    assert _isolated == []
+    assert t.speak("Here's what's going on.", ignore_mute=True) is True
+    assert _isolated == ["piper", "aplay"]
