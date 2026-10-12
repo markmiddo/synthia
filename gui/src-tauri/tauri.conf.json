@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "Synthia",
-        "width": 900,
-        "height": 600,
-        "minWidth": 700,
-        "minHeight": 400,
+        "width": 1120,
+        "height": 720,
+        "minWidth": 760,
+        "minHeight": 480,
         "resizable": true,
         "visible": true,
         "center": true,
@@ -43,7 +43,8 @@
       "iconAsTemplate": false
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:8766",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:8766 ws://localhost:1420 http://localhost:1420"
     }
   },
   "bundle": {

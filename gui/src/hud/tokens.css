@@ -1,0 +1,24 @@
+/* Direction D, "Jarvis, legible". Sora is bundled locally (@fontsource/sora); nothing is
+   fetched from the network. Body text is 14.5px, her spoken line 17px. */
+@import "@fontsource/sora/latin-400.css";
+@import "@fontsource/sora/latin-500.css";
+@import "@fontsource/sora/latin-600.css";
+
+:root {
+  --bg: #0d1420;
+  --panel: #121c2b;
+  --ink: #eef3f8;
+  --muted: #93a4b8;
+  --line: #22324a;
+  --line-mine: #2d4566;
+  --accent: #7cc4ff;
+  --work: #7cc4ff;
+  --need: #ffc66d;
+  --done: #53657c;
+  --stuck: #ff7a7a;
+  --kid-ink: #c5d1de;
+  --font: "Sora", system-ui, sans-serif;
+  --body: 14.5px;
+  --says: 17px;
+  color-scheme: dark;
+}

@@ -75,11 +75,17 @@ fn load_embedded_icon(data: &'static [u8]) -> Option<Image<'static>> {
     Some(Image::new_owned(rgba, width, height))
 }
 
-#[derive(Deserialize, Debug, Default)]
+/// The voice process's state file (`synthia-state.json`), forwarded to the HUD as the
+/// `synthia-state` event so the orb can show "listening".
+#[derive(Deserialize, serde::Serialize, Debug, Default, Clone, PartialEq)]
 struct SynthiaState {
-    #[allow(dead_code)]
     status: String,
     recording: bool,
+}
+
+#[tauri::command]
+fn get_synthia_state() -> SynthiaState {
+    read_synthia_state()
 }
 
 pub(crate) fn get_lock_file() -> PathBuf {
@@ -277,7 +283,7 @@ fn spawn_state_watcher(
     let state_file = get_state_file();
     let parent = state_file.parent()?.to_path_buf();
     let target = state_file.clone();
-    let last_recording = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let last_state = std::sync::Arc::new(std::sync::Mutex::new(SynthiaState::default()));
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(event) = res else { return };
@@ -291,14 +297,19 @@ fn spawn_state_watcher(
             return;
         }
         let state = read_synthia_state();
-        let mut last = match last_recording.lock() {
+        let mut last = match last_state.lock() {
             Ok(g) => g,
             Err(_) => return,
         };
-        if state.recording == *last {
+        if state == *last {
             return;
         }
-        *last = state.recording;
+        let recording_changed = state.recording != last.recording;
+        *last = state.clone();
+        let _ = app_handle.emit("synthia-state", &state);
+        if !recording_changed {
+            return;
+        }
         if let Some(tray) = app_handle.tray_by_id("main-tray") {
             if state.recording {
                 if let Some(ref icon) = recording_icon {
@@ -581,6 +592,8 @@ pub fn run() {
             crate::native_term::commands::native_term_rename_tab,
             crate::native_term::commands::native_term_list_tabs,
             commands::shortcuts::get_shell_aliases,
+            get_synthia_state,
+            commands::desk::get_desk_token,
             commands::fleet::fleet_snapshot,
             commands::fleet::fleet_focus,
             commands::fleet::fleet_day
