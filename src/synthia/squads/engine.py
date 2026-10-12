@@ -35,6 +35,20 @@ class JobInfo:
     pane_id: str
 
 
+SUMMARY_DIGEST_CHARS = 2500
+
+
+def _summary_digest(job_path: Path) -> str:
+    """The head of the director's out/summary.md, so Synthia can say what the job found."""
+    try:
+        text = (job_path / "out" / "summary.md").read_text(errors="replace")
+    except OSError:
+        return ""
+    if len(text) <= SUMMARY_DIGEST_CHARS:
+        return text.strip()
+    return text[:SUMMARY_DIGEST_CHARS].rsplit("\n", 1)[0].strip() + "\n[...]"
+
+
 class Engine:
     def __init__(
         self,
@@ -320,6 +334,8 @@ class Engine:
             "squad": squad.id,
             "job": m.job,
             "text": text,
+            "desk": str(path),
+            "digest": _summary_digest(path),
         }
         self.root.mkdir(parents=True, exist_ok=True)
         line = (json.dumps(event) + "\n").encode()

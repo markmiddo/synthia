@@ -99,3 +99,17 @@ async def test_tail_pushes_events(tmp_path):
     assert got and got[0].summary == "Growth posts are ready for review"
     assert got[0].status == "review" and got[0].name.startswith("growth squad")
     assert event_record({}).summary
+
+
+def test_event_record_carries_the_directors_summary():
+    rec = event_record(
+        {
+            "squad": "office",
+            "job": "2026-10-13-board-cleanup",
+            "text": "Office's board cleanup is ready for review",
+            "desk": "/d/office/jobs/x",
+            "digest": "# Board cleanup\nSix cards moved to In review.",
+        }
+    )
+    assert "Six cards moved to In review." in rec.summary
+    assert rec.summary.startswith("Office's board cleanup is ready for review")

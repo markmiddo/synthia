@@ -13,11 +13,16 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 try:
     from telegram import Update
     from telegram.constants import ChatAction
+    from telegram.error import TimedOut
     from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
     HAS_TELEGRAM = True
 except ImportError:  # pragma: no cover - only hit without the `brain` extra
     HAS_TELEGRAM = False
+
+    class TimedOut(Exception):  # type: ignore[no-redef]
+        """Stand-in so the except clause below still compiles without the extra."""
+
 
 from synthia.brain.config import BrainConfig
 
@@ -30,6 +35,8 @@ CAPTION_LIMIT = 1024
 
 # How long to wait before retrying an event we could not push, or restarting a crashed pump.
 EVENT_RETRY_DELAY_S = 30
+# Voice uploads are slow on a phone-tethered or busy link; the library default is 5 s.
+VOICE_TIMEOUT_S = 60
 # Each retry re-synthesises the voice note (paid TTS), so a push that keeps failing is
 # given up after this many attempts; the job's result is already in the walk journal.
 MAX_EVENT_PUSH_ATTEMPTS = 5
@@ -108,8 +115,16 @@ class TelegramTransport:
             try:
                 with open(path, "rb") as f:
                     await bot.send_voice(
-                        chat_id=chat_id, voice=f, caption=caption if i == 0 else None
+                        chat_id=chat_id,
+                        voice=f,
+                        caption=caption if i == 0 else None,
+                        read_timeout=VOICE_TIMEOUT_S,
+                        write_timeout=VOICE_TIMEOUT_S,
                     )
+            except TimedOut:
+                # Telegram usually has the upload by the time the response times out; a retry
+                # sends Mark the same note again (13 Oct: three copies). Treat it as sent.
+                logger.warning("voice note timed out waiting for Telegram; assuming delivered")
             finally:
                 path.unlink(missing_ok=True)
 

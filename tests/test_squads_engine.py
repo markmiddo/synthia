@@ -158,12 +158,14 @@ def test_stop_job_dismisses_specialists_then_director(env):
 def test_done_writes_review_state_and_event(env):
     eng, _, tmp = env
     info = start(eng)
+    (info.path / "out" / "summary.md").write_text("# Posts\nTwo posts ready.\n")
     text = eng.done(info.pane_id)
     assert "ready for review" in text
     assert json.loads((info.path / "status.json").read_text())["state"] == "review"
     lines = (tmp / "data" / "events.jsonl").read_text().splitlines()
     ev = json.loads(lines[0])
     assert ev["squad"] == "growth" and ev["job"] == info.job and ev["text"] == text
+    assert ev["digest"] == "# Posts\nTwo posts ready." and ev["desk"] == str(info.path)
 
 
 def test_done_refused_for_specialist(env):

@@ -390,3 +390,24 @@ async def test_cancelled_telegram_leg_without_winner_says_cancelled(parts):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert "cancelled" in bot.texts[-1][1]
+
+
+async def test_voice_timeout_counts_as_delivered_and_is_not_resent(parts):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    timeouts = {"n": 0}
+
+    async def slow_send_voice(chat_id, voice, caption=None, **kw):
+        assert kw.get("read_timeout") == telegram_module.VOICE_TIMEOUT_S
+        timeouts["n"] += 1
+        raise telegram_module.TimedOut("Timed out")
+
+    bot.send_voice = slow_send_voice
+    rec = JobRecord(id="a", name="office squad", prompt="", started="t", status="review")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "Office sweep is ready."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert timeouts["n"] == 1, "a timed-out upload must not be retried (Mark got three copies)"
+    assert brain.acked == [rec]

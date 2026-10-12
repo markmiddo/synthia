@@ -27,8 +27,21 @@ def event_record(ev: dict[str, Any]) -> JobRecord:
         started=now,
         finished=now,
         ok=True,
-        summary=str(ev.get("text") or f"{squad} squad has finished"),
+        summary=_spoken_summary(ev, squad),
         status=str(ev.get("kind") or "review"),
+    )
+
+
+def _spoken_summary(ev: dict[str, Any], squad: str) -> str:
+    head = str(ev.get("text") or f"{squad} squad has finished")
+    digest = str(ev.get("digest") or "").strip()
+    desk = str(ev.get("desk") or "")
+    if not digest:
+        return head
+    where = f" Full files: {desk}/out." if desk else ""
+    return (
+        f"{head}. Tell Mark the outcome in two or three spoken sentences from the director's "
+        f"summary below (what was done, what needs him), no file names.{where}\n\n{digest}"
     )
 
 
