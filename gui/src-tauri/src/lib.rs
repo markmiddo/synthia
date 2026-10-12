@@ -350,7 +350,15 @@ pub fn run() {
             commands::squads::squad_job_detail,
             commands::squads::squad_open_file,
             commands::squads::squad_stop_job,
-            commands::squads::squad_start_job
+            commands::squads::squad_start_job,
+            commands::today::today_ledger,
+            commands::today::today_inbox,
+            commands::today::today_shipped,
+            commands::today::today_squad_output,
+            commands::today::open_url,
+            commands::today::today_release,
+            commands::today::today_meeting,
+            commands::today::today_spend
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

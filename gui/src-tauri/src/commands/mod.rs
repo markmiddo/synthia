@@ -8,4 +8,5 @@ pub mod lifecycle;
 pub mod overlay;
 pub mod remote;
 pub mod squads;
+pub mod today;
 pub mod usage;

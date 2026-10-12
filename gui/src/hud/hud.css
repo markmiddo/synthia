@@ -2208,3 +2208,399 @@ div.node {
 .subtree li.more {
   display: block;
 }
+
+/* ---- left column: the Today scorecard ---- */
+
+.left {
+  overflow-y: auto;
+  min-height: 0;
+  gap: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-hi) transparent;
+}
+
+.orbwrap {
+  width: min(250px, 22vh);
+  height: min(250px, 22vh);
+  flex: none;
+}
+
+.scorecard {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 8px;
+}
+
+.scorecard .lbl {
+  margin: 0 0 8px;
+}
+
+.need-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 5px 0;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.need-line i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 10px rgba(255, 198, 109, 0.7);
+}
+
+.need-line:hover span {
+  text-decoration: underline;
+}
+
+.meeting {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.meeting b {
+  font-weight: 500;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meeting span {
+  font-size: 12.5px;
+  color: var(--soft);
+}
+
+.meeting em {
+  font-style: normal;
+  color: var(--cyan);
+}
+
+.meeting em.soon {
+  color: var(--amber);
+}
+
+.meeting:hover b {
+  text-decoration: underline;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px 11px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.tile:hover,
+.tile.on {
+  border-color: var(--blue);
+}
+
+.tile b {
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.tile small {
+  font-size: 11px;
+  color: var(--soft);
+}
+
+.tlist {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tlist li {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.row-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  text-align: left;
+  color: var(--soft);
+  cursor: pointer;
+}
+
+.row-btn:hover {
+  color: var(--ink);
+}
+
+.row-btn small,
+.row-plain small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.row-plain {
+  display: block;
+  padding: 4px 0;
+  color: var(--soft);
+}
+
+.squad-line {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.release {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.release .bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+}
+
+.release .bar i {
+  display: block;
+  min-width: 3px;
+  border-radius: 3px;
+  opacity: 0.85;
+}
+
+.rcounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rcounts b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.release:hover .rcounts {
+  color: var(--soft);
+}
+
+.due {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.due li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.due em {
+  flex: none;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--amber);
+  border: 1px solid rgba(255, 198, 109, 0.45);
+  border-radius: 999px;
+  padding: 0 8px;
+  align-self: flex-start;
+}
+
+.spend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--soft);
+}
+
+.spend b {
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.spark {
+  flex: none;
+}
+
+.spark polyline {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.pop {
+  position: fixed;
+  z-index: 30;
+  width: 320px;
+  padding: 14px 16px 16px;
+  background: rgba(8, 15, 28, 0.97);
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(3, 7, 14, 0.6);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--soft);
+}
+
+.pop-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pop-head b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.pop time {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.pop p {
+  margin: 8px 0 0;
+}
+
+.pop em {
+  font-style: normal;
+  color: var(--cyan);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-right: 6px;
+}
+
+/* ---- top bar: two usage rings with a hover tooltip ---- */
+
+.top .gauges {
+  pointer-events: auto;
+}
+
+.gauge {
+  position: relative;
+  outline: none;
+}
+
+.gauge .lead {
+  margin-right: 6px;
+  color: var(--muted);
+}
+
+.gauge .tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  min-width: 190px;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
+  background: rgba(8, 15, 28, 0.97);
+  border: 1px solid var(--line-hi);
+  border-radius: 10px;
+  box-shadow: 0 16px 36px rgba(3, 7, 14, 0.6);
+  white-space: nowrap;
+}
+
+.gauge .tip span {
+  font-size: 12.5px;
+  color: var(--soft);
+}
+
+.gauge .tip span:first-child {
+  color: var(--ink);
+}
+
+.gauge:hover .tip,
+.gauge:focus-visible .tip {
+  display: flex;
+}
+
+.top .mark {
+  flex: none;
+}
+
+.gauge .lead {
+  margin-right: 8px;
+}
+
+@media (max-width: 1320px) {
+  .top .clock {
+    display: none;
+  }
+}
+
+.left {
+  z-index: 6;
+}
+
+@media (min-width: 1181px) {
+  .left {
+    position: sticky;
+    top: 36px;
+    align-self: start;
+    max-height: calc(100vh - 36px);
+  }
+}

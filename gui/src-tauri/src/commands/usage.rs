@@ -205,6 +205,7 @@ pub async fn get_usage_stats(state: tauri::State<'_, AppState>) -> Result<UsageS
         }
     }
 
+    super::today::record_usage(&super::fleet::home_dir(), stats.seven_day_pct, &stats.seven_day_resets_at);
     {
         let mut cache = state.usage_response_cache.lock();
         *cache = Some(UsageResponseCache {
