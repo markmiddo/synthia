@@ -561,6 +561,248 @@ pub fn validate_job_path(desk: &Path, path: &str) -> AppResult<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
+// Job detail, start and stop
+// ---------------------------------------------------------------------------
+
+const THUMB_MAX_BYTES: u64 = 400_000;
+const MAX_BRIEF_CHARS: usize = 8000;
+const OPENABLE: [&str; 6] = ["md", "json", "txt", "png", "jpg", "jpeg"];
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    pub at: String,
+    pub who: String,
+    pub text: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Deliverable {
+    pub name: String,
+    pub size: u64,
+    pub path: String,
+    /// png | md | json | other
+    pub kind: String,
+    /// A data URL for small images.
+    pub thumb: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct JobDetail {
+    pub id: String,
+    pub squad: String,
+    pub path: String,
+    pub state: String,
+    pub brief: String,
+    /// Newest first.
+    pub log: Vec<LogEntry>,
+    pub deliverables: Vec<Deliverable>,
+}
+
+/// `[a-z0-9][a-z0-9_-]{0,63}`: job ids look like `2026-10-13-week-of-posts`.
+pub fn valid_job_id(id: &str) -> bool {
+    let b = id.as_bytes();
+    !b.is_empty()
+        && b.len() <= 64
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
+}
+
+/// `<desk>/<squad>/jobs/<job>`, validated to exist and to stay inside the desk.
+pub fn job_dir(desk: &Path, squad: &str, job: &str) -> AppResult<PathBuf> {
+    check_id("squad", squad)?;
+    if !valid_job_id(job) {
+        return Err(AppError::Validation(format!("bad job id: {job}")));
+    }
+    let dir = desk.join(squad).join("jobs").join(job);
+    if !dir.is_dir() || !is_inside(desk, &dir) {
+        return Err(AppError::NotFound(format!("job {job} in squad {squad}")));
+    }
+    Ok(dir)
+}
+
+/// Find a job by id across all squads (used by stop, which only knows the job id).
+pub fn find_job(desk: &Path, job: &str) -> AppResult<(String, PathBuf)> {
+    if !valid_job_id(job) {
+        return Err(AppError::Validation(format!("bad job id: {job}")));
+    }
+    let rd = std::fs::read_dir(desk).map_err(|_| AppError::NotFound("squads desk".into()))?;
+    for e in rd.filter_map(|e| e.ok()) {
+        let Ok(squad) = e.file_name().into_string() else { continue };
+        if !valid_id(&squad) {
+            continue;
+        }
+        if let Ok(dir) = job_dir(desk, &squad, job) {
+            return Ok((squad, dir));
+        }
+    }
+    Err(AppError::NotFound(format!("job {job}")))
+}
+
+fn thumb_for(path: &Path, size: u64) -> Option<String> {
+    use base64::Engine;
+    if size > THUMB_MAX_BYTES {
+        return None;
+    }
+    let mime = match path.extension()?.to_str()? {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => return None,
+    };
+    let bytes = std::fs::read(path).ok()?;
+    Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
+pub fn job_detail(desk: &Path, squad: &str, job: &str) -> AppResult<JobDetail> {
+    let dir = job_dir(desk, squad, job)?;
+    let status: Option<serde_json::Value> =
+        std::fs::read_to_string(dir.join("status.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
+    let state = status
+        .as_ref()
+        .and_then(|s| s.get("state"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let mut log: Vec<LogEntry> = status
+        .as_ref()
+        .and_then(|s| s.get("log"))
+        .and_then(|l| l.as_array())
+        .map(|a| {
+            a.iter()
+                .map(|e| {
+                    let f = |k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                    LogEntry { at: f("at"), who: f("who"), text: f("text") }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    log.reverse();
+    log.truncate(200);
+    let brief = std::fs::read_to_string(dir.join("brief.md")).unwrap_or_default();
+    let brief: String = brief.chars().take(MAX_PROMPT_BYTES).collect();
+    let mut deliverables = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir.join("out")) {
+        for e in rd.filter_map(|e| e.ok()) {
+            let path = e.path();
+            let Ok(name) = e.file_name().into_string() else { continue };
+            let Ok(meta) = std::fs::metadata(&path) else { continue };
+            if !meta.is_file() || name.starts_with('.') || !is_inside(&dir.join("out"), &path) {
+                continue;
+            }
+            let ext = path.extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase();
+            let kind = match ext.as_str() {
+                "png" | "jpg" | "jpeg" => "image",
+                "md" => "md",
+                "json" => "json",
+                _ => "other",
+            };
+            deliverables.push(Deliverable {
+                thumb: thumb_for(&path, meta.len()),
+                size: meta.len(),
+                path: name.clone(),
+                kind: kind.into(),
+                name,
+            });
+        }
+    }
+    deliverables.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(JobDetail {
+        id: job.to_string(),
+        squad: squad.to_string(),
+        path: dir.to_string_lossy().into_owned(),
+        state,
+        brief,
+        log,
+        deliverables,
+    })
+}
+
+/// The deliverable file to open: a plain filename in `out/` with an openable extension.
+pub fn deliverable_path(desk: &Path, squad: &str, job: &str, name: &str) -> AppResult<PathBuf> {
+    crate::paths::validate_filename(name)?;
+    let ext = Path::new(name).extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase();
+    if !OPENABLE.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!("I won't open {name} from here")));
+    }
+    let out = job_dir(desk, squad, job)?.join("out");
+    let path = out.join(name);
+    if !path.is_file() || !is_inside(&out, &path) {
+        return Err(AppError::NotFound(format!("deliverable {name}")));
+    }
+    Ok(path)
+}
+
+pub fn stop_args(job: &str) -> AppResult<Vec<String>> {
+    if !valid_job_id(job) {
+        return Err(AppError::Validation(format!("bad job id: {job}")));
+    }
+    Ok(vec!["stop".into(), job.into()])
+}
+
+pub fn start_args(squad: &str, brief: &str) -> AppResult<Vec<String>> {
+    check_id("squad", squad)?;
+    let brief = brief.trim();
+    if brief.is_empty() {
+        return Err(AppError::Validation("write a brief first".into()));
+    }
+    if brief.chars().count() > MAX_BRIEF_CHARS || brief.contains('\0') {
+        return Err(AppError::Validation("that brief is too long".into()));
+    }
+    // A leading dash would be read as an option.
+    let brief = if brief.starts_with('-') { format!("Brief: {brief}") } else { brief.to_string() };
+    Ok(vec!["start".into(), squad.into(), brief])
+}
+
+/// `synthia-squad` on PATH, else `~/.local/bin/synthia-squad`.
+fn squad_bin(home: &Path) -> PathBuf {
+    let fallback = home.join(".local/bin/synthia-squad");
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let c = dir.join("synthia-squad");
+            if c.is_file() {
+                return c;
+            }
+        }
+    }
+    fallback
+}
+
+async fn run_squad(args: Vec<String>) -> AppResult<String> {
+    let home = super::fleet::home_dir();
+    let mut cmd = tokio::process::Command::new(squad_bin(&home));
+    cmd.args(&args).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    let out = match tokio::time::timeout(std::time::Duration::from_secs(45), cmd.output()).await {
+        Err(_) => return Err(AppError::Process("synthia-squad did not answer within 45 seconds".into())),
+        Ok(Err(e)) => return Err(AppError::Process(format!("could not run synthia-squad: {e}"))),
+        Ok(Ok(o)) => o,
+    };
+    if out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    let err = err.trim();
+    let err = if err.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err.to_string() };
+    let tail: String = err.chars().rev().take(600).collect::<Vec<_>>().into_iter().rev().collect();
+    Err(AppError::Process(tail))
+}
+
+fn open_path(path: &Path) -> AppResult<()> {
+    let mut child = std::process::Command::new("xdg-open")
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| AppError::Process(format!("could not run xdg-open: {e}")))?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tauri surface
 // ---------------------------------------------------------------------------
 
@@ -580,18 +822,33 @@ pub fn squad_role_save(squad: String, role: String, fields: RoleFields) -> AppRe
 
 #[tauri::command]
 pub fn squad_open_job(path: String) -> AppResult<()> {
-    let real = validate_job_path(&dirs().desk, &path)?;
-    let mut child = std::process::Command::new("xdg-open")
-        .arg(&real)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| AppError::Process(format!("could not run xdg-open: {e}")))?;
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(())
+    open_path(&validate_job_path(&dirs().desk, &path)?)
+}
+
+#[tauri::command]
+pub fn squad_job_detail(squad: String, job: String) -> AppResult<JobDetail> {
+    job_detail(&dirs().desk, &squad, &job)
+}
+
+#[tauri::command]
+pub fn squad_open_file(squad: String, job: String, name: String) -> AppResult<()> {
+    open_path(&deliverable_path(&dirs().desk, &squad, &job, &name)?)
+}
+
+#[tauri::command]
+pub async fn squad_stop_job(job: String) -> AppResult<String> {
+    let args = stop_args(&job)?;
+    find_job(&dirs().desk, &job)?;
+    run_squad(args).await
+}
+
+#[tauri::command]
+pub async fn squad_start_job(squad: String, brief: String) -> AppResult<String> {
+    let args = start_args(&squad, &brief)?;
+    if !dirs().config.join(format!("{squad}.yaml")).is_file() {
+        return Err(AppError::NotFound(format!("squad {squad}")));
+    }
+    run_squad(args).await
 }
 
 #[cfg(test)]
@@ -792,6 +1049,75 @@ mod tests {
         let reg = read_registry(&dirs.desk);
         assert_eq!(reg.len(), 1);
         assert_eq!(reg["w1:p1"].role, "growth-director");
+        fs::remove_dir_all(home).ok();
+    }
+
+    #[test]
+    fn job_ids_and_dirs_are_validated() {
+        assert!(valid_job_id("2026-10-13-week-of-posts"));
+        for bad in ["", "-x", "A", "a/b", "..", "a b", &"a".repeat(65)] {
+            assert!(!valid_job_id(bad), "{bad}");
+        }
+        let (home, dirs) = fixture();
+        assert!(job_dir(&dirs.desk, "growth", "2026-10-13-week-of-posts").is_ok());
+        assert!(job_dir(&dirs.desk, "growth", "nope").is_err());
+        assert!(job_dir(&dirs.desk, "../growth", "2026-10-13-week-of-posts").is_err());
+        assert!(job_dir(&dirs.desk, "growth", "..").is_err());
+        assert_eq!(find_job(&dirs.desk, "2026-10-01-old").unwrap().0, "growth");
+        assert!(find_job(&dirs.desk, "ghost").is_err());
+        assert!(find_job(&dirs.desk, "../x").is_err());
+        fs::remove_dir_all(home).ok();
+    }
+
+    #[test]
+    fn stop_and_start_args_are_validated_and_never_shell_text() {
+        assert_eq!(stop_args("2026-10-13-x").unwrap(), ["stop", "2026-10-13-x"]);
+        assert!(stop_args("x; rm -rf /").is_err());
+        assert!(stop_args("").is_err());
+        assert_eq!(start_args("growth", "  write posts  ").unwrap(), ["start", "growth", "write posts"]);
+        assert_eq!(start_args("growth", "--force").unwrap()[2], "Brief: --force");
+        assert!(start_args("Growth", "x").is_err());
+        assert!(start_args("../x", "x").is_err());
+        assert!(start_args("growth", "   ").is_err());
+        assert!(start_args("growth", &"x".repeat(MAX_BRIEF_CHARS + 1)).is_err());
+        assert_eq!(start_args("growth", "a \"quoted\" $(thing)").unwrap()[2], "a \"quoted\" $(thing)");
+    }
+
+    #[test]
+    fn job_detail_reads_brief_log_newest_first_and_deliverables() {
+        let (home, dirs) = fixture();
+        let job = dirs.desk.join("growth/jobs/2026-10-13-week-of-posts");
+        fs::write(job.join("brief.md"), "Write five posts.").unwrap();
+        fs::create_dir_all(job.join("out")).unwrap();
+        fs::write(job.join("out/post-1.md"), "# hi").unwrap();
+        fs::write(job.join("out/hero.png"), [137, 80, 78, 71]).unwrap();
+        fs::write(job.join("out/.hidden"), "x").unwrap();
+        let d = job_detail(&dirs.desk, "growth", "2026-10-13-week-of-posts").unwrap();
+        assert_eq!((d.state.as_str(), d.brief.as_str()), ("working", "Write five posts."));
+        assert_eq!(d.log[0].text, "drafting");
+        assert_eq!(d.log[1].text, "briefed");
+        let names: Vec<&str> = d.deliverables.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, ["hero.png", "post-1.md"]);
+        assert!(d.deliverables[0].thumb.as_deref().unwrap().starts_with("data:image/png;base64,"));
+        assert!(d.deliverables[1].thumb.is_none());
+        fs::remove_dir_all(home).ok();
+    }
+
+    #[test]
+    fn deliverable_open_is_limited_to_plain_files_in_out() {
+        let (home, dirs) = fixture();
+        let job = dirs.desk.join("growth/jobs/2026-10-13-week-of-posts");
+        fs::create_dir_all(job.join("out")).unwrap();
+        fs::write(job.join("out/a.md"), "x").unwrap();
+        fs::write(job.join("out/run.sh"), "x").unwrap();
+        let j = "2026-10-13-week-of-posts";
+        assert!(deliverable_path(&dirs.desk, "growth", j, "a.md").is_ok());
+        assert!(deliverable_path(&dirs.desk, "growth", j, "run.sh").is_err());
+        assert!(deliverable_path(&dirs.desk, "growth", j, "../status.json").is_err());
+        assert!(deliverable_path(&dirs.desk, "growth", j, "missing.md").is_err());
+        std::os::unix::fs::symlink(home.join("outside.md"), job.join("out/link.md")).unwrap();
+        fs::write(home.join("outside.md"), "s").unwrap();
+        assert!(deliverable_path(&dirs.desk, "growth", j, "link.md").is_err());
         fs::remove_dir_all(home).ok();
     }
 }

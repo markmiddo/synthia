@@ -75,7 +75,19 @@ export interface SynthiaState {
   talk_key?: string | null;
 }
 
-export const MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] as const;
+export const MODEL_CHOICES = [
+  { id: "claude-opus-5-5", name: "Opus" },
+  { id: "claude-sonnet-5-5", name: "Sonnet" },
+  { id: "claude-haiku-5-5", name: "Haiku" },
+] as const;
+
+/** A friendly model name; raw ids never reach the screen. */
+export function modelName(id: string): string {
+  const hit = MODEL_CHOICES.find((m) => m.id === id);
+  if (hit) return hit.name;
+  const word = id.replace(/^claude-/, "").split("-")[0];
+  return word ? word[0].toUpperCase() + word.slice(1) : "Default";
+}
 
 export interface RoleInfo {
   id: string;
@@ -110,4 +122,28 @@ export interface RoleFields {
   model?: string;
   hires?: string[];
   prompt?: string;
+}
+
+export interface LogEntry {
+  at: string;
+  who: string;
+  text: string;
+}
+
+export interface Deliverable {
+  name: string;
+  size: number;
+  path: string;
+  kind: "image" | "md" | "json" | "other";
+  thumb: string | null;
+}
+
+export interface JobDetail {
+  id: string;
+  squad: string;
+  path: string;
+  state: string;
+  brief: string;
+  log: LogEntry[];
+  deliverables: Deliverable[];
 }

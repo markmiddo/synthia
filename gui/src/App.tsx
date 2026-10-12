@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useActivity } from "./hud/activity";
 import { useBrain } from "./hud/brain";
 import { Connection } from "./hud/Connection";
 import { CompanyView } from "./hud/CompanyView";
 import { Constellation } from "./hud/Constellation";
-import { DayPicker } from "./hud/DayPicker";
 import { Feed } from "./hud/Feed";
-import { localDate } from "./hud/format";
+import { isPlainShell, lastSevenDays, localDate } from "./hud/format";
 import {
   murmurKeyMissing,
   NO_MURMUR_KEY_LINE,
@@ -20,15 +19,19 @@ import {
 import { NeedsYou, Spoken } from "./hud/Left";
 import { Orb, orbState } from "./hud/Orb";
 import { call, MOCK, reasonOf } from "./hud/tauri";
-import { Timeline, type DayState } from "./hud/Timeline";
+import { fleetFromDay } from "./hud/replay";
 import { TopBar, type View } from "./hud/TopBar";
-import type { DayChart } from "./hud/types";
+import type { DayChart, Fleet } from "./hud/types";
 import "./hud/tokens.css";
 import "./hud/hud.css";
 
 function App() {
   const { view, confirmReply } = useBrain();
-  const fleet = useFleet();
+  const liveFleet = useFleet();
+  const fleet = useMemo(
+    () => (liveFleet ? { ...liveFleet, nodes: liveFleet.nodes.filter((n) => !isPlainShell(n)) } : null),
+    [liveFleet],
+  );
   const usage = useUsage();
   const { state: voice, error: voiceStateError } = useSynthiaState();
   const talkKey = useTalkKey(voice);
@@ -38,7 +41,7 @@ function App() {
 
   const today = localDate(new Date(now));
   const [day, setDay] = useState(today);
-  const [chart, setChart] = useState<DayState>({ status: "loading" });
+  const [past, setPast] = useState<{ status: "loading" } | { status: "error"; reason: string } | { status: "ready"; fleet: Fleet }>({ status: "loading" });
   const [screen, setScreen] = useState<View>(() => {
     try {
       return localStorage.getItem("synthia.hud.view") === "company" ? "company" : "constellation";
@@ -54,26 +57,39 @@ function App() {
       /* the choice just will not be remembered */
     }
   }, []);
+  const [jobRequest, setJobRequest] = useState<{ squad: string; job: string; n: number } | null>(null);
+  const openJob = useCallback(
+    (squad: string, job: string) => {
+      setJobRequest((r) => ({ squad, job, n: (r?.n ?? 0) + 1 }));
+      pickView("company");
+    },
+    [pickView],
+  );
   const [focusError, setFocusError] = useState<string | null>(null);
   const viewingToday = day === today;
 
-  // Today's lanes follow the fleet: reload when something changes, and every minute.
-  const fleetKey = fleet ? fleet.nodes.map((n) => `${n.paneId}:${n.status}:${n.subagents.length}`).join("|") : "";
-  const minute = Math.floor(now / 60_000);
+  // A past day is read once from the day record; today is the live fleet.
   useEffect(() => {
+    if (viewingToday) return;
     let alive = true;
+    setPast({ status: "loading" });
     call<DayChart>("fleet_day", { date: day })
-      .then((c) => alive && setChart({ status: "ready", chart: c }))
-      .catch((e) => alive && setChart({ status: "error", reason: reasonOf(e) }));
+      .then((c) => {
+        if (!alive) return;
+        const f = fleetFromDay(c);
+        setPast({ status: "ready", fleet: { ...f, nodes: f.nodes.filter((n) => !isPlainShell(n)) } });
+      })
+      .catch((e) => alive && setPast({ status: "error", reason: reasonOf(e) }));
     return () => {
       alive = false;
     };
-  }, [day, viewingToday ? fleetKey : "", viewingToday ? minute : 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [day, viewingToday]);
 
-  const pick = (d: string) => {
-    setChart({ status: "loading" });
+  const pickDay = useCallback((d: string) => {
     setDay(d);
-  };
+    if (d !== today) setScreen("constellation");
+  }, [today]);
+  const dayLabel = lastSevenDays(new Date(now)).find((d) => d.date === day)?.label ?? day;
 
   const focus = useCallback((paneId: string) => {
     call("fleet_focus", { paneId })
@@ -90,7 +106,10 @@ function App() {
       <span className="bracket tr" />
       <span className="bracket bl" />
       <span className="bracket br" />
-      <TopBar nodes={nodes} usage={usage} now={now} preview={MOCK} view={screen} onView={pickView} />
+      <TopBar nodes={nodes} usage={usage} now={now} preview={MOCK} view={screen} onView={(v) => {
+          setDay(today);
+          pickView(v);
+        }} day={day} today={today} onDay={pickDay} />
       <aside className="left">
         <Orb state={orbState(voice.recording, view.state)} talkKey={talkKey} />
         <Connection
@@ -109,19 +128,27 @@ function App() {
         <Spoken spoken={view.spoken} />
         <NeedsYou nodes={nodes} confirms={view.confirms} now={now} onFocus={focus} onConfirm={confirmReply} />
       </aside>
-      {screen === "company" ? (
-        <CompanyView fleet={fleet} now={now} onFocus={focus} />
+      {!viewingToday && (
+        <p className="replay-banner" role="status">
+          <span>
+            Viewing {dayLabel}
+            {past.status === "loading" ? " · loading…" : past.status === "error" ? ` · I can't read that day: ${past.reason}` : ""}
+          </span>
+          <button type="button" onClick={() => setDay(today)}>Back to live</button>
+        </p>
+      )}
+      {screen === "company" && viewingToday ? (
+        <CompanyView fleet={fleet} now={now} onFocus={focus} request={jobRequest} />
       ) : (
-        <Constellation fleet={fleet} now={now} onFocus={focus} />
+        <Constellation
+          fleet={viewingToday ? fleet : past.status === "ready" ? past.fleet : null}
+          now={now}
+          onFocus={focus}
+          onOpenJob={openJob}
+          replay={!viewingToday}
+        />
       )}
       <Feed items={activity} />
-      <section className="day" aria-label="Timeline">
-        <div className="day-head">
-          <p className="lbl">{viewingToday ? "TODAY" : "THAT DAY"}</p>
-          <DayPicker selected={day} onSelect={pick} />
-        </div>
-        <Timeline day={chart} now={now} today={viewingToday} />
-      </section>
     </main>
   );
 }
