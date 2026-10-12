@@ -16,7 +16,9 @@ import {
   useUsage,
   useVoiceRunning,
 } from "./hud/hooks";
-import { NeedsYou, Spoken } from "./hud/Left";
+import { Spoken } from "./hud/Left";
+import { Scorecard } from "./hud/Scorecard";
+import { useToday, useTodayChart } from "./hud/today";
 import { Orb, orbState } from "./hud/Orb";
 import { call, MOCK, reasonOf } from "./hud/tauri";
 import { fleetFromDay } from "./hud/replay";
@@ -40,6 +42,8 @@ function App() {
   const activity = useActivity(fleet);
 
   const today = localDate(new Date(now));
+  const todayData = useToday();
+  const todayChart = useTodayChart(fleet, today);
   const [day, setDay] = useState(today);
   const [past, setPast] = useState<{ status: "loading" } | { status: "error"; reason: string } | { status: "ready"; fleet: Fleet }>({ status: "loading" });
   const [screen, setScreen] = useState<View>(() => {
@@ -126,7 +130,16 @@ function App() {
           ]}
         />
         <Spoken spoken={view.spoken} />
-        <NeedsYou nodes={nodes} confirms={view.confirms} now={now} onFocus={focus} onConfirm={confirmReply} />
+        <Scorecard
+          today={todayData}
+          nodes={nodes}
+          chart={todayChart}
+          fleet={fleet}
+          confirms={view.confirms}
+          now={now}
+          onFocus={focus}
+          onConfirm={confirmReply}
+        />
       </aside>
       {!viewingToday && (
         <p className="replay-banner" role="status">

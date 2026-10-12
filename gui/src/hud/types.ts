@@ -62,7 +62,12 @@ export interface DayChart {
 export interface UsageStats {
   five_hour_pct: number;
   five_hour_resets_in: string;
+  five_hour_resets_at?: string;
   seven_day_pct: number;
+  seven_day_resets_in?: string;
+  seven_day_resets_at?: string;
+  seven_day_opus_pct?: number | null;
+  seven_day_sonnet_pct?: number | null;
   error: string | null;
 }
 

@@ -1,19 +1,19 @@
+use serde::Deserialize;
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
-use std::process::Command;
-use std::fs;
-use std::path::PathBuf;
-use serde::Deserialize;
 
+mod commands;
 mod error;
 mod paths;
 mod state;
 mod yaml_writer;
-mod commands;
 
 /// Get the Synthia project root directory.
 /// Resolves from the executable path (gui/src-tauri/target/release/synthia-gui)
@@ -36,9 +36,8 @@ pub(crate) fn get_synthia_root() -> PathBuf {
         return PathBuf::from(root);
     }
     // Fallback: check the known development path
-    let dev_path = PathBuf::from(
-        std::env::var("HOME").unwrap_or_default()
-    ).join("dev/misc/synthia");
+    let dev_path =
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("dev/misc/synthia");
     if dev_path.join("run.sh").exists() {
         return dev_path;
     }
@@ -82,20 +81,17 @@ fn get_synthia_state() -> SynthiaState {
 }
 
 pub(crate) fn get_lock_file() -> PathBuf {
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| "/tmp".to_string());
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(runtime_dir).join("synthia-gui.lock")
 }
 
 pub(crate) fn get_state_file() -> PathBuf {
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| "/tmp".to_string());
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(runtime_dir).join("synthia-state.json")
 }
 
 pub(crate) fn get_history_file() -> PathBuf {
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| "/tmp".to_string());
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(runtime_dir).join("synthia-history.json")
 }
 
@@ -120,9 +116,7 @@ fn acquire_lock() -> bool {
     if lock_file.exists() {
         if let Ok(pid_str) = fs::read_to_string(&lock_file) {
             if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                let check = Command::new("kill")
-                    .args(["-0", &pid.to_string()])
-                    .output();
+                let check = Command::new("kill").args(["-0", &pid.to_string()]).output();
                 if check.map(|o| o.status.success()).unwrap_or(false) {
                     return false;
                 }
@@ -226,10 +220,7 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Show Settings", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[
-                &show,
-                &quit,
-            ])?;
+            let menu = Menu::with_items(app, &[&show, &quit])?;
 
             // Load the tray icon immediately for COSMIC/StatusNotifierItem compatibility
             let initial_icon = load_embedded_icon(TRAY_ICON_PNG)
@@ -240,20 +231,18 @@ pub fn run() {
                 .icon(initial_icon)
                 .menu(&menu)
                 .tooltip("Synthia - Voice Assistant")
-                .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
-                        "quit" => {
-                            release_lock();
-                            app.exit(0);
-                        }
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                        _ => {}
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => {
+                        release_lock();
+                        app.exit(0);
                     }
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -311,7 +300,10 @@ pub fn run() {
             }
 
             if let Some(watcher) = spawn_state_watcher(app_handle, normal_icon, recording_icon) {
-                app.state::<state::AppState>().watchers.lock().push(Box::new(watcher));
+                app.state::<state::AppState>()
+                    .watchers
+                    .lock()
+                    .push(Box::new(watcher));
             }
 
             commands::fleet::spawn_emitter(app.handle().clone());
@@ -350,9 +342,16 @@ pub fn run() {
             commands::squads::squad_job_detail,
             commands::squads::squad_open_file,
             commands::squads::squad_stop_job,
-            commands::squads::squad_start_job
+            commands::squads::squad_start_job,
+            commands::today::today_ledger,
+            commands::today::today_inbox,
+            commands::today::today_shipped,
+            commands::today::today_squad_output,
+            commands::today::open_url,
+            commands::today::today_release,
+            commands::today::today_meeting,
+            commands::today::today_spend
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

@@ -14,6 +14,8 @@ const SQUAD = params.has("squad");
 
 /** Changes that arrive after load, so the activity feed has something to show. */
 let step = 0;
+/** Flips a squad writer between working and idle every few seconds, to show the feed ignoring it. */
+let flap = 0;
 
 const TYPES = ["Explore", "general-purpose", "bug-hunter", "mark-reviewer", "bob"];
 function subs(prefix: string, done: number, live: string[]) {
@@ -55,7 +57,7 @@ function fleet(): Fleet {
     const base = { agent: "claude", repo: "eventflo", cwd: "", session: null, subagents: [], squad: "growth", job: "2026-10-13-week-of-posts" };
     nodes.push(
       { ...base, paneId: "w3:p1", status: "working", title: "growth-director", role: "growth-director", roleTitle: "Marketing Director", parent: null, sinceMs: t0 - 22 * min },
-      { ...base, paneId: "w3:p2", status: "working", title: "growth-writer-1", role: "growth-writer", roleTitle: "Writer", parent: "w3:p1", sinceMs: t0 - 6 * min },
+      { ...base, paneId: "w3:p2", status: flap % 2 === 1 ? "idle" : "working", title: "growth-writer-1", role: "growth-writer", roleTitle: "Writer", parent: "w3:p1", sinceMs: t0 - 6 * min },
       { ...base, paneId: "w3:p3", status: "idle", title: "growth-seo-1", role: "growth-seo", roleTitle: "SEO Strategist", parent: "w3:p1", sinceMs: t0 - 9 * min },
       { ...base, paneId: "w3:p4", status: "working", title: "growth-editor-1", role: "growth-editor", roleTitle: "Editor and Fact-checker", parent: "w3:p1", sinceMs: t0 - 2 * min },
     );
@@ -73,8 +75,11 @@ function fleet(): Fleet {
 }
 
 const usage: UsageStats = {
-  five_hour_pct: 2, five_hour_resets_in: "4h 10m", seven_day_pct: 11, error: null,
+  five_hour_pct: 7, five_hour_resets_in: "2h 46m", five_hour_resets_at: new Date(t0 + 166 * min).toISOString(),
+  seven_day_pct: 40, seven_day_resets_in: "58h 20m", seven_day_resets_at: new Date(t0 + 58 * 60 * min).toISOString(),
+  seven_day_opus_pct: 31, seven_day_sonnet_pct: 9, error: null,
 };
+
 
 function day(date: string): DayChart {
   const today = new Date(t0);
@@ -139,6 +144,57 @@ const JOB: JobDetail = {
   ],
 };
 
+const li = (id: string, title: string, ago: number, extra: object = {}) => ({
+  id, title, detail: "", recommendation: null, undo: null, createdAt: t0 - ago * min, links: [], ...extra,
+});
+const LEDGER = {
+  doneCount: 14, callCount: 5, waitingCount: 2,
+  done: [
+    li("d1", "Merged the Eva hotfix to main and watched the deploy", 12, { detail: "CI and Eva were green. Deploy finished clean; checked the escalation reply on prod." }),
+    li("d2", "Email triage: 13 archived, Vishal invoice kept", 55),
+    li("d3", "Filed #3387 for the impersonation image upload error", 90),
+    li("d4", "Dependabot wave 1 merged to dev", 140),
+    li("d5", "Squad install command shipped", 200), li("d6", "Role editor polished", 230), li("d7", "Job panel built", 260),
+    li("d8", "Timeline replaced by day chip", 300), li("d9", "Calendar helper checked", 340), li("d10", "Weekly report drafted", 380),
+  ],
+  calls: [
+    li("c1", "Branched the squads work off feat/squads", 30, { detail: "The active branch had unmerged HUD work, so a clean development branch would have hidden it.", undo: "git branch -D feat/squads-c" }),
+    li("c2", "Kept the brain on the desk machine", 70), li("c3", "Used the CPU small model", 120),
+  ],
+  waiting: [
+    li("b1", "Enable weekday 7:30 board sweep + monthly investor update timers?", 25, { detail: "Both squads are installed and tested. Timers are not enabled.", recommendation: "Yes, enable both." }),
+    li("b2", "Merge multi-tier be#3837 then op#1467?", 900, { detail: "Both are green on development.", recommendation: "Merge after be#3836." }),
+  ],
+};
+const day0 = new Date(t0); day0.setHours(0, 0, 0, 0);
+const dueDate = (offset: number) => { const d = new Date(day0); d.setDate(d.getDate() + offset); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const DUE = [
+  { id: "a1", kind: "pay", title: "Vishal INV-2026-10-02 AUD 1,950", due: dueDate(-2), overdue: true },
+  { id: "a2", kind: "reply", title: "Reply to Josh about Reminisce wages", due: dueDate(0), overdue: false },
+];
+const SHIPPED = {
+  ok: true,
+  items: [
+    { number: 392, title: "Fix escalation for how-to questions", repo: "eva-ai", url: "https://github.com/eventfloHQ/eva-ai/pull/392" },
+    { number: 3836, title: "Prod hotfix: ticket scan retry", repo: "backend", url: "https://github.com/eventfloHQ/backend/pull/3836" },
+    { number: 1745, title: "Gate the scanner contrast change", repo: "frontend", url: "https://github.com/eventfloHQ/frontend/pull/1745" },
+  ],
+};
+const RELEASE = {
+  ok: true, title: "Version 3.2 Release", url: "https://github.com/orgs/eventfloHQ/projects/16", total: 133,
+  counts: [
+    { status: "Backlog", count: 4 }, { status: "In review", count: 13 }, { status: "Testing", count: 2 },
+    { status: "Ready for Prod", count: 4 }, { status: "Done", count: 110 },
+  ],
+};
+const MEETING = {
+  state: "ok",
+  next: { title: "Weekly management and product jam", startMs: t0 + 8 * min, link: "https://calendar.google.com/calendar/event?eid=mock" },
+  moreToday: 2,
+};
+const SPEND = { ok: true, percent: 6.2, points: [0, 0.4, 1.1, 1.6, 2.9, 3.4, 4.8, 5.1, 6.2] };
+const SQUAD_OUT = { deliverables: 4, jobsFinished: 1 };
+
 export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const table: Record<string, unknown> = {
     fleet_snapshot: fleet(),
@@ -149,6 +205,14 @@ export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promis
     get_hotkeys: ["none", "Key.alt_l"],
     get_synthia_state: { status: "ready", recording: false } satisfies SynthiaState,
     squads_list: SQUADS,
+    today_ledger: LEDGER,
+    today_inbox: DUE,
+    today_shipped: SHIPPED,
+    today_release: RELEASE,
+    today_meeting: MEETING,
+    today_spend: SPEND,
+    today_squad_output: SQUAD_OUT,
+    open_url: null,
     squad_job_detail: JOB,
     squad_stop_job: "",
     squad_start_job: "",
@@ -166,6 +230,7 @@ export function mockListen<T>(event: string, handler: (p: T) => void): () => voi
     setTimeout(() => handler(fleet() as T), 50),
     setTimeout(() => { step = 1; handler(fleet() as T); }, 4000),
     setTimeout(() => { step = 2; handler(fleet() as T); }, 8000),
+    ...[10000, 12500, 15000, 17500, 20000].map((ms) => setTimeout(() => { flap++; handler(fleet() as T); }, ms)),
   ];
   return () => timers.forEach(clearTimeout);
 }

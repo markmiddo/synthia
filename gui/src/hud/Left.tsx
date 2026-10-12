@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BrainView, ConfirmAsk } from "./brain";
 import { formatSince } from "./format";
+import type { LedgerItem } from "./today";
 import type { FleetNode } from "./types";
 
 /** The most characters that fit on two lines of subtitle in the left column. */
@@ -82,7 +83,11 @@ export function NeedsYou({
   now,
   onFocus,
   onConfirm,
+  ledger = [],
+  onDetail,
 }: {
+  ledger?: LedgerItem[];
+  onDetail?: (item: LedgerItem, el: HTMLElement) => void;
   nodes: FleetNode[];
   confirms: ConfirmAsk[];
   now: number;
@@ -92,8 +97,8 @@ export function NeedsYou({
   const waiting = nodes.filter((n) => n.status === "needs-you");
   return (
     <section aria-label="Needs you">
-      <p className="lbl">NEEDS YOU</p>
-      {waiting.length === 0 && confirms.length === 0 && (
+      <p className="lbl">NEEDS YOU{ledger.length + waiting.length + confirms.length > 0 ? ` · ${ledger.length + waiting.length + confirms.length}` : ""}</p>
+      {waiting.length === 0 && confirms.length === 0 && ledger.length === 0 && (
         <div className="allclear">
           <i />
           Nothing is waiting on you.
@@ -112,6 +117,12 @@ export function NeedsYou({
             </button>
           </div>
         </div>
+      ))}
+      {ledger.map((i) => (
+        <button type="button" className="need-line" key={i.id} onClick={(e) => onDetail?.(i, e.currentTarget)}>
+          <i />
+          <span>{i.title}</span>
+        </button>
       ))}
       {waiting.map((n) => (
         <button type="button" className="need need-button" key={n.paneId} onClick={() => onFocus(n.paneId)}>

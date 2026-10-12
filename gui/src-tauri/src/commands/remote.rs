@@ -39,7 +39,7 @@ pub fn start_remote_mode() -> AppResult<String> {
         .args([
             bot_script.to_str().unwrap_or(""),
             "--notify",
-            "🟢 *Remote Mode ENABLED*\n\nYou can now control Claude Code via Telegram."
+            "🟢 *Remote Mode ENABLED*\n\nYou can now control Claude Code via Telegram.",
         ])
         .current_dir(&root)
         .spawn();
@@ -68,7 +68,7 @@ pub fn stop_remote_mode() -> AppResult<String> {
         .args([
             bot_script.to_str().unwrap_or(""),
             "--notify",
-            "🔴 *Remote Mode DISABLED*\n\nTelegram bot stopped."
+            "🔴 *Remote Mode DISABLED*\n\nTelegram bot stopped.",
         ])
         .current_dir(&root)
         .spawn();

@@ -43,7 +43,13 @@ pub fn resend_to_assistant(text: String) -> AppResult<String> {
 
     // Use xdotool to focus Claude Code window and type the text
     let _ = Command::new("xdotool")
-        .args(["search", "--name", "Claude Code", "windowactivate", "--sync"])
+        .args([
+            "search",
+            "--name",
+            "Claude Code",
+            "windowactivate",
+            "--sync",
+        ])
         .output();
 
     // Type the text

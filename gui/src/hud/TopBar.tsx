@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { lastSevenDays, stamp } from "./format";
 import { MOCK } from "./tauri";
+import { resetsText } from "./today";
 import type { FleetNode, UsageStats } from "./types";
 import { Wordmark } from "./Wordmark";
 
@@ -14,7 +15,13 @@ function Gauge({
   shown,
   title,
   fault,
+  lead,
+  tip,
 }: {
+  /** Put the label before the number ("5h 7%"). */
+  lead?: boolean;
+  /** A hover tooltip with several lines. */
+  tip?: string[];
   value: number;
   total: number;
   label: string;
@@ -25,7 +32,7 @@ function Gauge({
 }) {
   const frac = total > 0 ? Math.min(1, value / total) : 0;
   return (
-    <div className="gauge" title={title}>
+    <div className="gauge" title={title} tabIndex={tip ? 0 : undefined}>
       <svg viewBox="0 0 44 44" aria-hidden="true">
         <circle cx="22" cy="22" r="18" fill="none" stroke={fault ? "var(--red)" : "var(--line)"} strokeWidth="4" opacity={fault ? 0.5 : 1} />
         {frac > 0 && (
@@ -44,9 +51,17 @@ function Gauge({
         )}
       </svg>
       <div>
+        {lead && <span className="lead">{label}</span>}
         <b>{shown ?? value}</b>
-        <span>{label}</span>
+        {!lead && <span>{label}</span>}
       </div>
+      {tip && tip.length > 0 && (
+        <div className="tip" role="tooltip">
+          {tip.map((l) => (
+            <span key={l}>{l}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -203,14 +218,31 @@ export function TopBar({
         <Gauge value={count("working")} total={total} label="working" color="var(--blue)" />
         <Gauge value={count("needs-you")} total={total} label="need you" color="var(--amber)" />
         {usageOk ? (
-          <Gauge
-            value={usage.five_hour_pct}
-            total={100}
-            shown={`${Math.round(usage.five_hour_pct)}%`}
-            label="Claude usage"
-            color="var(--cyan)"
-            title={usage.five_hour_resets_in ? `Resets in ${usage.five_hour_resets_in}` : undefined}
-          />
+          <>
+            <Gauge
+              lead
+              value={usage.five_hour_pct}
+              total={100}
+              shown={`${Math.round(usage.five_hour_pct)}%`}
+              label="5h"
+              color="var(--cyan)"
+              tip={[`5-hour limit ${Math.round(usage.five_hour_pct)}%`, resetsText(usage.five_hour_resets_at, usage.five_hour_resets_in, Date.now())].filter(Boolean)}
+            />
+            <Gauge
+              lead
+              value={usage.seven_day_pct}
+              total={100}
+              shown={`${Math.round(usage.seven_day_pct)}%`}
+              label="Week"
+              color="var(--blue)"
+              tip={[
+                `Weekly limit ${Math.round(usage.seven_day_pct)}%`,
+                resetsText(usage.seven_day_resets_at, usage.seven_day_resets_in, Date.now()),
+                ...(usage.seven_day_opus_pct != null ? [`Opus ${Math.round(usage.seven_day_opus_pct)}% this week`] : []),
+                ...(usage.seven_day_sonnet_pct != null ? [`Sonnet ${Math.round(usage.seven_day_sonnet_pct)}% this week`] : []),
+              ].filter(Boolean)}
+            />
+          </>
         ) : (
           <Gauge value={0} total={100} shown={usage ? "!" : "…"} label={usage ? "Claude usage unavailable" : "Claude usage"} color="var(--cyan)" fault={usage !== null} title={usage?.error ?? undefined} />
         )}
