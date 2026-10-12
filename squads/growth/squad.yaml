@@ -1,0 +1,11 @@
+id: growth
+name: Growth
+director: growth-director
+cap: 4                 # live specialists at once, director not counted
+cwd: ~/dev/eventflo
+roles:
+  growth-director:    {title: Marketing Director, model: claude-opus-5-5, hires: [growth-seo, growth-writer, growth-editor, growth-designer]}
+  growth-seo:         {title: SEO Strategist, model: claude-sonnet-5-5}
+  growth-writer:      {title: Writer, model: claude-sonnet-5-5}
+  growth-editor:      {title: Editor and Fact-checker, model: claude-sonnet-5-5}
+  growth-designer:    {title: Designer, model: claude-sonnet-5-5}
