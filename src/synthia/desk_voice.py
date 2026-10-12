@@ -27,6 +27,9 @@ ERROR_LINE = "Something went wrong on my side."
 _BOUNDARY = re.compile(r"(?<=[.!?])[\"')\]]*\s+|\n+")
 # Shorter than this and the "sentence" is probably an abbreviation or a stray fragment.
 MIN_SENTENCE_CHARS = 12
+# If the brain has not started answering this soon after the question, say a short
+# acknowledgement so the silence does not feel like she missed it.
+ACK_DELAY_S = 0.7
 _YES = re.compile(r"\b(yes|yep|yeah|confirm|confirmed|go ahead|do it|approved)\b", re.IGNORECASE)
 
 
@@ -55,6 +58,13 @@ class SentenceBuffer:
         return rest or None
 
 
+class _Ack:
+    """A queued pre-rendered acknowledgement (a file path), played instead of synthesised."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+
 class DeskVoice:
     def __init__(
         self,
@@ -62,13 +72,25 @@ class DeskVoice:
         speak: Callable[[str], Any],
         stop_speaking: Callable[[], Any],
         on_state: Callable[[str], None] | None = None,
+        ack_source: Callable[[], str | None] | None = None,
+        play_ack: Callable[[str], Any] | None = None,
+        ack_delay_s: float = ACK_DELAY_S,
     ) -> None:
         self.client = client_factory(self._on_frame)
         self._speak = speak
         self._stop_speaking = stop_speaking
         self._on_state = on_state or (lambda state: None)
         self._buffer = SentenceBuffer()
-        self._lines: queue.Queue[tuple[int, str] | None] = queue.Queue()
+        self._lines: queue.Queue[tuple[int, str | _Ack] | None] = queue.Queue()
+        self._ack_source = ack_source
+        self._play_ack = play_ack
+        self._ack_delay_s = ack_delay_s
+        self._ack_timer: threading.Timer | None = None
+        # The brain has started answering this turn (no acknowledgement needed any more).
+        self._reply_started = False
+        # Timing of the current turn, for the one latency line per turn.
+        self._timing: dict[str, float] = {}
+        self._playing_reply = False
         # Lines queued or being spoken; the single truth for "is she still talking".
         self._outstanding = 0
         self._state_lock = threading.Lock()
@@ -100,8 +122,11 @@ class DeskVoice:
 
     # ---- outgoing ----
 
-    def ask(self, text: str) -> None:
-        """Send a transcript. If the brain asked a yes/no question, this is the answer."""
+    def ask(self, text: str, released_at: float | None = None) -> None:
+        """Send a transcript. If the brain asked a yes/no question, this is the answer.
+
+        `released_at` is the time.monotonic() of the key release, for the latency log.
+        """
         self._close_utterance()
         if self._pending_confirm is not None:
             confirm_id, self._pending_confirm = self._pending_confirm, None
@@ -113,6 +138,14 @@ class DeskVoice:
             self._down_announced = False
             self._emit("thinking")
             return
+        transcript_at = time.monotonic()
+        with self._lock:
+            self._reply_started = False
+            self._timing = {"transcript": transcript_at}
+            if released_at is not None:
+                self._timing["release"] = released_at
+            self._playing_reply = False
+            epoch = self._epoch
         try:
             self.client.say(text)
         except BrainUnavailable as e:
@@ -122,6 +155,60 @@ class DeskVoice:
         self._down_announced = False
         self._turn_active = True
         self._emit("thinking")
+        self._arm_ack(epoch)
+
+    # ---- acknowledgement ----
+
+    def _arm_ack(self, epoch: int) -> None:
+        if self._ack_source is None or self._play_ack is None:
+            return
+        self._cancel_ack_timer()
+        timer = threading.Timer(self._ack_delay_s, self._maybe_ack, args=(epoch,))
+        timer.daemon = True
+        self._ack_timer = timer
+        timer.start()
+
+    def _cancel_ack_timer(self) -> None:
+        timer, self._ack_timer = self._ack_timer, None
+        if timer is not None:
+            timer.cancel()
+
+    def _maybe_ack(self, epoch: int) -> None:
+        """No answer yet: queue the acknowledgement ahead of whatever the reply says."""
+        if self._ack_source is None:
+            return
+        with self._lock:
+            if epoch != self._epoch or self._reply_started or not self._turn_active:
+                return
+            path = self._ack_source()
+            if path is None:
+                return
+            self._timing["ack"] = time.monotonic()
+            self._enqueue_locked(_Ack(path))
+
+    def _mark_reply_started(self) -> None:
+        """Called under self._lock when the brain's first frame of the turn arrives."""
+        if not self._reply_started:
+            self._reply_started = True
+            self._timing.setdefault("first_delta", time.monotonic())
+
+    def mark_audio_start(self) -> None:
+        """The speaker started playing something: log the turn's latency on the first reply audio."""
+        with self._lock:
+            if not self._playing_reply or "first_audio" in self._timing:
+                return
+            t = self._timing
+            t["first_audio"] = time.monotonic()
+            parts = []
+            if "release" in t:
+                parts.append(f"release to transcript {t['transcript'] - t['release']:.2f}s")
+            if "first_delta" in t:
+                parts.append(f"transcript to first delta {t['first_delta'] - t['transcript']:.2f}s")
+                parts.append(
+                    f"first delta to first audio {t['first_audio'] - t['first_delta']:.2f}s"
+                )
+            parts.append("ack played" if "ack_played" in t else "no ack")
+        logger.info("desk turn: %s", ", ".join(parts))
 
     def end_utterance(self) -> None:
         """The utterance was abandoned (nothing heard, or recording failed): resume state reports."""
@@ -165,6 +252,7 @@ class DeskVoice:
 
     def interrupt(self) -> None:
         """Stop talking now and tell the brain to stop the turn."""
+        self._cancel_ack_timer()
         with self._lock:
             self._epoch += 1
             self._discarding = self._turn_active
@@ -179,15 +267,19 @@ class DeskVoice:
         self._pending_confirm = None
 
     def close(self) -> None:
+        self._cancel_ack_timer()
         self._lines.put(None)
         self.client.close()
 
     # ---- incoming ----
 
     def _enqueue(self, text: str) -> None:
+        self._enqueue_locked(text)
+
+    def _enqueue_locked(self, item: str | _Ack) -> None:
         with self._state_lock:
             self._outstanding += 1
-        self._lines.put((self._epoch, text))
+        self._lines.put((self._epoch, item))
 
     def _maybe_ready(self) -> None:
         """Report "ready" once the turn is over and nothing is left to say."""
@@ -200,6 +292,9 @@ class DeskVoice:
         kind = frame.get("type")
         if self._discarding and kind in ("delta", "error"):
             return
+        if kind in ("delta", "event", "confirm", "error", "reply_done"):
+            with self._lock:
+                self._mark_reply_started()
         if kind == "delta":
             with self._lock:
                 for sentence in self._buffer.push(str(frame.get("text", ""))):
@@ -271,7 +366,14 @@ class DeskVoice:
             try:
                 if epoch == self._epoch:
                     self._emit("speaking")
-                    self._speak(line)
+                    if isinstance(line, _Ack):
+                        self._timing["ack_played"] = time.monotonic()
+                        self._playing_reply = False
+                        if self._play_ack is not None:
+                            self._play_ack(line.path)
+                    else:
+                        self._playing_reply = True
+                        self._speak(line)
             except Exception:
                 logger.exception("speaking failed")
             finally:

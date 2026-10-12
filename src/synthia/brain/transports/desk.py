@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import secrets
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -229,10 +230,14 @@ class DeskTransport:
     async def _run_turn(self, text: str) -> None:
         await self._set_state("thinking")
         chunks: list[str] = []
+        started = time.monotonic()
         try:
             async with contextlib.aclosing(self.brain.send(text, origin="desk")) as stream:
                 async for delta in stream:
                     if not chunks:
+                        logger.info(
+                            "desk turn: say to first delta %.2fs", time.monotonic() - started
+                        )
                         await self._set_state("speaking")
                     chunks.append(delta)
                     await self.broadcast({"type": "delta", "text": delta})

@@ -18,6 +18,7 @@ import threading
 import time
 from typing import Any, Optional
 
+from synthia.acks import AckBank
 from synthia.assistant import Assistant
 from synthia.audio import AudioRecorder, list_audio_devices
 from synthia.brain_client import DEFAULT_PORT, BrainClient
@@ -123,13 +124,24 @@ class Synthia:
         self.desk_voice: Optional[DeskVoice] = None
         if self.config.get("assistant_backend", "local") == "brain":
             desk_port = int(self.config.get("brain_desk_port", DEFAULT_PORT))
+            ack_source = None
+            if not use_local_tts:
+                # Short acknowledgements, rendered once with her voice, so she answers at once.
+                acks = AckBank(
+                    self.config["tts_voice"], self.tts.synthesize_to_file, self.config["tts_speed"]
+                )
+                acks.start()
+                ack_source = acks.next
             self.desk_voice = DeskVoice(
                 client_factory=lambda on_frame: BrainClient(on_frame, port=desk_port),
                 # Mark asked; answer even when background speech is muted.
                 speak=lambda text: self.tts.speak(text, ignore_mute=True),
                 stop_speaking=self.tts.cancel,
                 on_state=self._on_desk_state,
+                ack_source=ack_source,
+                play_ack=(lambda path: self.tts.play_file(path, ignore_mute=True)),
             )
+            self.tts.on_play_start = self.desk_voice.mark_audio_start
             logger.info("Assistant: synthia-brain desk (port %d)", desk_port)
 
         # Initialize LLM polisher for dictation accuracy (if enabled)
@@ -375,6 +387,7 @@ class Synthia:
         if not self.running or not self.assistant_active:
             return
 
+        released_at = time.monotonic()
         try:
             self.assistant_active = False
             self._update_state("thinking")
@@ -393,7 +406,7 @@ class Synthia:
 
                     if self.desk_voice is not None:
                         # The brain streams the reply; DeskVoice speaks it as it arrives.
-                        self.desk_voice.ask(text)
+                        self.desk_voice.ask(text, released_at=released_at)
                         self._save_to_history(text, "assistant")
                         # DeskVoice reports thinking, speaking and ready (state file and
                         # tray) as the reply plays.

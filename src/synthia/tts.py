@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from google.cloud import texttospeech
@@ -100,6 +100,8 @@ class TextToSpeech:
         self._playback: subprocess.Popen[bytes] | None = None
         self._synth: subprocess.Popen[bytes] | None = None
         self._gen = 0
+        # Called when audio actually starts playing (for latency logging).
+        self.on_play_start: Callable[[], None] | None = None
         self._gen_lock = threading.Lock()
 
         if use_local:
@@ -245,6 +247,7 @@ class TextToSpeech:
                 self._terminate(aplay_proc)
                 self._terminate(piper_proc)
                 return False
+            self._notify_play_start()
 
             # Send text directly to piper's stdin (no shell escaping needed)
             if piper_proc.stdin is not None:
@@ -303,20 +306,76 @@ class TextToSpeech:
                 temp_path = f.name
 
             try:
-                proc = subprocess.Popen(["mpv", "--no-video", "--really-quiet", temp_path])
-                self._playback = proc
-                if self._cancelled_since(gen):
-                    self._terminate(proc)
-                if proc.wait() != 0 and not self._cancelled_since(gen):
-                    raise subprocess.CalledProcessError(proc.returncode, "mpv")
+                return self._play_mp3(temp_path, gen)
             finally:
-                self._playback = None
                 os.unlink(temp_path)
-            return not self._cancelled_since(gen)
 
         except Exception as e:
             logger.error("Google TTS error: %s", e)
             return False
+
+    def _play_mp3(self, path: str, gen: int) -> bool:
+        """Play an mp3 with mpv, cancellable like any other speech."""
+        proc = subprocess.Popen(["mpv", "--no-video", "--really-quiet", path])
+        self._playback = proc
+        try:
+            if self._cancelled_since(gen):
+                self._terminate(proc)
+            else:
+                self._notify_play_start()
+            if proc.wait() != 0 and not self._cancelled_since(gen):
+                raise subprocess.CalledProcessError(proc.returncode, "mpv")
+        finally:
+            self._playback = None
+        return not self._cancelled_since(gen)
+
+    def _notify_play_start(self) -> None:
+        cb = self.on_play_start
+        if cb is not None:
+            try:
+                cb()
+            except Exception:
+                logger.exception("on_play_start failed")
+
+    def synthesize_to_file(self, text: str, path: str) -> bool:
+        """Render `text` with the configured Google voice into an mp3 at `path` (no playback)."""
+        if self.use_local or self.client is None:
+            return False
+        from google.cloud import texttospeech
+
+        try:
+            response = self.client.synthesize_speech(
+                input=texttospeech.SynthesisInput(text=text),
+                voice=texttospeech.VoiceSelectionParams(
+                    language_code=self.language_code, name=self.voice_name
+                ),
+                audio_config=texttospeech.AudioConfig(
+                    audio_encoding=texttospeech.AudioEncoding.MP3,
+                    speaking_rate=self.speed,
+                ),
+            )
+            tmp = f"{path}.part"
+            with open(tmp, "wb") as f:
+                f.write(response.audio_content)
+            os.replace(tmp, path)
+            return True
+        except Exception as e:
+            logger.warning("could not render %r: %s", text, e)
+            return False
+
+    def play_file(self, path: str, ignore_mute: bool = False) -> bool:
+        """Play a pre-rendered mp3 through the same lock and cancel path as speak()."""
+        gen = self._gen
+        if not ignore_mute and is_voice_muted():
+            return False
+        with speech_lock() as acquired:
+            if not acquired or self._cancelled_since(gen):
+                return False
+            try:
+                return self._play_mp3(path, gen)
+            except Exception as e:
+                logger.error("playing %s failed: %s", path, e)
+                return False
 
     def cancel(self) -> None:
         """Stop only the playback this instance started (unlike stop(), which pkills mpv)."""
