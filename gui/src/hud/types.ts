@@ -62,4 +62,8 @@ export interface UsageStats {
 export interface SynthiaState {
   status: string;
   recording: boolean;
+  /** "murmur" when Murmur hears the assistant key. */
+  stt_source?: string | null;
+  /** Murmur's assistant key label: missing/null = unknown, "" = none set in Murmur. */
+  talk_key?: string | null;
 }

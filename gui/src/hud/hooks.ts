@@ -128,13 +128,29 @@ const KEY_NAMES: Record<string, string> = {
   "Key.shift_r": "Right Shift",
 };
 
-/** The talk key from the voice app's config, in words ("Left Alt"). */
-export function useTalkKey(): string {
-  const [key, setKey] = useState("your talk key");
+/**
+ * The talk key in words ("Left Alt"). With Murmur hearing the key, the voice app reports
+ * Murmur's own label in its state file; otherwise it is the key from Synthia's config.
+ */
+export function useTalkKey(voice: SynthiaState): string {
+  const [configured, setConfigured] = useState("your talk key");
   useEffect(() => {
     call<[string, string]>("get_hotkeys")
-      .then(([, assistant]) => setKey(KEY_NAMES[assistant] ?? assistant))
+      .then(([, assistant]) => setConfigured(KEY_NAMES[assistant] ?? assistant))
       .catch(() => undefined); // keep the neutral wording; nothing else depends on it
   }, []);
-  return key;
+  return talkKeyLabel(voice, configured);
+}
+
+export const NO_MURMUR_KEY_LINE = "Set an assistant key in Murmur's settings so I can hear you.";
+
+/** Pure choice of label: Murmur's when it hears the key (unknown stays neutral). */
+export function talkKeyLabel(voice: SynthiaState, configured: string): string {
+  if (voice.stt_source !== "murmur") return configured;
+  return voice.talk_key || "your talk key";
+}
+
+/** Murmur is the ear but has no assistant key, so nothing can start a question. */
+export function murmurKeyMissing(voice: SynthiaState): boolean {
+  return voice.stt_source === "murmur" && voice.talk_key === "";
 }

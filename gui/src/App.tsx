@@ -6,7 +6,16 @@ import { Constellation } from "./hud/Constellation";
 import { DayPicker } from "./hud/DayPicker";
 import { Feed } from "./hud/Feed";
 import { localDate } from "./hud/format";
-import { useFleet, useNow, useSynthiaState, useTalkKey, useUsage, useVoiceRunning } from "./hud/hooks";
+import {
+  murmurKeyMissing,
+  NO_MURMUR_KEY_LINE,
+  useFleet,
+  useNow,
+  useSynthiaState,
+  useTalkKey,
+  useUsage,
+  useVoiceRunning,
+} from "./hud/hooks";
 import { NeedsYou, Spoken } from "./hud/Left";
 import { Orb, orbState } from "./hud/Orb";
 import { call, MOCK, reasonOf } from "./hud/tauri";
@@ -19,9 +28,9 @@ import "./hud/hud.css";
 function App() {
   const { view, confirmReply } = useBrain();
   const fleet = useFleet();
-  const talkKey = useTalkKey();
   const usage = useUsage();
   const { state: voice, error: voiceStateError } = useSynthiaState();
+  const talkKey = useTalkKey(voice);
   const { running, start, error: voiceError } = useVoiceRunning();
   const now = useNow();
   const activity = useActivity(fleet);
@@ -77,6 +86,7 @@ function App() {
           notes={[
             ...(focusError ? [focusError] : []),
             ...(voiceError ? [voiceError] : []),
+            ...(murmurKeyMissing(voice) ? [NO_MURMUR_KEY_LINE] : []),
             ...(voiceStateError ? [`I can't read the voice state: ${voiceStateError}`] : []),
           ]}
         />

@@ -68,6 +68,12 @@ fn load_embedded_icon(data: &'static [u8]) -> Option<Image<'static>> {
 struct SynthiaState {
     status: String,
     recording: bool,
+    /// "murmur" when Murmur hears the assistant key (older voice apps omit it).
+    #[serde(default)]
+    stt_source: Option<String>,
+    /// Murmur's assistant key label: absent/null = unknown, "" = no key set in Murmur.
+    #[serde(default)]
+    talk_key: Option<String>,
 }
 
 #[tauri::command]
