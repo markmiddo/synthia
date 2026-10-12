@@ -10,6 +10,43 @@ from synthia.brain.concierge import Brain, SpokenEvent
 from synthia.brain.config import BrainConfig
 
 
+def _ev(event: dict) -> StreamEvent:
+    return StreamEvent(uuid="u", session_id="sess-1", event=event)
+
+
+def _text_message(*chunks: str, tool: bool = False) -> list[StreamEvent]:
+    """The stream events of one assistant message, optionally ending in a tool call."""
+    events = [_ev({"type": "message_start"})]
+    events.append(_ev({"type": "content_block_start", "content_block": {"type": "text"}}))
+    for c in chunks:
+        events.append(
+            _ev(
+                {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": c},
+                }
+            )
+        )
+    events.append(_ev({"type": "content_block_stop"}))
+    if tool:
+        events.append(_ev({"type": "content_block_start", "content_block": {"type": "tool_use"}}))
+        events.append(_ev({"type": "content_block_stop"}))
+    events.append(_ev({"type": "message_stop"}))
+    return events
+
+
+def _result(text: str) -> ResultMessage:
+    return ResultMessage(
+        subtype="success",
+        duration_ms=1,
+        duration_api_ms=1,
+        is_error=False,
+        num_turns=1,
+        session_id="sess-1",
+        result=text,
+    )
+
+
 class FakeClient:
     """Scripted stand-in for ClaudeSDKClient."""
 
@@ -41,6 +78,7 @@ class FakeClient:
         if not self.queries:
             await asyncio.Event().wait()
             return
+        yield _ev({"type": "message_start"})
         for word in self.reply.split(" "):
             yield StreamEvent(
                 uuid="u",
@@ -50,6 +88,7 @@ class FakeClient:
                     "delta": {"type": "text_delta", "text": word + " "},
                 },
             )
+        yield _ev({"type": "message_stop"})
         yield ResultMessage(
             subtype="success",
             duration_ms=1,
@@ -59,6 +98,18 @@ class FakeClient:
             session_id="sess-1",
             result=self.reply,
         )
+
+
+class ScriptedClient(FakeClient):
+    """Replays a list of messages, then a ResultMessage."""
+
+    script: list = []
+    final = ""
+
+    async def receive_response(self):
+        for m in self.script:
+            yield m
+        yield _result(self.final)
 
 
 class BlockingClient:
@@ -99,6 +150,7 @@ class BlockingClient:
                 "delta": {"type": "text_delta", "text": "hello "},
             },
         )
+        yield _ev({"type": "message_stop"})
         await self.release.wait()
         yield ResultMessage(
             subtype="success",
@@ -267,7 +319,7 @@ async def test_interrupt_drains_then_allows_send(tmp_path):
 
     gen = brain.send("hi")
     first = await gen.__anext__()
-    assert first == "hello "
+    assert first == "hello"
 
     client = BlockingClient.instances[0]
     await brain.interrupt()
@@ -316,7 +368,7 @@ async def test_abandoned_send_does_not_strand_lock(tmp_path):
 
     gen = brain.send("one")
     first = await gen.__anext__()
-    assert first == "hello "
+    assert first == "hello"
 
     client = BlockingClient.instances[0]
     client.release.set()
@@ -370,7 +422,7 @@ async def test_concurrent_interrupt_during_abandoned_send_drains_once(tmp_path):
 
     gen = brain.send("one")
     first = await gen.__anext__()
-    assert first == "hello "
+    assert first == "hello"
 
     client = BlockingClient.instances[0]
     client.release.set()
@@ -474,7 +526,7 @@ async def test_interrupt_only_stops_a_turn_from_the_same_transport(tmp_path):
     brain = Brain(_cfg(tmp_path), _yes, client_factory=BlockingClient, runner=None)
     await brain.start()
     gen = brain.send("hi", origin="desk")
-    assert await gen.__anext__() == "hello "
+    assert await gen.__anext__() == "hello"
     client = BlockingClient.instances[0]
     await brain.interrupt("telegram")  # a Telegram /stop must not cut off a desk turn
     assert client.interrupted is False
@@ -514,4 +566,55 @@ async def test_requeued_job_event_is_not_asked_again(tmp_path):
     again = await asyncio.wait_for(events.__anext__(), 2)
     assert again.text == ev.text
     assert len(client.queries) == asked
+    await brain.stop()
+
+
+def _scripted(script, final=""):
+    class Client(ScriptedClient):
+        pass
+
+    Client.script = script
+    Client.final = final
+    return Client
+
+
+async def test_narration_before_a_tool_call_is_dropped(tmp_path):
+    script = [
+        *_text_message("Reading is fine. ", "Read the two panes.", tool=True),
+        *_text_message("The admin pane is on the hotfix."),
+    ]
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=_scripted(script, "x"), runner=None)
+    await brain.start()
+    chunks = [c async for c in brain.send("what's going on", origin="desk")]
+    assert chunks == ["The admin pane is on the hotfix."]
+    await brain.stop()
+
+
+async def test_two_text_messages_are_joined_with_a_space(tmp_path):
+    script = [*_text_message("First thing."), *_text_message("Second thing.")]
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=_scripted(script), runner=None)
+    await brain.start()
+    chunks = [c async for c in brain.send("hi")]
+    assert "".join(chunks) == "First thing. Second thing."
+    await brain.stop()
+
+
+async def test_narration_never_reaches_telegram_or_the_journal(tmp_path):
+    script = [
+        *_text_message("Let me check.", tool=True),
+        *_text_message("All quiet."),
+    ]
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=_scripted(script), runner=None)
+    await brain.start()
+    # Telegram joins send() chunks exactly like this.
+    reply = "".join([c async for c in brain.send("status", origin="telegram")]).strip()
+    assert reply == "All quiet."
+    assert "Let me check" not in next((tmp_path / "walk").glob("*.md")).read_text()
+    await brain.stop()
+
+
+async def test_result_text_is_the_fallback_when_nothing_streamed(tmp_path):
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=_scripted([], "Done."), runner=None)
+    await brain.start()
+    assert [c async for c in brain.send("hi")] == ["Done."]
     await brain.stop()

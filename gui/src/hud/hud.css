@@ -253,22 +253,44 @@ button:focus-visible {
 }
 
 .says {
-  font-size: 18px;
-  line-height: 1.55;
+  font-size: 20px;
+  line-height: 1.4;
   margin: 0;
   color: var(--ink);
-  text-wrap: pretty;
-  min-height: 7em;
+  text-align: center;
+  text-wrap: balance;
+  /* Two lines at most, and the column keeps its height so nothing below jumps. */
+  height: 2.8em;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.4s ease;
 }
 
-.says .caret {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  background: var(--cyan);
-  vertical-align: -2px;
-  margin-left: 2px;
-  animation: blink 1s steps(1) infinite;
+.says.on {
+  opacity: 1;
+}
+
+.says span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  animation: sub-in 0.4s ease;
+}
+
+@keyframes sub-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .says,
+  .says span {
+    transition: none;
+    animation: none;
+  }
 }
 
 @keyframes blink {

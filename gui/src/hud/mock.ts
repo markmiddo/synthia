@@ -107,7 +107,7 @@ export function mockListen<T>(event: string, handler: (p: T) => void): () => voi
 }
 
 const MOCK_LINE =
-  "Three agents are up and none of them is blocked on you. Admin panel PR 175 has two builds running. Tomorrow, the Symbiotic tier-count repair is due.";
+  "Three agents are up and none of them is blocked on you. The admin panel hotfix needs about half an hour. Want the detail?";
 
 export function startMockBrain(send: (frame: Record<string, unknown>) => void): () => void {
   const timers: ReturnType<typeof setTimeout>[] = [];
@@ -116,15 +116,12 @@ export function startMockBrain(send: (frame: Record<string, unknown>) => void): 
   timers.push(
     setTimeout(() => {
       send({ type: "state", value: "speaking" });
-      const words = MOCK_LINE.split(" ");
-      words.forEach((w, i) =>
-        timers.push(setTimeout(() => send({ type: "delta", text: (i ? " " : "") + w }), i * 110)),
-      );
+      send({ type: "delta", text: MOCK_LINE });
       timers.push(
         setTimeout(() => {
           send({ type: "reply_done", text: MOCK_LINE });
           send({ type: "state", value: "idle" });
-        }, words.length * 110 + 300),
+        }, 300),
       );
     }, 1400),
   );

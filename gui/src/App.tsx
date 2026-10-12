@@ -90,7 +90,7 @@ function App() {
             ...(voiceStateError ? [`I can't read the voice state: ${voiceStateError}`] : []),
           ]}
         />
-        <Spoken spoken={view.spoken} link={view.link} talkKey={talkKey} />
+        <Spoken spoken={view.spoken} />
         <NeedsYou nodes={nodes} confirms={view.confirms} now={now} onFocus={focus} onConfirm={confirmReply} />
       </aside>
       <Constellation fleet={fleet} now={now} onFocus={focus} />

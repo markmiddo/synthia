@@ -65,16 +65,55 @@ class SpokenEvent:
     text: str
 
 
-def _delta_text(message: Any) -> str | None:
-    if not isinstance(message, StreamEvent) or message.parent_tool_use_id:
+class _ReplyFilter:
+    """Keeps only the user-facing text of a turn.
+
+    The model often narrates before a tool call ("Let me read the panes."). That text
+    must never be spoken or shown. Text is buffered per assistant message and released
+    only when the message ends without a tool call; released messages are joined with
+    a single space so sentences never glue together.
+    """
+
+    def __init__(self) -> None:
+        self._buf: list[str] = []
+        self._has_tool = False
+        self._emitted = False
+
+    def feed(self, message: Any) -> str | None:
+        if not isinstance(message, StreamEvent) or message.parent_tool_use_id:
+            return None
+        ev = message.event
+        kind = ev.get("type")
+        if kind == "message_start":
+            return self.commit()
+        if kind == "content_block_start":
+            block = ev.get("content_block") or {}
+            if block.get("type") not in (None, "text", "thinking"):
+                self._has_tool = True
+                self._buf.clear()
+        elif kind == "content_block_delta":
+            delta = ev.get("delta") or {}
+            if delta.get("type") == "text_delta" and not self._has_tool:
+                self._buf.append(str(delta.get("text", "")))
+        elif kind == "message_stop":
+            return self.commit()
         return None
-    ev = message.event
-    if ev.get("type") != "content_block_delta":
-        return None
-    delta = ev.get("delta") or {}
-    if delta.get("type") != "text_delta":
-        return None
-    return str(delta.get("text", ""))
+
+    def commit(self) -> str | None:
+        """Release the buffered message if it was text only; reset for the next one."""
+        text = "".join(self._buf).strip()
+        keep = text and not self._has_tool
+        self._buf.clear()
+        self._has_tool = False
+        if not keep:
+            return None
+        out = (" " if self._emitted else "") + text
+        self._emitted = True
+        return out
+
+    @property
+    def emitted(self) -> bool:
+        return self._emitted
 
 
 class Brain:
@@ -249,15 +288,20 @@ class Brain:
         self._reader_active = True
         parts: list[str] = []
         fallback = ""
+        reply = _ReplyFilter()
         try:
             async for message in client.receive_response():
-                text = _delta_text(message)
-                if text:
-                    parts.append(text)
-                elif isinstance(message, ResultMessage):
+                if isinstance(message, ResultMessage):
                     self._in_flight = False
                     self._note_result(message)
+                    tail = reply.commit()
+                    if tail:
+                        parts.append(tail)
                     fallback = message.result or ""
+                else:
+                    text = reply.feed(message)
+                    if text:
+                        parts.append(text)
         finally:
             self._reader_active = False
             if self._in_flight:  # this turn ended abnormally (e.g. an exception)
@@ -271,7 +315,9 @@ class Brain:
         self._save_session()
 
     async def send(self, text: str, origin: str | None = None) -> AsyncIterator[str]:
-        """Stream a reply to `text` as raw text deltas.
+        """Stream a reply to `text` as text chunks, one per finished text-only message.
+
+        Pre-tool narration is dropped; see `_ReplyFilter`.
 
         `origin` names the transport that started the turn; permission prompts raised
         during it go back to that transport. Desk turns are tagged for the persona.
@@ -289,22 +335,26 @@ class Brain:
             await client.query(prompt)
             self._in_flight = True
             self._reader_active = True
-            streamed = False
             spoken: list[str] = []
+            reply = _ReplyFilter()
             try:
                 async for message in client.receive_response():
-                    delta = _delta_text(message)
-                    if delta:
-                        streamed = True
-                        spoken.append(delta)
-                        yield delta
-                    elif isinstance(message, ResultMessage):
+                    if isinstance(message, ResultMessage):
                         self._in_flight = False
                         self._note_result(message)
-                        if not streamed and message.result:
+                        tail = reply.commit()
+                        if tail:
+                            spoken.append(tail)
+                            yield tail
+                        if not reply.emitted and message.result:
                             spoken.append(message.result)
                             yield message.result
                         self.journal.turn(text, "".join(spoken))
+                    else:
+                        chunk = reply.feed(message)
+                        if chunk:
+                            spoken.append(chunk)
+                            yield chunk
             finally:
                 self._reader_active = False
                 try:

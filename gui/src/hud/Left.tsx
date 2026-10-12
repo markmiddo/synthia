@@ -1,22 +1,77 @@
+import { useEffect, useRef, useState } from "react";
 import type { BrainView, ConfirmAsk } from "./brain";
 import { formatSince } from "./format";
 import type { FleetNode } from "./types";
 
-/** Her current or last line, written as it arrives; a caret while she is still speaking. */
-export function Spoken({
-  spoken,
-  link,
-  talkKey,
-}: {
-  spoken: BrainView["spoken"];
-  link: BrainView["link"];
-  talkKey: string;
-}) {
-  const text = spoken.text || (link === "online" ? `Hold ${talkKey} and ask me what's going on.` : "");
+/** The most characters that fit on two lines of subtitle in the left column. */
+const MAX_CHARS = 46;
+
+/** Split a reply into subtitle lines: sentences, with long ones broken at word edges. */
+export function sentences(text: string): string[] {
+  const out: string[] = [];
+  for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+    let line = "";
+    for (const word of sentence.split(/\s+/).filter(Boolean)) {
+      if (line && line.length + 1 + word.length > MAX_CHARS) {
+        out.push(line);
+        line = word;
+      } else {
+        line = line ? `${line} ${word}` : word;
+      }
+    }
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+/** About how long a sentence takes to say out loud, at roughly 2.6 words a second. */
+export function speakMs(sentence: string): number {
+  const words = sentence.split(/\s+/).filter(Boolean).length;
+  return Math.max(1600, (words / 2.6) * 1000);
+}
+
+/** Linger on the last line after it is done, then fade to nothing. */
+const LINGER_MS = 2200;
+
+/**
+ * Subtitles: only the sentence being spoken right now, centred under the orb. There is no
+ * progress signal from the voice app, so each sentence is held for about as long as it
+ * takes to say, then the next one replaces it.
+ */
+export function Spoken({ spoken }: { spoken: BrainView["spoken"] }) {
+  const parts = sentences(spoken.text);
+  const [idx, setIdx] = useState(0);
+  const [hidden, setHidden] = useState(true);
+  const firstRef = useRef("");
+
+  // A new reply starts over from its first sentence.
+  const first = parts[0] ?? "";
+  useEffect(() => {
+    if (first !== firstRef.current) {
+      firstRef.current = first;
+      setIdx(0);
+      setHidden(first === "");
+    }
+  }, [first]);
+
+  const current = parts[Math.min(idx, parts.length - 1)] ?? "";
+  const hasNext = idx < parts.length - 1;
+  const done = !spoken.live;
+  useEffect(() => {
+    if (!current) return;
+    // The last sentence of a finished reply fades away once it has been said.
+    if (!hasNext && !done) return;
+    const t = setTimeout(
+      () => (hasNext ? setIdx(idx + 1) : setHidden(true)),
+      speakMs(current) + (hasNext ? 0 : LINGER_MS),
+    );
+    return () => clearTimeout(t);
+  }, [current, idx, hasNext, done]);
+
+  const show = !hidden && current !== "";
   return (
-    <p className="says" aria-live="polite">
-      {text}
-      {spoken.live && <span className="caret" aria-hidden="true" />}
+    <p className={`says${show ? " on" : ""}`} aria-live="polite">
+      <span key={current}>{show ? current : ""}</span>
     </p>
   );
 }
