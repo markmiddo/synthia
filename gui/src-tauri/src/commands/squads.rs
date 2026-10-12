@@ -648,7 +648,6 @@ pub fn validate_job_path(desk: &Path, path: &str) -> AppResult<PathBuf> {
 // Job detail, start and stop
 // ---------------------------------------------------------------------------
 
-const THUMB_MAX_BYTES: u64 = 400_000;
 const MAX_BRIEF_CHARS: usize = 8000;
 const OPENABLE: [&str; 6] = ["md", "json", "txt", "png", "jpg", "jpeg"];
 
@@ -728,21 +727,10 @@ pub fn find_job(desk: &Path, job: &str) -> AppResult<(String, PathBuf)> {
     Err(AppError::NotFound(format!("job {job}")))
 }
 
-fn thumb_for(path: &Path, size: u64) -> Option<String> {
-    use base64::Engine;
-    if size > THUMB_MAX_BYTES {
-        return None;
-    }
-    let mime = match path.extension()?.to_str()? {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        _ => return None,
-    };
-    let bytes = std::fs::read(path).ok()?;
-    Some(format!(
-        "data:{mime};base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    ))
+/// A 320px JPEG thumbnail of a png or jpg deliverable, any size, cached on disk.
+fn thumb_for(path: &Path) -> Option<String> {
+    let cache = super::inbox::preview_cache_dir(&super::fleet::home_dir());
+    super::inbox::make_preview(path, &cache, 320, 80).ok().map(|p| p.data_url)
 }
 
 pub fn job_detail(desk: &Path, squad: &str, job: &str) -> AppResult<JobDetail> {
@@ -807,7 +795,7 @@ pub fn job_detail(desk: &Path, squad: &str, job: &str) -> AppResult<JobDetail> {
                 _ => "other",
             };
             deliverables.push(Deliverable {
-                thumb: thumb_for(&path, meta.len()),
+                thumb: thumb_for(&path),
                 size: meta.len(),
                 path: name.clone(),
                 kind: kind.into(),
@@ -1287,7 +1275,7 @@ mod tests {
         fs::write(job.join("brief.md"), "Write five posts.").unwrap();
         fs::create_dir_all(job.join("out")).unwrap();
         fs::write(job.join("out/post-1.md"), "# hi").unwrap();
-        fs::write(job.join("out/hero.png"), [137, 80, 78, 71]).unwrap();
+        image::RgbImage::from_fn(40, 20, |x, y| image::Rgb([x as u8, y as u8, 9])).save(job.join("out/hero.png")).unwrap();
         fs::write(job.join("out/.hidden"), "x").unwrap();
         let d = job_detail(&dirs.desk, "growth", "2026-10-13-week-of-posts").unwrap();
         assert_eq!(
@@ -1302,7 +1290,7 @@ mod tests {
             .thumb
             .as_deref()
             .unwrap()
-            .starts_with("data:image/png;base64,"));
+            .starts_with("data:image/jpeg;base64,"));
         assert!(d.deliverables[1].thumb.is_none());
         fs::remove_dir_all(home).ok();
     }

@@ -19,7 +19,8 @@ serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "process"] }
-image = "0.24"
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+sha1 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"

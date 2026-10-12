@@ -171,7 +171,7 @@ function App() {
         />
       )}
       <Feed items={activity} />
-      {inboxOpen && <InboxDrawer items={inboxItems} initialId={inboxOpen.id} onClose={closeInbox} reload={reloadInbox} />}
+      {inboxOpen && <InboxDrawer items={inboxItems} initialId={inboxOpen.id} onClose={closeInbox} reload={reloadInbox} fleet={fleet} onOpenJob={openJob} />}
     </main>
   );
 }

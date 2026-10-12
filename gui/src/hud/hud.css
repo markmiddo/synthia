@@ -3296,56 +3296,44 @@ div.card {
 
 /* ---- inbox ---- */
 
-.inboxbtn {
-  position: relative;
+.inboxchip {
   flex: none;
-  display: grid;
-  place-items: center;
-  width: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   height: 28px;
   background: none;
   border: 1px solid var(--line);
   border-radius: 999px;
-  color: var(--soft);
+  padding: 0 11px;
+  font-size: 12px;
+  color: var(--muted);
   cursor: pointer;
+  white-space: nowrap;
   transition: border-color 0.15s, color 0.15s;
 }
 
-.inboxbtn:hover {
+.inboxchip:hover {
   border-color: var(--blue);
   color: var(--ink);
 }
 
-.inboxbtn svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linejoin: round;
-  stroke-linecap: round;
+.inboxchip.has {
+  color: var(--ink);
+  border-color: rgba(255, 198, 109, 0.45);
 }
 
-.inboxbtn b {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 4px;
+.inboxchip b {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
   border-radius: 999px;
-  display: grid;
+  display: inline-grid;
   place-items: center;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   background: var(--amber);
   color: #1b1405;
-  box-shadow: 0 0 12px rgba(255, 198, 109, 0.55);
-}
-
-.inboxbtn.has {
-  border-color: rgba(255, 198, 109, 0.5);
-  color: var(--amber);
 }
 
 .drawer.inbox {
@@ -3757,4 +3745,123 @@ div.card {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+}
+
+/* ---- inbox: previews, feedback composer and thread ---- */
+
+.pimg {
+  margin: 12px 0;
+}
+
+.pimg img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+}
+
+.pimg img.cover {
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.pimg .link-btn {
+  display: inline-block;
+  margin-top: 6px;
+}
+
+.article .pimg {
+  margin: 0 0 16px;
+}
+
+.imgwait {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  margin: 12px 0;
+  border-radius: 10px;
+  border: 1px dashed var(--line-hi);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.frow.broken .fname {
+  color: var(--amber);
+  white-space: normal;
+}
+
+.dwrap {
+  scroll-margin-top: 12px;
+}
+
+.ractions {
+  max-height: 55%;
+  overflow-y: auto;
+}
+
+.targets,
+.quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.targets .toggle {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qchip {
+  background: none;
+  border: 1px dashed var(--line-hi);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 12px;
+  color: var(--soft);
+  cursor: pointer;
+}
+
+.qchip:hover {
+  border-style: solid;
+  border-color: var(--blue);
+  color: var(--ink);
+}
+
+.routeline {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--cyan);
+}
+
+.thread {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.thread .lbl {
+  margin: 0 0 8px;
+}
+
+.fb + .fb {
+  margin-top: 10px;
+}
+
+.fb p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--soft);
+}
+
+.fb p b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.fb .route {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
 }

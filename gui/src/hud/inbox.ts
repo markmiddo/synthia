@@ -10,6 +10,16 @@ export interface InboxFile {
 
 export type InboxState = "new" | "approved" | "sent_back" | "archived";
 
+/** One round of Mark's feedback on an item. The HUD owns the item's `feedback` array. */
+export interface FeedbackEntry {
+  at: string;
+  target: { path: string | null; title: string } | null;
+  note: string;
+  /** The director's role title, "revision job", or "not delivered". */
+  routed_to: string;
+  job: string | null;
+}
+
 /** One finished piece of work. Python writes everything except `state`, `note` and `decided_at`. */
 export interface InboxItem {
   id: string;
@@ -25,6 +35,7 @@ export interface InboxItem {
   state: InboxState;
   note: string | null;
   decided_at: string | null;
+  feedback?: FeedbackEntry[];
 }
 
 const POLL_MS = 5000;
@@ -104,3 +115,30 @@ export function coverFor(slug: string, files: InboxFile[]): InboxFile | null {
   const s = slug.toLowerCase();
   return files.find((f) => (f.kind === "png" || f.kind === "jpg") && f.name.toLowerCase().includes(s)) ?? null;
 }
+
+/** A newer inbox item produced by a round of feedback: matched on the revision job's id, or on its
+ *  `revise-<job slug>` name, and delivered after the feedback was sent. */
+export function revisedVersion(item: InboxItem, fb: FeedbackEntry, items: InboxItem[]): InboxItem | null {
+  if (fb.routed_to !== "revision job") return null;
+  const sent = Date.parse(fb.at);
+  const slug = item.job.replace(/^\d{4}-\d{2}-\d{2}-/, "");
+  return (
+    items.find(
+      (i) =>
+        i.id !== item.id &&
+        i.squad === item.squad &&
+        (i.job === fb.job || i.job.endsWith(`revise-${slug}`)) &&
+        (Number.isNaN(sent) || itemTime(i) >= sent - 60_000),
+    ) ?? null
+  );
+}
+
+/** Starter phrases for the feedback box. */
+export const QUICK_PHRASES: [string, string][] = [
+  ["Tone", "The tone is off: "],
+  ["Facts / sources", "Check the facts and cite the sources: "],
+  ["Cover image", "The cover image needs work: "],
+  ["Too long", "This is too long. Cut it down: "],
+  ["Wrong audience", "This is aimed at the wrong audience: "],
+  ["SEO angle", "The SEO angle is wrong: "],
+];

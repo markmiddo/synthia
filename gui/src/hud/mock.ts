@@ -356,6 +356,21 @@ let INBOX: Record<string, unknown>[] = [
     deliverables: [{ path: "/mock/inbox/office/out/board-cleanup.md", name: "board-cleanup.md", kind: "md", bytes: 900 }],
   },
   {
+    version: 1, id: "growth-covers", created_at: iso(30), source: "squad", squad: "growth", job: "2026-10-13-covers",
+    title: "Growth: covers", director: "growth-director", state: "sent_back", note: "Warmer is fine, but lose the vans.", decided_at: iso(20), desk: "/mock/inbox/growth",
+    summary_md: "# Blog covers, 13 October 2026\n\nBoth covers are done. Each image took one try. No post text was changed.\n\n- **Bush doof guide**: dusty campsite at golden hour, 16:9 (2752 x 1536), no text\n- **Resale**: a punter queues at dusk outside a brick venue",
+    feedback: [{ at: iso(20), target: { path: "/mock/inbox/growth/out/how-to-sell-out-your-first-gig-cover.png", title: "Cover: How to sell out your first gig" }, note: "Warmer is fine, but lose the vans.", routed_to: "revision job", job: "2026-10-13-revise-covers" }],
+    deliverables: [
+      { path: "/mock/inbox/growth/out/how-to-sell-out-your-first-gig-cover.png", name: "how-to-sell-out-your-first-gig-cover.png", kind: "png", bytes: 7549747 },
+      { path: "/mock/inbox/growth/out/resale-without-the-headache-cover.png", name: "resale-without-the-headache-cover.png", kind: "png", bytes: 5872025 },
+    ],
+  },
+  {
+    version: 1, id: "growth-revise-covers", created_at: iso(3), source: "squad", squad: "growth", job: "2026-10-13-revise-covers",
+    title: "Growth: revise covers", director: "growth-director", state: "new", note: null, decided_at: null, desk: "/mock/inbox/growth",
+    summary_md: "The bush doof cover is redone without the vans.", deliverables: [],
+  },
+  {
     version: 1, id: "release-faq-v31", created_at: iso(60 * 20), source: "squad", squad: "release", job: "2026-10-12-v31-faq",
     title: "Release: v3.1 Help Centre updates", director: "release-lead", state: "approved", note: null, decided_at: iso(60 * 19), desk: "/mock/inbox/release",
     summary_md: "Four articles updated, two new ones drafted.", deliverables: [],
@@ -374,7 +389,14 @@ function inboxMock(cmd: string, args?: Record<string, unknown>): unknown {
     }
     case "inbox_decide": return patch({ state: args?.state, decided_at: new Date().toISOString() });
     case "inbox_restore": return patch({ state: args?.state, note: args?.note ?? null, decided_at: args?.decided_at ?? null });
-    case "inbox_send_back": patch({ state: "sent_back", note: args?.note, decided_at: new Date().toISOString() }); return { how: "asked", detail: "" };
+    case "inbox_send_back": {
+      const cur = INBOX.find((i) => i.id === id);
+      const tgt = args?.target as { path: string | null; title: string } | null;
+      const live = SQUAD && cur?.squad === "growth";
+      const entry = { at: new Date().toISOString(), target: tgt, note: String(args?.note), routed_to: live ? "Marketing Director" : "revision job", job: live ? null : `${new Date().toISOString().slice(0, 10)}-revise-${String(cur?.job).slice(11)}` };
+      patch({ state: "sent_back", note: args?.note, decided_at: entry.at, feedback: [...(((cur?.feedback) as unknown[]) ?? []), entry] });
+      return { how: live ? "asked" : "started", detail: "", routed_to: entry.routed_to, job: entry.job };
+    }
     case "inbox_read_file": {
       const p = String(args?.path);
       return p in PAYLOADS ? JSON.stringify(PAYLOADS[p]) : FILE_TEXT[p] ?? "";

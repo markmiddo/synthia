@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ago } from "./hive";
-import { asPayload, coverFor, itemTime, squadLabel, STATE_LABEL, type InboxFile, type InboxItem, type Payload } from "./inbox";
+import { asPayload, coverFor, itemTime, QUICK_PHRASES, revisedVersion, squadLabel, STATE_LABEL, type FeedbackEntry, type InboxFile, type InboxItem, type Payload } from "./inbox";
 import { Markdown } from "./markdown";
 import { call, reasonOf } from "./tauri";
+import type { Fleet } from "./types";
 
 type Filter = "inbox" | "archived";
 
@@ -48,27 +49,62 @@ function useFileText(id: string, f: InboxFile, wanted: boolean): { text: string 
   return s;
 }
 
-function useImage(id: string, f: InboxFile | null): string | null {
-  const [url, setUrl] = useState<string | null>(null);
+type ImageState = { status: "loading" } | { status: "ready"; url: string } | { status: "failed"; reason: string };
+
+/** A downscaled preview of a delivered image (any size). */
+function useImage(id: string, f: InboxFile | null): ImageState {
+  const [s, setS] = useState<ImageState>({ status: "loading" });
   useEffect(() => {
     if (!f) return;
     let alive = true;
+    setS({ status: "loading" });
     call<string>("inbox_image", { id, path: f.path })
-      .then((u) => alive && setUrl(u))
-      .catch(() => {});
+      .then((u) => alive && setS({ status: "ready", url: u }))
+      .catch((e) => alive && setS({ status: "failed", reason: reasonOf(e) }));
     return () => {
       alive = false;
     };
   }, [id, f]);
-  return url;
+  return s;
+}
+
+function openFull(id: string, f: InboxFile): void {
+  call("inbox_open_file", { id, path: f.path }).catch(() => {});
+}
+
+/** The preview, with an Open full size button; a failure is a clear row, never empty space. */
+function PreviewImage({ id, f, className, alt }: { id: string; f: InboxFile; className?: string; alt: string }) {
+  const img = useImage(id, f);
+  if (img.status === "failed") {
+    return (
+      <div className="frow broken">
+        <span className="ficon">IMG</span>
+        <span className="fname">
+          Couldn't preview this image ({f.name}, {sizeText(f.bytes)})
+        </span>
+        <span />
+        <button type="button" className="link-btn" onClick={() => openFull(id, f)}>
+          Open
+        </button>
+      </div>
+    );
+  }
+  if (img.status === "loading") return <div className={`imgwait ${className ?? ""}`}>Preparing preview…</div>;
+  return (
+    <figure className="pimg">
+      <img className={className} src={img.url} alt={alt} />
+      <button type="button" className="link-btn" onClick={() => openFull(id, f)}>
+        Open full size
+      </button>
+    </figure>
+  );
 }
 
 function Article({ id, p, cover }: { id: string; p: Payload; cover: InboxFile | null }) {
   const [raw, setRaw] = useState(false);
-  const img = useImage(id, cover);
   return (
     <article className="article">
-      {img && <img className="cover" src={img} alt="" />}
+      {cover && <PreviewImage id={id} f={cover} className="cover" alt="" />}
       <h1>{p.title}</h1>
       {p.excerpt && <p className="excerpt">{p.excerpt}</p>}
       <Markdown text={p.body} />
@@ -121,10 +157,9 @@ function Deliverable({ item, f, covers }: { item: InboxItem; f: InboxFile; cover
   const isText = f.kind === "json" || f.kind === "md";
   const { text, error } = useFileText(item.id, f, isText);
   const isImage = f.kind === "png" || f.kind === "jpg";
-  const img = useImage(item.id, isImage && !covers.has(f.path) ? f : null);
   if (isImage) {
     if (covers.has(f.path)) return null;
-    return img ? <img className="dimg" src={img} alt={f.name} /> : <FileRow item={item} f={f} />;
+    return <PreviewImage id={item.id} f={f} className="dimg" alt={f.name} />;
   }
   if (f.kind === "md") {
     return error ? <FileRow item={item} f={f} /> : text === null ? <p className="co-quiet">Reading {f.name}…</p> : <Markdown text={text} />;
@@ -144,60 +179,171 @@ function Deliverable({ item, f, covers }: { item: InboxItem; f: InboxFile; cover
   return <FileRow item={item} f={f} />;
 }
 
-/** Which image files are used as a post's cover, so they are not shown twice. */
-function useCovers(item: InboxItem): Set<string> {
-  const [covers, setCovers] = useState<Set<string>>(new Set());
+/** Which image files are a post's cover (so they are not shown twice), and each post's title. */
+function useInfo(item: InboxItem): { covers: Set<string>; titles: Map<string, string> } {
+  const [info, setInfo] = useState<{ covers: Set<string>; titles: Map<string, string> }>({ covers: new Set(), titles: new Map() });
   useEffect(() => {
     let alive = true;
     const jsons = item.deliverables.filter((d) => d.kind === "json");
     Promise.all(jsons.map((d) => call<string>("inbox_read_file", { id: item.id, path: d.path }).catch(() => "")))
       .then((texts) => {
         if (!alive) return;
-        const set = new Set<string>();
-        for (const t of texts) {
+        const covers = new Set<string>();
+        const titles = new Map<string, string>();
+        texts.forEach((t, i) => {
           const p = asPayload(t);
-          const c = p ? coverFor(p.slug, item.deliverables) : null;
-          if (c) set.add(c.path);
-        }
-        setCovers(set);
+          if (!p) return;
+          titles.set(jsons[i].path, p.title);
+          const c = coverFor(p.slug, item.deliverables);
+          if (c) {
+            covers.add(c.path);
+            titles.set(c.path, `Cover: ${p.title}`);
+          }
+        });
+        setInfo({ covers, titles });
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
   }, [item]);
-  return covers;
+  return info;
+}
+
+const hhmm = (iso: string) => {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? "" : new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+};
+
+function Thread({ item, items, onOpenItem, onOpenJob }: { item: InboxItem; items: InboxItem[]; onOpenItem: (id: string) => void; onOpenJob: (squad: string, job: string) => void }) {
+  const thread = item.feedback ?? [];
+  if (thread.length === 0) return null;
+  return (
+    <section className="thread" aria-label="Feedback so far">
+      <p className="lbl">FEEDBACK</p>
+      {thread.map((fb: FeedbackEntry, i) => {
+        const revised = revisedVersion(item, fb, items);
+        return (
+          <div className="fb" key={`${fb.at}-${i}`}>
+            <p>
+              <b>You</b> · {hhmm(fb.at)} · on {fb.target?.path ? fb.target.title : "the whole job"}: {fb.note}
+            </p>
+            <p className="route">
+              {fb.routed_to === "revision job" && fb.job ? (
+                <>
+                  → Revision job {fb.job} started{" "}
+                  <button type="button" className="link-btn" onClick={() => onOpenJob(item.squad, fb.job as string)}>
+                    Open job
+                  </button>
+                </>
+              ) : fb.routed_to === "not delivered" ? (
+                <>→ Saved, but the squad could not be reached</>
+              ) : (
+                <>→ Sent to {fb.routed_to}</>
+              )}
+              {revised && (
+                <>
+                  {" · "}
+                  <button type="button" className="link-btn" onClick={() => onOpenItem(revised.id)}>
+                    Revised version available →
+                  </button>
+                </>
+              )}
+            </p>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+interface Target {
+  key: string;
+  label: string;
+  path: string | null;
+  title: string;
 }
 
 function Reader({
   item,
+  items,
+  fleet,
   now,
   onChanged,
   setToast,
   undo,
   setUndo,
+  onOpenItem,
+  onOpenJob,
 }: {
   item: InboxItem;
+  items: InboxItem[];
+  fleet: Fleet | null;
   now: number;
   onChanged: () => void;
   setToast: (t: Toast | null) => void;
   undo: Undo | null;
   setUndo: (u: Undo | null) => void;
+  onOpenItem: (id: string) => void;
+  onOpenJob: (squad: string, job: string) => void;
 }) {
-  const covers = useCovers(item);
+  const { covers, titles } = useInfo(item);
   const [busy, setBusy] = useState(false);
   const [composing, setComposing] = useState(false);
   const [note, setNote] = useState("");
+  const [targetKey, setTargetKey] = useState("job");
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     setComposing(false);
     setNote("");
+    setTargetKey("job");
   }, [item.id]);
   useEffect(() => {
     if (composing) noteRef.current?.focus();
   }, [composing]);
   const readOnly = item.state === "approved" || item.state === "archived";
   const canUndo = undo !== null && undo.id === item.id && undo.until > now;
+
+  const targets: Target[] = useMemo(
+    () => [
+      { key: "job", label: "Whole job", path: null, title: item.title },
+      ...item.deliverables.map((d) => {
+        const title = titles.get(d.path) ?? d.name;
+        return { key: d.path, label: title, path: d.path, title };
+      }),
+    ],
+    [item, titles],
+  );
+  const target = targets.find((t) => t.key === targetKey) ?? targets[0];
+
+  /** The deliverable under the reader's top edge becomes the default target. */
+  const openComposer = () => {
+    const box = bodyRef.current;
+    let pick = "job";
+    if (box) {
+      const line = box.getBoundingClientRect().top + 120;
+      for (const el of Array.from(box.querySelectorAll<HTMLElement>("[data-path]"))) {
+        const r = el.getBoundingClientRect();
+        if (r.top <= line && r.bottom >= line) {
+          pick = el.dataset.path ?? "job";
+          break;
+        }
+      }
+    }
+    setTargetKey(pick);
+    setComposing(true);
+  };
+
+  const liveDirector = (fleet?.nodes ?? []).find((n) => n.squad === item.squad && n.parent === null && n.status !== "gone");
+  const routeText = liveDirector
+    ? `Goes to ${liveDirector.roleTitle ?? "the director"} (live)`
+    : `Starts a revision job for ${squadLabel(item)} (director has finished)`;
+
+  const addPhrase = (phrase: string) => {
+    setNote((n) => (n.trim() === "" ? phrase : `${n.replace(/\s+$/, "")}\n${phrase}`));
+    noteRef.current?.focus();
+  };
 
   const decide = (state: "approved" | "archived") => {
     setBusy(true);
@@ -213,9 +359,9 @@ function Reader({
   };
   const sendBack = () => {
     setBusy(true);
-    call<{ how: string; detail: string }>("inbox_send_back", { id: item.id, note })
+    call<{ how: string; job: string | null }>("inbox_send_back", { id: item.id, note, target: { path: target.path, title: target.title } })
       .then((r) => {
-        setToast({ ok: true, text: r.how === "asked" ? "Sent back. The director has your note." : "Sent back. A revision job is starting." });
+        setToast({ ok: true, text: r.how === "asked" ? "Sent. The director has your note." : `Sent. A revision job is starting${r.job ? ` (${r.job})` : ""}.` });
         setComposing(false);
         setNote("");
       })
@@ -245,10 +391,9 @@ function Reader({
         <h2>{item.title}</h2>
         <p className="rstate">
           <span className={`ipill s-${item.state}`}>{STATE_LABEL[item.state]}</span>
-          {item.note && item.state === "sent_back" && <span className="rnote">“{item.note}”</span>}
         </p>
       </header>
-      <div className="rbody">
+      <div className="rbody" ref={bodyRef}>
         {item.summary_md && (
           <section className="rsummary">
             <Markdown text={item.summary_md} />
@@ -256,17 +401,39 @@ function Reader({
         )}
         {item.deliverables.length > 0 && <p className="dsec">Deliverables</p>}
         {item.deliverables.map((d) => (
-          <Deliverable key={d.path} item={item} f={d} covers={covers} />
+          <div className="dwrap" key={d.path} data-path={d.path}>
+            <Deliverable item={item} f={d} covers={covers} />
+          </div>
         ))}
         {item.deliverables.length === 0 && !item.summary_md && <p className="co-quiet">Nothing was attached to this one.</p>}
       </div>
       <footer className="ractions">
         {composing ? (
           <div className="sendbox">
-            <label className="lbl" htmlFor="sb-note">
-              WHAT SHOULD CHANGE?
-            </label>
-            <textarea id="sb-note" ref={noteRef} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Tell the director what to fix. They get this note as written." />
+            <p className="lbl">WHAT SHOULD CHANGE?</p>
+            <div className="targets" role="radiogroup" aria-label="What is this about?">
+              {targets.map((t) => (
+                <button key={t.key} type="button" role="radio" aria-checked={t.key === target.key} className={`toggle${t.key === target.key ? " on" : ""}`} onClick={() => setTargetKey(t.key)} title={t.path ?? undefined}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="quick">
+              {QUICK_PHRASES.map(([label, phrase]) => (
+                <button key={label} type="button" className="qchip" onClick={() => addPhrase(phrase)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              id="sb-note"
+              ref={noteRef}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              aria-label="What should change?"
+              placeholder="The bush doof post reads too formal. Make it sound like a mate who goes, keep the checklist."
+            />
+            <p className="routeline">{routeText}</p>
             <div className="co-actions">
               <button type="button" className="primary" disabled={busy || note.trim() === ""} onClick={sendBack}>
                 {busy ? "Sending…" : "Send back"}
@@ -293,7 +460,7 @@ function Reader({
             <button type="button" className="primary" disabled={busy} onClick={() => decide("approved")}>
               Approve
             </button>
-            <button type="button" className="ghost" disabled={busy} onClick={() => setComposing(true)}>
+            <button type="button" className="ghost" disabled={busy} onClick={openComposer}>
               Send back
             </button>
             <button type="button" className="ghost" disabled={busy} onClick={() => decide("archived")}>
@@ -301,6 +468,7 @@ function Reader({
             </button>
           </div>
         )}
+        <Thread item={item} items={items} onOpenItem={onOpenItem} onOpenJob={onOpenJob} />
       </footer>
     </div>
   );
@@ -311,11 +479,15 @@ export function InboxDrawer({
   initialId,
   onClose,
   reload,
+  fleet,
+  onOpenJob,
 }: {
   items: InboxItem[];
   initialId: string | null;
   onClose: () => void;
   reload: () => void;
+  fleet: Fleet | null;
+  onOpenJob: (squad: string, job: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("inbox");
   const [sel, setSel] = useState<string | null>(initialId);
@@ -347,6 +519,11 @@ export function InboxDrawer({
   useEffect(() => {
     if (current && current.id !== sel) setSel(current.id);
   }, [current, sel]);
+
+  // A toast belongs to the item it was about.
+  useEffect(() => {
+    setToast(null);
+  }, [current?.id]);
 
   const changed = useCallback(() => reload(), [reload]);
 
@@ -390,7 +567,25 @@ export function InboxDrawer({
             <CloseIcon />
           </button>
           {current ? (
-            <Reader key={current.id} item={current} now={now} onChanged={changed} setToast={setToast} undo={undo} setUndo={setUndo} />
+            <Reader
+              key={current.id}
+              item={current}
+              items={items}
+              fleet={fleet}
+              now={now}
+              onChanged={changed}
+              setToast={setToast}
+              undo={undo}
+              setUndo={setUndo}
+              onOpenItem={(id) => {
+                setFilter("inbox");
+                setSel(id);
+              }}
+              onOpenJob={(squad, job) => {
+                onClose();
+                onOpenJob(squad, job);
+              }}
+            />
           ) : (
             <p className="co-quiet pad">Pick something on the left to read it.</p>
           )}
@@ -423,12 +618,11 @@ export function InboxDrawer({
   );
 }
 
+/** A chip like the Today chip: "Inbox" and, when there is work to review, a count pill inside it. */
 export function InboxButton({ count, onClick }: { count: number; onClick: () => void }) {
   return (
-    <button type="button" className={`inboxbtn${count > 0 ? " has" : ""}`} onClick={onClick} aria-label={count > 0 ? `Inbox, ${count} to review` : "Inbox"} title="Inbox">
-      <svg viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M3 11l2-6h10l2 6M3 11v5h14v-5M3 11h4l1 2h4l1-2h4" />
-      </svg>
+    <button type="button" className={`inboxchip${count > 0 ? " has" : ""}`} onClick={onClick} aria-label={count > 0 ? `Inbox, ${count} to review` : "Inbox"}>
+      Inbox
       {count > 0 && <b>{count}</b>}
     </button>
   );
