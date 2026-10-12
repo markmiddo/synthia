@@ -34,3 +34,8 @@ confirm_timeout_s: 120
 #   - mcp__claude_ai_Notion__*
 #   - mcp__eva-core__*
 #   - mcp__tavily__*
+
+# Desk websocket served to the Synthia HUD and the desktop voice app (127.0.0.1 only).
+# The auth token is regenerated on every start at <state_dir>/desk.token (mode 600).
+desk:
+  port: 8766

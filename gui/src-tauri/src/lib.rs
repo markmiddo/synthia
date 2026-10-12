@@ -4,21 +4,16 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
-use std::io::Write as _;
 use std::process::Command;
 use std::fs;
 use std::path::PathBuf;
 use serde::Deserialize;
 
-mod security;
-mod egress;
 mod error;
 mod paths;
 mod state;
-mod config;
 mod yaml_writer;
 mod commands;
-mod native_term;
 
 /// Get the Synthia project root directory.
 /// Resolves from the executable path (gui/src-tauri/target/release/synthia-gui)
@@ -56,14 +51,6 @@ pub(crate) fn get_runtime_dir() -> PathBuf {
     PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string()))
 }
 
-#[allow(dead_code)]
-fn load_icon_from_path(path: &PathBuf) -> Option<Image<'static>> {
-    let img = image::open(path).ok()?.to_rgba8();
-    let (width, height) = img.dimensions();
-    let rgba = img.into_raw();
-    Some(Image::new_owned(rgba, width, height))
-}
-
 // Embed icons directly in binary for better compatibility
 static TRAY_ICON_PNG: &[u8] = include_bytes!("../icons/tray-icon.png");
 static TRAY_RECORDING_PNG: &[u8] = include_bytes!("../icons/tray-recording.png");
@@ -75,11 +62,23 @@ fn load_embedded_icon(data: &'static [u8]) -> Option<Image<'static>> {
     Some(Image::new_owned(rgba, width, height))
 }
 
-#[derive(Deserialize, Debug, Default)]
+/// The voice process's state file (`synthia-state.json`), forwarded to the HUD as the
+/// `synthia-state` event so the orb can show "listening".
+#[derive(Deserialize, serde::Serialize, Debug, Default, Clone, PartialEq)]
 struct SynthiaState {
-    #[allow(dead_code)]
     status: String,
     recording: bool,
+    /// "murmur" when Murmur hears the assistant key (older voice apps omit it).
+    #[serde(default)]
+    stt_source: Option<String>,
+    /// Murmur's assistant key label: absent/null = unknown, "" = no key set in Murmur.
+    #[serde(default)]
+    talk_key: Option<String>,
+}
+
+#[tauri::command]
+fn get_synthia_state() -> SynthiaState {
+    read_synthia_state()
 }
 
 pub(crate) fn get_lock_file() -> PathBuf {
@@ -100,53 +99,9 @@ pub(crate) fn get_history_file() -> PathBuf {
     PathBuf::from(runtime_dir).join("synthia-history.json")
 }
 
-pub(crate) fn get_clipboard_file() -> PathBuf {
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(runtime_dir).join("synthia-clipboard.json")
-}
-
-pub(crate) fn get_inbox_file() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".local/share/synthia/inbox/inbox.json")
-}
-
-pub(crate) fn get_worktrees_config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".config/synthia/worktrees.yaml")
-}
-
 pub(crate) fn get_claude_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".claude")
-}
-
-pub(crate) fn get_memory_dir() -> PathBuf {
-    get_claude_dir().join("memory")
-}
-
-pub(crate) fn get_product_dashboard_dir() -> PathBuf {
-    get_claude_dir().join("tools/product-dashboard")
-}
-
-pub(crate) fn get_agents_dir() -> PathBuf {
-    get_claude_dir().join("agents")
-}
-
-pub(crate) fn get_commands_dir() -> PathBuf {
-    get_claude_dir().join("commands")
-}
-
-pub(crate) fn get_skills_dir() -> PathBuf {
-    get_claude_dir().join("skills")
-}
-
-pub(crate) fn get_settings_file() -> PathBuf {
-    get_claude_dir().join("settings.json")
-}
-
-pub(crate) fn get_plugins_file() -> PathBuf {
-    get_claude_dir().join("plugins").join("installed_plugins.json")
 }
 
 pub(crate) fn get_config_path() -> PathBuf {
@@ -154,79 +109,9 @@ pub(crate) fn get_config_path() -> PathBuf {
     PathBuf::from(home).join(".config/synthia/config.yaml")
 }
 
-/// One-shot seeding: when the Synthia config has no `youtube:` key, copy the
-/// channel list from the morning skill's `config.json` (if it exists). Skipped
-/// silently on any I/O error — the rotator will simply show nothing until the
-/// user adds channels manually.
-fn seed_youtube_channels() {
-    let cfg_path = get_config_path();
-    let existing = std::fs::read_to_string(&cfg_path).unwrap_or_default();
-    if existing.lines().any(|l| {
-        !l.starts_with(|c: char| c.is_whitespace()) && l.trim_start().starts_with("youtube:")
-    }) {
-        return;
-    }
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    let morning_path = PathBuf::from(home).join(".claude/skills/morning/config.json");
-    let raw = std::fs::read_to_string(&morning_path).unwrap_or_default();
-    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let channels: Vec<(String, String)> = parsed
-        .get("youtube")
-        .and_then(|y| y.get("channels"))
-        .and_then(|c| c.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|item| {
-                    let name = item.get("name")?.as_str()?.to_string();
-                    let id = item.get("id")?.as_str()?.to_string();
-                    Some((name, id))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let updated = crate::yaml_writer::append_youtube_channels(&existing, &channels);
-    if updated != existing {
-        if let Some(parent) = cfg_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(&cfg_path, updated);
-    }
-}
-
 pub(crate) fn get_runtime_state_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/synthia/runtime.json")
-}
-
-pub(crate) fn parse_frontmatter(content: &str) -> (std::collections::HashMap<String, String>, String) {
-    if !content.starts_with("---") {
-        return (std::collections::HashMap::new(), content.to_string());
-    }
-
-    let parts: Vec<&str> = content.splitn(3, "---").collect();
-    if parts.len() < 3 {
-        return (std::collections::HashMap::new(), content.to_string());
-    }
-
-    let mut frontmatter = std::collections::HashMap::new();
-    for line in parts[1].trim().lines() {
-        if let Some(colon_pos) = line.find(':') {
-            let key = line[..colon_pos].trim().to_string();
-            let value = line[colon_pos + 1..].trim().to_string();
-            frontmatter.insert(key, value);
-        }
-    }
-
-    (frontmatter, parts[2].to_string())
-}
-
-pub(crate) fn is_wayland_env() -> bool {
-    std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
 fn acquire_lock() -> bool {
@@ -277,7 +162,7 @@ fn spawn_state_watcher(
     let state_file = get_state_file();
     let parent = state_file.parent()?.to_path_buf();
     let target = state_file.clone();
-    let last_recording = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let last_state = std::sync::Arc::new(std::sync::Mutex::new(SynthiaState::default()));
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(event) = res else { return };
@@ -291,14 +176,19 @@ fn spawn_state_watcher(
             return;
         }
         let state = read_synthia_state();
-        let mut last = match last_recording.lock() {
+        let mut last = match last_state.lock() {
             Ok(g) => g,
             Err(_) => return,
         };
-        if state.recording == *last {
+        if state == *last {
             return;
         }
-        *last = state.recording;
+        let recording_changed = state.recording != last.recording;
+        *last = state.clone();
+        let _ = app_handle.emit("synthia-state", &state);
+        if !recording_changed {
+            return;
+        }
         if let Some(tray) = app_handle.tray_by_id("main-tray") {
             if state.recording {
                 if let Some(ref icon) = recording_icon {
@@ -323,15 +213,9 @@ pub fn run() {
         std::process::exit(0);
     }
 
-    egress::spawn_watcher();
-
     tauri::Builder::default()
         .manage(state::AppState::default())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            seed_youtube_channels();
-
             // Clean up any stale remote mode state from previous sessions
             let _ = fs::remove_file(get_runtime_dir().join("synthia-remote-mode"));
             let _ = Command::new("pkill")
@@ -430,50 +314,17 @@ pub fn run() {
                 app.state::<state::AppState>().watchers.lock().push(Box::new(watcher));
             }
 
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
-                    let paths_str: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-                    let _ = window.emit("synthia://file-drop", paths_str.clone());
+            commands::fleet::spawn_emitter(app.handle().clone());
 
-                    // If a native terminal tab is active, also write the
-                    // dropped paths into its PTY (single-quoted + space-
-                    // separated) so the user can drop a file onto the
-                    // terminal and have its path appear at the prompt.
-                    let slot = crate::native_term::active_writer_slot();
-                    let writer_opt = slot.lock().clone();
-                    if let Some(writer) = writer_opt {
-                        let mut buf = String::new();
-                        for (i, p) in paths_str.iter().enumerate() {
-                            if i > 0 { buf.push(' '); }
-                            // Single-quote and escape any embedded single quotes.
-                            buf.push('\'');
-                            buf.push_str(&p.replace('\'', "'\\''"));
-                            buf.push('\'');
-                        }
-                        if !buf.is_empty() {
-                            let mut w = writer.lock();
-                            let _ = w.write_all(buf.as_bytes());
-                            let _ = w.flush();
-                        }
-                    }
-                }
-                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Enter { .. }) => {
-                    let _ = window.emit("synthia://drag-enter", ());
-                }
-                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Leave) => {
-                    let _ = window.emit("synthia://drag-leave", ());
-                }
-                _ => {}
-            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::lifecycle::get_status,
             commands::lifecycle::start_synthia,
             commands::lifecycle::stop_synthia,
             commands::lifecycle::set_mode,
+            commands::lifecycle::get_voice_muted,
+            commands::lifecycle::set_voice_muted,
             commands::overlay::show_overlay,
             commands::overlay::hide_overlay,
             commands::overlay::set_overlay_recording,
@@ -487,98 +338,12 @@ pub fn run() {
             commands::hotkeys::save_hotkeys,
             commands::hotkeys::get_word_replacements,
             commands::hotkeys::save_word_replacements,
-            commands::clipboard::get_clipboard_history,
-            commands::clipboard::copy_from_clipboard_history,
-            commands::inbox::get_inbox_items,
-            commands::inbox::open_inbox_item,
-            commands::inbox::delete_inbox_item,
-            commands::inbox::clear_inbox,
-            commands::worktrees::get_worktrees,
-            commands::worktrees::resume_session,
-            commands::worktrees::set_worktree_status,
-            commands::memory::get_memory_stats,
-            commands::memory::get_memory_entries,
-            commands::memory::search_memory,
-            commands::memory::update_memory_entry,
-            commands::memory::delete_memory_entry,
-            commands::claude_config::get_synthia_config,
-            commands::claude_config::save_synthia_config,
-            commands::worktrees::get_worktree_repos,
-            commands::worktrees::save_worktree_repos,
-            commands::agents::list_agents,
-            commands::agents::save_agent,
-            commands::agents::delete_agent,
-            commands::agents::list_commands,
-            commands::agents::save_command,
-            commands::agents::delete_command,
-            commands::agents::list_skills,
-            commands::agents::save_skill,
-            commands::agents::delete_skill,
-            commands::lifecycle::get_voice_muted,
-            commands::lifecycle::set_voice_muted,
-            commands::neuralguard::list_security_events,
-            commands::neuralguard::clear_security_events,
-            commands::agents::scan_all_sessions,
-            commands::neuralguard::list_pending_prompts,
-            commands::neuralguard::respond_to_prompt,
-            commands::neuralguard::neuralguard_status,
-            commands::neuralguard::install_neuralguard_hooks,
-            commands::neuralguard::uninstall_neuralguard_hooks,
-            commands::neuralguard::get_egress_enabled,
-            commands::neuralguard::set_egress_enabled,
-            commands::neuralguard::add_to_allowlist,
-            commands::agents::list_hooks,
-            commands::agents::list_plugins,
-            commands::agents::toggle_plugin,
-            commands::claude_config::get_knowledge_meta,
-            commands::claude_config::save_knowledge_meta,
-            commands::notes::list_notes,
-            commands::notes::read_note,
-            commands::notes::get_note_preview,
-            commands::notes::get_note_modified,
-            commands::notes::save_note,
-            commands::notes::rename_note,
-            commands::notes::move_note,
-            commands::notes::create_folder,
-            commands::notes::delete_note,
             commands::usage::get_usage_stats,
-            commands::weather::get_weather,
-            commands::product::get_product_dashboard_html,
-            commands::product::refresh_product_dashboard,
-            commands::youtube_feed::get_youtube_videos,
-            commands::youtube_feed::list_youtube_channels,
-            commands::youtube_feed::add_youtube_channel,
-            commands::youtube_feed::remove_youtube_channel,
-            commands::notes::get_pinned_note,
-            commands::notes::save_pinned_note,
-            commands::github::get_github_config,
-            commands::github::save_github_config,
-            commands::github::get_github_issues,
-            commands::notes::get_notes_base_path_cmd,
-            commands::agents::list_active_agents,
-            commands::agents::kill_agent,
-            commands::journal::add_journal_entry,
-            commands::journal::get_journal_entries,
-            commands::journal::get_journal_entries_by_agent,
-            commands::terminal::terminal_spawn,
-            commands::terminal::terminal_attach,
-            commands::terminal::terminal_write,
-            commands::terminal::terminal_resize,
-            commands::terminal::terminal_kill,
-            commands::terminal::terminal_list,
-            commands::native_term::native_term_spawn,
-            commands::native_term::native_term_reposition,
-            commands::native_term::native_term_kill,
-            crate::native_term::commands::native_term_attach,
-            crate::native_term::commands::native_term_resize,
-            crate::native_term::commands::native_term_detach,
-            crate::native_term::commands::native_term_show,
-            crate::native_term::commands::native_term_hide,
-            crate::native_term::commands::native_term_new_tab,
-            crate::native_term::commands::native_term_close_tab,
-            crate::native_term::commands::native_term_rename_tab,
-            crate::native_term::commands::native_term_list_tabs,
-            commands::shortcuts::get_shell_aliases
+            get_synthia_state,
+            commands::desk::get_desk_token,
+            commands::fleet::fleet_snapshot,
+            commands::fleet::fleet_focus,
+            commands::fleet::fleet_day
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

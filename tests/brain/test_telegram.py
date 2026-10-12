@@ -12,7 +12,9 @@ from synthia.brain.transports.telegram import TelegramTransport, is_yes
 class FakeBrain:
     def __init__(self):
         self.sent = []
+        self.origins = []
         self.interrupts = 0
+        self.interrupt_origins = []
         self.new_sessions = 0
         self._events: asyncio.Queue = asyncio.Queue()
         self.jobs = SimpleNamespace(list_jobs=lambda: [])
@@ -28,13 +30,15 @@ class FakeBrain:
     def requeue(self, rec):
         self.requeued.append(rec)
 
-    async def send(self, text):
+    async def send(self, text, origin=None):
         self.sent.append(text)
+        self.origins.append(origin)
         yield "reply to "
         yield text
 
-    async def interrupt(self):
+    async def interrupt(self, origin=None):
         self.interrupts += 1
+        self.interrupt_origins.append(origin)
 
     async def new_session(self, handover=None):
         self.new_sessions += 1
@@ -131,6 +135,7 @@ async def test_voice_roundtrip(parts):
     brain, speech, bot, tr, ctx = parts
     await tr.on_voice(_update(voice=True, bot=bot), ctx)
     assert brain.sent == ["run the morning ritual"]
+    assert brain.origins == ["telegram"]
     assert speech.spoken == ["reply to run the morning ritual"]
     assert bot.voices[-1][1] == "reply to run the morning ritual"
     assert bot.actions  # typing/recording chat actions were sent
@@ -149,6 +154,7 @@ async def test_commands(parts):
     await tr.on_new(_update(text="/new", bot=bot), ctx)
     await tr.on_jobs(_update(text="/jobs", bot=bot), ctx)
     assert brain.interrupts == 1
+    assert brain.interrupt_origins == ["telegram"]
     assert brain.new_sessions == 1
     assert any("No jobs" in t for _, t in bot.texts)
 
@@ -188,9 +194,11 @@ def test_build_app_enables_concurrent_updates(parts):
     assert app.concurrent_updates > 1
 
 
-async def test_pump_events_survives_send_failure(parts):
+async def test_pump_events_survives_send_failure(parts, monkeypatch):
     brain, speech, bot, tr, ctx = parts
     from synthia.brain.concierge import SpokenEvent
+
+    monkeypatch.setattr(telegram_module, "EVENT_RETRY_DELAY_S", 0.01)
 
     bot.fail_send_voice_times = 1
     rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
@@ -288,3 +296,97 @@ async def test_confirmation_is_journaled(parts, tmp_path):
     assert await task is False
     text = brain.journal.today_path().read_text()
     assert "**Confirmation denied:** run git push origin main" in text
+
+
+async def test_pump_events_go_to_telegram_and_are_mirrored_to_the_desk(parts):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    mirrored = []
+
+    async def mirror(ev):
+        mirrored.append(ev.text)
+
+    tr.mirror_event = mirror
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert mirrored == ["Briefing is done."]
+    assert bot.voices[-1] == (1, "Briefing is done.")
+    assert brain.acked == [rec]
+
+
+async def test_pump_events_with_a_desk_client_still_requeues_when_no_chat(parts):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    async def mirror(ev):
+        pass
+
+    tr.mirror_event = mirror
+    tr.chat_id = None
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert brain.requeued == [rec]
+    assert brain.acked == []
+
+
+async def test_pump_events_requeues_on_push_failure_without_acking(parts, monkeypatch):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    monkeypatch.setattr(telegram_module, "EVENT_RETRY_DELAY_S", 0.01)
+    bot.fail_send_voice_times = 1
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert brain.requeued == [rec]
+    assert brain.acked == []
+
+
+async def test_pump_events_gives_up_after_max_push_attempts(parts, monkeypatch):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    monkeypatch.setattr(telegram_module, "EVENT_RETRY_DELAY_S", 0.001)
+    bot.fail_send_voice_times = 100
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    for _ in range(telegram_module.MAX_EVENT_PUSH_ATTEMPTS):
+        await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.1)
+    pump.cancel()
+    assert len(brain.requeued) == telegram_module.MAX_EVENT_PUSH_ATTEMPTS - 1
+    assert brain.acked == [rec]
+
+
+async def test_losing_telegram_leg_says_where_it_was_answered(parts):
+    brain, speech, bot, tr, ctx = parts
+    tr.bot = bot
+    task = asyncio.create_task(tr.ask("run git push"))
+    await asyncio.sleep(0.01)
+    tr.resolved(False)  # the Router: the desk declined first
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert bot.texts[-1] == (1, "Answered at the desk: declined.")
+    # And a late "yes" is no longer taken as an answer to a live question.
+    assert tr._pending_confirm is None
+
+
+async def test_cancelled_telegram_leg_without_winner_says_cancelled(parts):
+    brain, speech, bot, tr, ctx = parts
+    tr.bot = bot
+    task = asyncio.create_task(tr.ask("run git push"))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert "cancelled" in bot.texts[-1][1]

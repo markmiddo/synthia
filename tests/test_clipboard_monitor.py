@@ -659,6 +659,7 @@ class TestWaylandWatcherLeak:
 
     def test_watcher_is_reaped_before_respawn_when_handler_raises(self, tmp_path, monkeypatch):
         from unittest.mock import MagicMock, patch
+
         from synthia.clipboard_monitor import ClipboardMonitor
 
         monitor = ClipboardMonitor.__new__(ClipboardMonitor)
@@ -680,8 +681,10 @@ class TestWaylandWatcherLeak:
             raise RuntimeError("handler blew up")
 
         monkeypatch.setattr(monitor, "_add_item", failing_add)
-        with patch("synthia.clipboard_monitor.subprocess.Popen", side_effect=fake_popen), \
-             patch("synthia.clipboard_monitor.time.sleep"):
+        with (
+            patch("synthia.clipboard_monitor.subprocess.Popen", side_effect=fake_popen),
+            patch("synthia.clipboard_monitor.time.sleep"),
+        ):
             monitor._run_wayland_monitor()
 
         assert len(procs) == 2

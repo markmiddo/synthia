@@ -35,6 +35,8 @@ dependencies = [
     "scipy>=1.10.0",
     "sounddevice>=0.4.6",
     "PyYAML>=6.0",
+    "websockets>=13.0",
+    "jeepney>=0.8",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +59,7 @@ brain = [
     "google-cloud-speech>=2.0",
     "google-cloud-texttospeech>=2.0",
     "pyyaml>=6.0",
+    "websockets>=13.0",
 ]
 all = ["synthia[local,cloud,remote,search,tui,brain]"]
 dev = [

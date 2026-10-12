@@ -104,3 +104,12 @@ async def test_repl_input_does_not_block_loop():
     assert (
         counter["ticks"] >= 1
     ), f"Event loop was blocked: only {counter['ticks']} ticks during 0.2s input wait"
+
+
+def test_serve_command_dispatches_to_run_serve(monkeypatch):
+    import synthia.brain.serve as serve_module
+
+    called = []
+    monkeypatch.setattr(serve_module, "run_serve", lambda cfg: called.append(cfg) or 0)
+    assert main(["serve", "--config", "/nonexistent/brain.yaml"]) == 0
+    assert len(called) == 1

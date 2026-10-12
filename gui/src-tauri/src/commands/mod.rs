@@ -1,24 +1,10 @@
 //! Tauri IPC command handlers grouped by domain.
 
-pub mod agents;
-pub mod claude_config;
-pub mod clipboard;
-pub mod github;
+pub mod desk;
+pub mod fleet;
 pub mod history;
 pub mod hotkeys;
-pub mod inbox;
-pub mod journal;
 pub mod lifecycle;
-pub mod memory;
-pub mod native_term;
-pub mod neuralguard;
-pub mod notes;
 pub mod overlay;
-pub mod product;
 pub mod remote;
-pub mod shortcuts;
-pub mod terminal;
 pub mod usage;
-pub mod weather;
-pub mod worktrees;
-pub mod youtube_feed;

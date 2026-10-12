@@ -26,7 +26,7 @@ Synthia is a voice assistant + dev workstation companion for Linux with:
 - Hotkey activation (Right Ctrl for dictation, Right Alt for assistant)
 - Telegram remote access
 - TUI dashboard (Textual)
-- Tauri desktop GUI (sidebar: agents/worktrees/knowledge/security/voice/memory/github/config)
+- Tauri desktop GUI: a single Jarvis HUD (orb, her spoken line, needs-you, live org chart of herdr agents and sub-agents)
 - Clipboard monitoring
 - Memory system integration
 - AI Security AI security layer (intercepts risky tool calls from local AI agents)
@@ -37,17 +37,17 @@ Synthia is a voice assistant + dev workstation companion for Linux with:
 - `src/synthia/remote/` - Telegram bot, inbox, remote access
 - `src/synthia/hooks/` - Claude Code integration hooks (incl. `security_gate.py`)
 - `gui/` - Tauri desktop GUI (Rust + React)
-  - `gui/src-tauri/src/lib.rs` - thin orchestrator (~470 lines)
-  - `gui/src-tauri/src/commands/*.rs` - IPC handlers grouped by domain (15 modules)
+  - `gui/src/hud/` - the HUD (direction D "Jarvis, legible"); Sora is bundled locally, no network fonts
+  - `gui/src-tauri/src/lib.rs` - thin orchestrator (tray, state watcher, command registration)
+  - `gui/src-tauri/src/commands/*.rs` - IPC handlers: `fleet` (herdr snapshot, sub-agents, day record), `desk` (brain token), `lifecycle`, `overlay`, `usage`, `history`, `hotkeys`, `remote`
   - `gui/src-tauri/src/error.rs` - typed `AppError` (manual Serialize preserves React wire format)
   - `gui/src-tauri/src/state.rs` - Tauri-managed `AppState`
-  - `gui/src-tauri/src/paths.rs` - canonicalize-checked filesystem helpers
-  - `gui/src-tauri/src/security.rs` + `egress.rs` - AI Security rules + egress filter
-  - `gui/src-tauri/src/yaml_writer.rs` - comment-preserving config writers
-- `tests/` - pytest test suite (690 tests)
+  - `gui/src-tauri/src/paths.rs` - filename validation helper
+  - `gui/src-tauri/src/yaml_writer.rs` - comment-preserving word-replacement writer
+- `tests/` - pytest test suite (733 tests)
 - `docs/` - Documentation, specs, plans
 - `src/synthia/brain/` - mobile voice brain (Agent SDK concierge, job workers, Telegram transport); see `docs/brain.md`
-- `deploy/brain/` - systemd units and install script for the brain on middo247
+- `deploy/brain/` - systemd units and install script for the brain on middo247; `deploy/brain/desktop/synthia-brain.service` runs it on the desktop (`serve`: Telegram plus the desk websocket)
 
 ## Brand
 
@@ -108,7 +108,7 @@ source venv/bin/activate
 black --check src/ tests/       # Formatting
 isort --check src/ tests/       # Import ordering
 mypy src/synthia/ --ignore-missing-imports  # Type checking
-pytest tests/ --tb=short -q     # Tests (690 tests)
+pytest tests/ --tb=short -q     # Tests (733 tests)
 ```
 
 ### Rust GUI backend (when touching `gui/src-tauri/`)
@@ -117,7 +117,7 @@ pytest tests/ --tb=short -q     # Tests (690 tests)
 cd gui/src-tauri
 cargo build --release
 cargo clippy --all-targets -- -D warnings   # zero warnings policy
-cargo test --lib                            # 35 tests
+cargo test --lib                            # 27 tests
 ```
 
 The Rust side maintains a strict clippy gate. New code should not introduce warnings.
@@ -201,5 +201,6 @@ Validation never crashes - it warns and uses defaults.
 synthia             # Same (if installed)
 synthia-dash        # TUI dashboard
 synthia-brain repl      # Text REPL against the voice brain (desktop testing)
-synthia-brain telegram  # Telegram voice transport (runs on middo247)
+synthia-brain telegram  # Telegram voice transport only (old single-transport mode)
+synthia-brain serve     # Telegram plus the desk websocket the HUD and voice app use (assistant_backend: brain)
 ```

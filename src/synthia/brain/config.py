@@ -62,7 +62,10 @@ class BrainConfig:
     repos: list[Path] = field(default_factory=list)
     state_dir: Path = field(default_factory=lambda: DEFAULT_STATE_DIR)
     journal_dir: Path = field(default_factory=lambda: DEFAULT_JOURNAL_DIR)
+    # The talking brain (concierge). Kept fast; heavy work goes to workers.
     model: str | None = None
+    # Dispatched job workers; None means the Claude Code default from settings.
+    worker_model: str | None = None
     allowed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_ALLOWED_TOOLS))
     worker_allowed_tools: list[str] = field(
         default_factory=lambda: list(DEFAULT_WORKER_ALLOWED_TOOLS)
@@ -76,11 +79,38 @@ class BrainConfig:
     telegram_allowed_users: list[int] = field(default_factory=list)
     telegram_chat_id: int | None = None
     confirm_timeout_s: int = 120
+    # Desk websocket (the HUD and the voice app). yaml: `desk: {port: 8766}`.
+    desk_port: int = 8766
+
+    @property
+    def desk_token_file(self) -> Path:
+        """Where the desk transport writes its per-start auth token (mode 600)."""
+        return self.state_dir / "desk.token"
 
 
 _PATH_FIELDS = {"cwd", "state_dir", "journal_dir"}
 _PATH_LIST_FIELDS = {"repos"}
-_INT_FIELDS = {"max_workers", "job_timeout_s", "confirm_timeout_s"}
+_INT_FIELDS = {"max_workers", "job_timeout_s", "confirm_timeout_s", "desk_port"}
+
+# Nested yaml sections flattened onto BrainConfig fields as `<section>_<key>`.
+_SECTIONS = {"desk": {"port"}}
+
+
+def _flatten_sections(raw: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key not in _SECTIONS:
+            out[key] = value
+            continue
+        if not isinstance(value, dict):
+            logger.warning("brain.yaml: %s must be a mapping, got %r; ignored", key, value)
+            continue
+        for sub, sub_value in value.items():
+            if sub not in _SECTIONS[key]:
+                logger.warning("brain.yaml: unknown key %s.%s ignored", key, sub)
+                continue
+            out[f"{key}_{sub}"] = sub_value
+    return out
 
 
 def _coerce_int(key: str, value: Any, default: Any) -> Any:
@@ -134,7 +164,7 @@ def load_brain_config(
     defaults = BrainConfig()
     known = {f.name for f in fields(BrainConfig)}
     kwargs: dict[str, Any] = {}
-    for key, value in raw.items():
+    for key, value in _flatten_sections(raw).items():
         if key not in known:
             logger.warning("brain.yaml: unknown key %r ignored", key)
             continue
@@ -152,6 +182,11 @@ def load_brain_config(
             kwargs[key] = value
 
     cfg = BrainConfig(**kwargs)
+    if not 1 <= cfg.desk_port <= 65535:
+        logger.warning(
+            "brain.yaml: desk.port %r out of range; using %r", cfg.desk_port, defaults.desk_port
+        )
+        cfg.desk_port = defaults.desk_port
     token = env.get("BRAIN_TELEGRAM_TOKEN")
     if token:
         cfg.telegram_token = token

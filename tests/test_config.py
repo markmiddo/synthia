@@ -133,6 +133,9 @@ class TestDefaultConfig:
             "sample_rate",
             "tts_voice",
             "tts_speed",
+            "assistant_backend",
+            "brain_desk_port",
+            "stt_source",
             "assistant_model",
             "conversation_memory",
             "assistant_personality",
@@ -167,6 +170,17 @@ class TestDefaultConfig:
 class TestValidateConfig:
     """Tests for validate_config function."""
 
+    def test_assistant_backend_validated(self):
+        assert validate_config({**DEFAULT_CONFIG, "assistant_backend": "brain"}) == []
+        warnings = validate_config({**DEFAULT_CONFIG, "assistant_backend": "cloud"})
+        assert any("assistant_backend" in w for w in warnings)
+
+    def test_brain_desk_port_validated(self):
+        assert any(
+            "brain_desk_port" in w
+            for w in validate_config({**DEFAULT_CONFIG, "brain_desk_port": 0})
+        )
+
     def test_default_config_passes_validation(self):
         """DEFAULT_CONFIG produces zero warnings."""
         warnings = validate_config(DEFAULT_CONFIG)
@@ -177,6 +191,13 @@ class TestValidateConfig:
         cfg = {**DEFAULT_CONFIG, "dictation_key": "Key.f12"}
         warnings = validate_config(cfg)
         assert any("dictation_key" in w for w in warnings)
+
+    def test_dictation_key_none_turns_dictation_off_without_warning(self):
+        """dictation_key "none" is valid (Murmur owns dictation); assistant_key "none" is not."""
+        cfg = {**DEFAULT_CONFIG, "dictation_key": "none"}
+        assert not any("dictation_key" in w for w in validate_config(cfg))
+        cfg = {**DEFAULT_CONFIG, "assistant_key": "none"}
+        assert any("assistant_key" in w for w in validate_config(cfg))
 
     def test_accepts_valid_hotkeys(self):
         """All VALID_HOTKEYS are accepted without warnings."""

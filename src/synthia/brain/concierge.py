@@ -21,6 +21,7 @@ from claude_agent_sdk import (
 )
 
 from synthia.brain.config import BrainConfig
+from synthia.brain.fleet_context import FleetContext, wrap_context
 from synthia.brain.gate import Confirmer, make_can_use_tool
 from synthia.brain.job_tools import build_jobs_server
 from synthia.brain.jobs import JobFinished, JobManager, JobRecord, JobStore, Runner, claude_runner
@@ -44,6 +45,9 @@ DRAIN_TIMEOUT_S = 15
 # How long to wait before retrying a job event whose delivery turn failed.
 EVENT_RETRY_DELAY_S = 30
 
+# Turns from the desk are tagged so the persona knows Mark can see the HUD.
+DESK_TAG = "[desk] "
+
 
 class ClientLike(Protocol):
     async def connect(self) -> None: ...
@@ -62,16 +66,55 @@ class SpokenEvent:
     text: str
 
 
-def _delta_text(message: Any) -> str | None:
-    if not isinstance(message, StreamEvent) or message.parent_tool_use_id:
+class _ReplyFilter:
+    """Keeps only the user-facing text of a turn.
+
+    The model often narrates before a tool call ("Let me read the panes."). That text
+    must never be spoken or shown. Text is buffered per assistant message and released
+    only when the message ends without a tool call; released messages are joined with
+    a single space so sentences never glue together.
+    """
+
+    def __init__(self) -> None:
+        self._buf: list[str] = []
+        self._has_tool = False
+        self._emitted = False
+
+    def feed(self, message: Any) -> str | None:
+        if not isinstance(message, StreamEvent) or message.parent_tool_use_id:
+            return None
+        ev = message.event
+        kind = ev.get("type")
+        if kind == "message_start":
+            return self.commit()
+        if kind == "content_block_start":
+            block = ev.get("content_block") or {}
+            if block.get("type") not in (None, "text", "thinking"):
+                self._has_tool = True
+                self._buf.clear()
+        elif kind == "content_block_delta":
+            delta = ev.get("delta") or {}
+            if delta.get("type") == "text_delta" and not self._has_tool:
+                self._buf.append(str(delta.get("text", "")))
+        elif kind == "message_stop":
+            return self.commit()
         return None
-    ev = message.event
-    if ev.get("type") != "content_block_delta":
-        return None
-    delta = ev.get("delta") or {}
-    if delta.get("type") != "text_delta":
-        return None
-    return str(delta.get("text", ""))
+
+    def commit(self) -> str | None:
+        """Release the buffered message if it was text only; reset for the next one."""
+        text = "".join(self._buf).strip()
+        keep = text and not self._has_tool
+        self._buf.clear()
+        self._has_tool = False
+        if not keep:
+            return None
+        out = (" " if self._emitted else "") + text
+        self._emitted = True
+        return out
+
+    @property
+    def emitted(self) -> bool:
+        return self._emitted
 
 
 class Brain:
@@ -82,11 +125,13 @@ class Brain:
         client_factory: ClientFactory | None = None,
         runner: Runner | None = None,
         today: Callable[[], date] = date.today,
+        fleet: FleetContext | None = None,
     ) -> None:
         self.config = config
         self.confirm = confirm
         self._factory: ClientFactory = client_factory or (lambda o: ClaudeSDKClient(options=o))
         self._today = today
+        self.fleet = fleet or FleetContext()
         self.session_id: str | None = None
         self._session_date: str | None = None
         self._client: ClientLike | None = None
@@ -98,12 +143,17 @@ class Brain:
         # A send() generator body is currently the one consuming the stream.
         self._reader_active: bool = False
         self._job_events: asyncio.Queue[JobFinished] = asyncio.Queue()
+        # Which transport started the turn holding the lock ("telegram", "desk"), or
+        # None for a job-event or housekeeping turn. Read by confirmation routing.
+        self.turn_origin: str | None = None
+        # Spoken text per undelivered job id, so a requeued event never costs a second LLM turn.
+        self._spoken: dict[str, str] = {}
         config.state_dir.mkdir(parents=True, exist_ok=True)
         self.journal = WalkJournal(config.journal_dir)
         self.jobs = JobManager(
             JobStore(config.state_dir / "jobs"),
             self._job_events,
-            runner or claude_runner(config.cwd, config.worker_allowed_tools, config.model),
+            runner or claude_runner(config.cwd, config.worker_allowed_tools, config.worker_model),
             max_workers=config.max_workers,
             timeout_s=config.job_timeout_s,
         )
@@ -241,15 +291,20 @@ class Brain:
         self._reader_active = True
         parts: list[str] = []
         fallback = ""
+        reply = _ReplyFilter()
         try:
             async for message in client.receive_response():
-                text = _delta_text(message)
-                if text:
-                    parts.append(text)
-                elif isinstance(message, ResultMessage):
+                if isinstance(message, ResultMessage):
                     self._in_flight = False
                     self._note_result(message)
+                    tail = reply.commit()
+                    if tail:
+                        parts.append(tail)
                     fallback = message.result or ""
+                else:
+                    text = reply.feed(message)
+                    if text:
+                        parts.append(text)
         finally:
             self._reader_active = False
             if self._in_flight:  # this turn ended abnormally (e.g. an exception)
@@ -262,8 +317,21 @@ class Brain:
         self._session_date = self._session_date or self._today().isoformat()
         self._save_session()
 
-    async def send(self, text: str) -> AsyncIterator[str]:
-        """Stream a reply to `text` as raw text deltas.
+    async def _turn_prompt(self, text: str, origin: str | None) -> str:
+        """Mark's words, tagged and, for desk and Telegram turns, led by the live fleet block."""
+        tag = DESK_TAG if origin == "desk" else ""
+        if origin not in ("desk", "telegram"):
+            return tag + text
+        block = wrap_context(await self.fleet.summary())
+        return tag + block + text
+
+    async def send(self, text: str, origin: str | None = None) -> AsyncIterator[str]:
+        """Stream a reply to `text` as text chunks, one per finished text-only message.
+
+        Pre-tool narration is dropped; see `_ReplyFilter`.
+
+        `origin` names the transport that started the turn; permission prompts raised
+        during it go back to that transport. Desk turns are tagged for the persona.
 
         Callers must fully consume this generator, or close it explicitly (e.g. via
         `contextlib.aclosing`), so the turn's ResultMessage gets drained and the
@@ -273,32 +341,46 @@ class Brain:
             await self._rollover_if_new_day()
             client = self._require_client()
             await self._drain_leftover()  # in case a previous turn was abandoned
-            await client.query(text)
+            self.turn_origin = origin
+            prompt = await self._turn_prompt(text, origin)
+            await client.query(prompt)
             self._in_flight = True
             self._reader_active = True
-            streamed = False
             spoken: list[str] = []
+            reply = _ReplyFilter()
             try:
                 async for message in client.receive_response():
-                    delta = _delta_text(message)
-                    if delta:
-                        streamed = True
-                        spoken.append(delta)
-                        yield delta
-                    elif isinstance(message, ResultMessage):
+                    if isinstance(message, ResultMessage):
                         self._in_flight = False
                         self._note_result(message)
-                        if not streamed and message.result:
+                        tail = reply.commit()
+                        if tail:
+                            spoken.append(tail)
+                            yield tail
+                        if not reply.emitted and message.result:
                             spoken.append(message.result)
                             yield message.result
                         self.journal.turn(text, "".join(spoken))
+                    else:
+                        chunk = reply.feed(message)
+                        if chunk:
+                            spoken.append(chunk)
+                            yield chunk
             finally:
                 self._reader_active = False
-                if self._in_flight:  # consumer abandoned us mid-turn
-                    await self._drain_leftover()
+                try:
+                    if self._in_flight:  # consumer abandoned us mid-turn
+                        await self._drain_leftover()
+                finally:
+                    self.turn_origin = None
 
-    async def interrupt(self) -> None:
-        if not self._in_flight:
+    async def interrupt(self, origin: str | None = None) -> None:
+        """Stop the current turn, but only for the transport that started it.
+
+        A /stop on Telegram must not cut off a desk turn (and vice versa), so this is a
+        no-op unless `origin` matches the origin of the turn holding the lock.
+        """
+        if not self._in_flight or origin != self.turn_origin:
             return
         client = self._require_client()
         if self._reader_active:
@@ -312,6 +394,10 @@ class Brain:
         while True:
             finished = await self._job_events.get()
             rec = finished.job
+            cached = self._spoken.get(rec.id)
+            if cached is not None:
+                yield SpokenEvent(rec, cached)
+                continue
             prompt = f"[job event] {rec.name} finished ({rec.status}): {rec.summary}"
             try:
                 async with self._lock:
@@ -322,6 +408,7 @@ class Brain:
                 await self._job_events.put(finished)
                 await asyncio.sleep(EVENT_RETRY_DELAY_S)
                 continue
+            self._spoken[rec.id] = text
             self.journal.job_finished(rec.name, rec.status, rec.summary, text)
             # Marked delivered only once a transport has actually pushed it (see ack).
             yield SpokenEvent(rec, text)
@@ -329,6 +416,7 @@ class Brain:
     def ack(self, rec: JobRecord) -> None:
         """Mark a job event as delivered. Transports call this after the push succeeds."""
         rec.delivered = True
+        self._spoken.pop(rec.id, None)
         self.jobs.store.save(rec)
 
     def requeue(self, rec: JobRecord) -> None:

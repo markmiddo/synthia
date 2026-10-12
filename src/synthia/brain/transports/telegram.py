@@ -8,7 +8,7 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 try:
     from telegram import Update
@@ -30,6 +30,9 @@ CAPTION_LIMIT = 1024
 
 # How long to wait before retrying an event we could not push, or restarting a crashed pump.
 EVENT_RETRY_DELAY_S = 30
+# Each retry re-synthesises the voice note (paid TTS), so a push that keeps failing is
+# given up after this many attempts; the job's result is already in the walk journal.
+MAX_EVENT_PUSH_ATTEMPTS = 5
 
 # python-telegram-bot's Application is generic over six type parameters; we don't
 # customise any of them, so spell them out as Any rather than reach for # type: ignore.
@@ -61,8 +64,14 @@ class TelegramTransport:
         chat_id: int | None,
         confirm_timeout_s: int,
         work_dir: Path,
+        desk: Any = None,
+        mirror_event: Callable[[Any], Awaitable[bool]] | None = None,
     ) -> None:
         self.brain = brain
+        # When serving both transports the desk server's life is tied to this application's.
+        self.desk = desk
+        # Best-effort copy of each job event to the desk; Telegram stays the delivery of record.
+        self.mirror_event = mirror_event
         self.speech = speech
         self.allowed_users = set(allowed_users)
         self.chat_id = chat_id
@@ -70,6 +79,10 @@ class TelegramTransport:
         self.work_dir = work_dir
         self.bot: Any = None
         self._pending_confirm: asyncio.Future[bool] | None = None
+        # How the current question closed when another transport answered it first.
+        self._resolution: bool | None = None
+        # Failed Telegram pushes per job id, so a dead chat cannot retry forever.
+        self._push_failures: dict[str, int] = {}
         self._pump_task: asyncio.Task[None] | None = None
 
     # ---- helpers ----
@@ -112,7 +125,7 @@ class TelegramTransport:
             return
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
         t0 = time.monotonic()
-        chunks = [c async for c in self.brain.send(text)]
+        chunks = [c async for c in self.brain.send(text, origin="telegram")]
         reply = "".join(chunks).strip()
         logger.info(
             "turn: in=%d chars out=%d chars %.1fs", len(text), len(reply), time.monotonic() - t0
@@ -152,7 +165,7 @@ class TelegramTransport:
     async def on_stop(self, update: Any, context: Any) -> None:
         if not self._authorised(update) or not update.message:
             return
-        await self.brain.interrupt()
+        await self.brain.interrupt("telegram")
         await update.message.reply_text("Stopped.")
 
     async def on_new(self, update: Any, context: Any) -> None:
@@ -180,24 +193,55 @@ class TelegramTransport:
 
     # ---- confirmation (Confirmer for the brain's gate) ----
 
-    async def confirm(self, question: str) -> bool:
+    async def ask(self, question: str) -> bool | None:
+        """Ask in the chat. True/False is an answer; None means nobody answered (no chat,
+        another question pending, timed out, or the question was cancelled)."""
         if self.bot is None or self.chat_id is None:
-            logger.warning("confirm requested with no chat; denying: %s", question)
-            return False
+            logger.warning("confirm requested with no chat: %s", question)
+            return None
         if self._pending_confirm is not None and not self._pending_confirm.done():
             # Overwriting the future would strand the first waiter forever.
-            logger.warning("confirmation already pending; denying: %s", question)
-            return False
+            logger.warning("confirmation already pending: %s", question)
+            return None
         loop = asyncio.get_running_loop()
-        self._pending_confirm = loop.create_future()
-        await self._speak(self.bot, self.chat_id, f"I want to {question}. Say yes to confirm.")
+        fut: asyncio.Future[bool] = loop.create_future()
+        self._pending_confirm = fut
+        self._resolution = None
         try:
-            approved = await asyncio.wait_for(self._pending_confirm, self.confirm_timeout_s)
+            await self._speak(self.bot, self.chat_id, f"I want to {question}. Say yes to confirm.")
+            return await asyncio.wait_for(fut, self.confirm_timeout_s)
         except asyncio.TimeoutError:
             await self._speak(self.bot, self.chat_id, "No confirmation, so I did not do it.")
-            approved = False
+            return None
+        except asyncio.CancelledError:
+            # Closed elsewhere (the desk answered, or the turn ended). Say so in text, or a
+            # late "yes" here would reach the model as a fresh request.
+            if self._pending_confirm is fut:
+                self._pending_confirm = None
+            await self._notify_closed()
+            raise
         finally:
-            self._pending_confirm = None
+            if self._pending_confirm is fut:
+                self._pending_confirm = None
+
+    def resolved(self, approved: bool | None) -> None:
+        """The Router closed this question: another transport answered (None: nobody)."""
+        self._resolution = approved
+
+    async def _notify_closed(self) -> None:
+        if self.bot is None or self.chat_id is None:
+            return
+        if self._resolution is None:
+            text = "That question was cancelled, so nothing was done."
+        else:
+            text = f"Answered at the desk: {'approved' if self._resolution else 'declined'}."
+        try:
+            await asyncio.wait_for(self.bot.send_message(chat_id=self.chat_id, text=text), 5)
+        except Exception as e:
+            logger.error("failed to tell the chat the question closed: %s", e)
+
+    async def confirm(self, question: str) -> bool:
+        approved = bool(await self.ask(question))
         journal = getattr(self.brain, "journal", None)
         if journal is not None:
             journal.confirmation(question, approved)
@@ -215,6 +259,8 @@ class TelegramTransport:
             try:
                 async for ev in self.brain.events():
                     try:
+                        if self.mirror_event is not None:
+                            await self.mirror_event(ev)
                         if self.chat_id is None:
                             # No chat yet (Mark has not messaged since boot); keep it.
                             logger.warning("job event with no chat id; requeuing %s", ev.job.id)
@@ -222,11 +268,25 @@ class TelegramTransport:
                             await asyncio.sleep(EVENT_RETRY_DELAY_S)
                             continue
                         await self._speak(bot, self.chat_id, ev.text or f"{ev.job.name} finished.")
+                        self._push_failures.pop(ev.job.id, None)
                         self.brain.ack(ev.job)
                     except asyncio.CancelledError:
                         raise
                     except Exception:
-                        logger.exception("event push failed")
+                        # Keep the event: its spoken text is cached, so the retry costs no
+                        # model turn, and the router remembers the desk already has its copy.
+                        failures = self._push_failures.get(ev.job.id, 0) + 1
+                        if failures >= MAX_EVENT_PUSH_ATTEMPTS:
+                            logger.exception(
+                                "event push failed %d times; giving up on %s", failures, ev.job.id
+                            )
+                            self._push_failures.pop(ev.job.id, None)
+                            self.brain.ack(ev.job)
+                            continue
+                        self._push_failures[ev.job.id] = failures
+                        logger.exception("event push failed; requeuing %s", ev.job.id)
+                        self.brain.requeue(ev.job)
+                        await asyncio.sleep(EVENT_RETRY_DELAY_S)
                         continue
             except asyncio.CancelledError:
                 raise
@@ -256,6 +316,8 @@ class TelegramTransport:
     async def _post_init(self, app: TelegramApp) -> None:
         self.bot = app.bot
         await self.brain.start()
+        if self.desk is not None:
+            await self.desk.start()
         # post_init runs before the application is "running", so use a plain
         # asyncio task and keep the reference; cancelled in _post_shutdown.
         self._pump_task = asyncio.create_task(self.pump_events(app.bot))
@@ -267,6 +329,8 @@ class TelegramTransport:
                 await self._pump_task
             except asyncio.CancelledError:
                 pass
+        if self.desk is not None:
+            await self.desk.stop()
         await self.brain.stop()
 
 

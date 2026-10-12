@@ -6,42 +6,53 @@ use std::process::Command;
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use crate::{get_runtime_state_path, get_synthia_root};
+use crate::get_runtime_state_path;
+
+/// The voice app runs as this systemd user unit.
+const VOICE_UNIT: &str = "synthia-voice.service";
+
+fn unit_active() -> bool {
+    Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", VOICE_UNIT])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn process_running() -> bool {
+    Command::new("pgrep")
+        .args(["-f", "synthia.main"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
 
 #[tauri::command]
 pub fn get_status() -> String {
-    let output = Command::new("pgrep")
-        .args(["-f", "synthia.main"])
-        .output();
-
-    match output {
-        Ok(out) if out.status.success() => "running".to_string(),
-        _ => "stopped".to_string(),
+    if unit_active() || process_running() {
+        "running".to_string()
+    } else {
+        "stopped".to_string()
     }
 }
 
 #[tauri::command]
-pub fn start_synthia(state: tauri::State<'_, AppState>) -> AppResult<String> {
-    let mut proc = state.synthia_process.lock();
-    if proc.is_some() {
+pub fn start_synthia() -> AppResult<String> {
+    if unit_active() {
         return Ok("Already running".to_string());
     }
-
-    let root = get_synthia_root();
-    let log_path = root.join("synthia.log");
-    let log_file = std::fs::File::create(&log_path)
-        .map_err(|e| AppError::Io(format!("Failed to create log file: {}", e)))?;
-    let stderr_file = log_file
-        .try_clone()
-        .map_err(|e| AppError::Io(format!("Failed to clone log file: {}", e)))?;
-    let child = Command::new(root.join("run.sh"))
-        .current_dir(&root)
-        .stdout(std::process::Stdio::from(log_file))
-        .stderr(std::process::Stdio::from(stderr_file))
-        .spawn()
+    let out = Command::new("systemctl")
+        .args(["--user", "start", VOICE_UNIT])
+        .output()
         .map_err(|e| AppError::Process(format!("Failed to start: {}", e)))?;
-
-    *proc = Some(child);
+    if !out.status.success() {
+        let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(AppError::Process(format!(
+            "systemctl could not start {}: {}",
+            VOICE_UNIT,
+            if why.is_empty() { "unknown error" } else { &why }
+        )));
+    }
     Ok("Synthia started".to_string())
 }
 

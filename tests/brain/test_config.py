@@ -90,3 +90,24 @@ def test_worker_allowlist_defaults_and_override(tmp_path):
     p = tmp_path / "brain.yaml"
     p.write_text(yaml.dump({"worker_allowed_tools": ["Bash", "Read"]}))
     assert load_brain_config(path=p, env={}).worker_allowed_tools == ["Bash", "Read"]
+
+
+def test_desk_port_from_nested_section_and_range_check(tmp_path, caplog):
+    p = tmp_path / "brain.yaml"
+    p.write_text(yaml.dump({"desk": {"port": 9000}}))
+    assert load_brain_config(path=p, env={}).desk_port == 9000
+    assert load_brain_config(path=tmp_path / "none.yaml", env={}).desk_port == 8766
+    p.write_text(yaml.dump({"desk": {"port": 99999, "bogus": 1}}))
+    cfg = load_brain_config(path=p, env={})
+    assert cfg.desk_port == 8766
+    assert "desk.bogus" in caplog.text
+    assert cfg.desk_token_file == cfg.state_dir / "desk.token"
+
+
+def test_worker_model_is_separate_from_the_talking_model(tmp_path):
+    p = tmp_path / "brain.yaml"
+    p.write_text("model: claude-sonnet-5-5\nworker_model: claude-opus-5-5\n")
+    cfg = load_brain_config(p)
+    assert cfg.model == "claude-sonnet-5-5"
+    assert cfg.worker_model == "claude-opus-5-5"
+    assert load_brain_config(tmp_path / "missing.yaml").worker_model is None
