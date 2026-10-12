@@ -70,11 +70,24 @@ export function OrgTree({
   nodes,
   now,
   onFocus,
+  herdrDown,
 }: {
   nodes: FleetNode[];
   now: number;
   onFocus: (paneId: string) => void;
+  /** Set when herdr could not be read: not the same thing as "no agents". */
+  herdrDown?: { error: string | null };
 }) {
+  if (herdrDown) {
+    return (
+      <div>
+        <Root />
+        <p className="empty">
+          I can't read herdr{herdrDown.error ? `: ${herdrDown.error}` : "."} Your agents may still be running.
+        </p>
+      </div>
+    );
+  }
   if (nodes.length === 0) {
     return (
       <div>
@@ -104,8 +117,23 @@ export function OrgTree({
 }
 
 /** A past day, rebuilt from the saved record. Read-only: those panes are long gone. */
-export function PastTree({ chart }: { chart: DayChart | null }) {
-  const nodes = chart ? Object.entries(chart.nodes) : [];
+export type PastDay =
+  | { status: "loading" }
+  | { status: "error"; reason: string }
+  | { status: "ready"; chart: DayChart };
+
+export function PastTree({ day }: { day: PastDay }) {
+  if (day.status !== "ready") {
+    return (
+      <div>
+        <Root />
+        <p className="empty">
+          {day.status === "loading" ? "Loading…" : `Couldn't read that day: ${day.reason}`}
+        </p>
+      </div>
+    );
+  }
+  const nodes = Object.entries(day.chart.nodes);
   if (nodes.length === 0) {
     return (
       <div>

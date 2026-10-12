@@ -21,6 +21,8 @@ export interface BrainView {
   /** Her current or last line; `live` while it is still being written. */
   spoken: { text: string; live: boolean };
   confirms: ConfirmAsk[];
+  /** A short problem the user should see (e.g. an answer that could not be sent). */
+  notice: string | null;
 }
 
 export const INITIAL_VIEW: BrainView = {
@@ -29,11 +31,13 @@ export const INITIAL_VIEW: BrainView = {
   state: "idle",
   spoken: { text: "", live: false },
   confirms: [],
+  notice: null,
 };
 
 export type Action =
   | { type: "connecting" }
   | { type: "offline"; reason: string }
+  | { type: "notice"; text: string }
   | { type: "frame"; frame: Record<string, unknown> };
 
 /** Pure: fold one message from the brain (or a link change) into the view. */
@@ -42,10 +46,12 @@ export function reduce(view: BrainView, action: Action): BrainView {
     case "connecting":
       return { ...view, link: "connecting" };
     case "offline":
-      return { ...view, link: "offline", reason: action.reason, state: "idle", confirms: [] };
+      return { ...view, link: "offline", reason: action.reason, state: "idle", confirms: [], notice: null };
+    case "notice":
+      return { ...view, notice: action.text };
     case "frame": {
       const f = action.frame;
-      const online: BrainView = { ...view, link: "online", reason: null };
+      const online: BrainView = { ...view, link: "online", reason: null, notice: null };
       switch (f.type) {
         case "state": {
           const value = f.value;
@@ -143,8 +149,18 @@ export function useBrain(): { view: BrainView; confirmReply: (id: string, yes: b
   }, []);
 
   const confirmReply = useCallback((id: string, yes: boolean) => {
-    wsRef.current?.send(JSON.stringify({ type: "confirm_reply", id, yes }));
-    dispatch({ type: "frame", frame: { type: "confirm_done", id } });
+    // The card goes away only when the brain says the question is closed (confirm_done),
+    // so an answer that never left this window cannot look like it was given.
+    const ws = wsRef.current;
+    try {
+      if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("not connected");
+      ws.send(JSON.stringify({ type: "confirm_reply", id, yes }));
+    } catch {
+      dispatch({
+        type: "notice",
+        text: "I can't reach my brain, so I couldn't send your answer. The question stays until I'm back.",
+      });
+    }
   }, []);
 
   return { view, confirmReply };

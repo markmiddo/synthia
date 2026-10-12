@@ -6,12 +6,16 @@ interface Props {
   fleet: Fleet | null;
   voiceRunning: boolean | null;
   onStartVoice: () => void;
+  /** Other problems already phrased for the user (focus failed, voice app unreadable...). */
+  notes?: string[];
 }
 
 /** One plain-words line per problem; renders nothing when everything is reachable. */
-export function Connection({ brain, fleet, voiceRunning, onStartVoice }: Props) {
+export function Connection({ brain, fleet, voiceRunning, onStartVoice, notes = [] }: Props) {
   const lines: string[] = [];
   if (brain.link === "offline" && brain.reason) lines.push(brain.reason);
+  if (brain.notice) lines.push(brain.notice);
+  lines.push(...notes);
   if (fleet && !fleet.herdrOk) lines.push(`I can't see your agents. ${fleet.error ?? ""}`.trim());
   const voiceDown = voiceRunning === false;
   if (lines.length === 0 && !voiceDown) return null;

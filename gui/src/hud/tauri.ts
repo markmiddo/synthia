@@ -10,6 +10,13 @@ export function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T>
   return invoke<T>(cmd, args);
 }
 
+/** A short plain-words reason from whatever a failed Tauri call rejected with. */
+export function reasonOf(e: unknown): string {
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
+  return "unknown error";
+}
+
 /** Subscribe to a Tauri event; returns an unsubscribe function. */
 export function on<T>(event: string, handler: (payload: T) => void): () => void {
   if (MOCK) return mockListen<T>(event, handler);

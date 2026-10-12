@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { call, on } from "./tauri";
+import { call, on, reasonOf } from "./tauri";
 import type { Fleet, SynthiaState, UsageStats } from "./types";
 
 /** Re-render every `ms` so "52m" keeps counting without any new data. */
@@ -19,9 +19,9 @@ export function useFleet(): Fleet | null {
     let alive = true;
     call<Fleet>("fleet_snapshot")
       .then((f) => alive && setFleet((cur) => cur ?? f))
-      .catch(() =>
+      .catch((e) =>
         alive &&
-        setFleet((cur) => cur ?? { nodes: [], herdrOk: false, error: "I can't read herdr." }),
+        setFleet((cur) => cur ?? { nodes: [], herdrOk: false, error: reasonOf(e) }),
       );
     const off = on<Fleet>("fleet", (f) => alive && setFleet(f));
     return () => {
@@ -39,7 +39,11 @@ export function useUsage(): UsageStats | null {
     const load = () =>
       call<UsageStats>("get_usage_stats")
         .then((u) => alive && setUsage(u))
-        .catch(() => alive && setUsage(null));
+        // An error entry renders as "Claude usage unavailable".
+        .catch((e) =>
+          alive &&
+          setUsage({ five_hour_pct: 0, five_hour_resets_in: "", seven_day_pct: 0, error: reasonOf(e) }),
+        );
     load();
     const t = setInterval(load, 60_000);
     return () => {
@@ -51,31 +55,49 @@ export function useUsage(): UsageStats | null {
 }
 
 /** The voice process's own state (recording, thinking...), written by the Python app. */
-export function useSynthiaState(): SynthiaState {
+export function useSynthiaState(): { state: SynthiaState; error: string | null } {
   const [state, setState] = useState<SynthiaState>({ status: "ready", recording: false });
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     call<SynthiaState>("get_synthia_state")
       .then((s) => alive && s && setState(s))
-      .catch(() => {});
-    const off = on<SynthiaState>("synthia-state", (s) => alive && setState(s));
+      .catch((e) => alive && setError(reasonOf(e)));
+    const off = on<SynthiaState>("synthia-state", (s) => {
+      if (!alive) return;
+      setState(s);
+      setError(null);
+    });
     return () => {
       alive = false;
       off();
     };
   }, []);
-  return state;
+  return { state, error };
 }
 
 /** Whether the voice app (Right Alt / Right Ctrl) is running. */
-export function useVoiceRunning(): { running: boolean | null; start: () => void } {
+export function useVoiceRunning(): {
+  running: boolean | null;
+  start: () => void;
+  error: string | null;
+} {
   const [running, setRunning] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     const load = () =>
       call<string>("get_status")
-        .then((s) => alive && setRunning(s === "running"))
-        .catch(() => alive && setRunning(null));
+        .then((s) => {
+          if (!alive) return;
+          setRunning(s === "running");
+          setError(null);
+        })
+        .catch((e) => {
+          if (!alive) return;
+          setRunning(null);
+          setError(`I can't tell whether the voice app is running: ${reasonOf(e)}`);
+        });
     load();
     const t = setInterval(load, 10_000);
     return () => {
@@ -85,8 +107,14 @@ export function useVoiceRunning(): { running: boolean | null; start: () => void 
   }, []);
   const start = () => {
     call("start_synthia")
-      .then(() => setRunning(true))
-      .catch(() => setRunning(false));
+      .then(() => {
+        setRunning(true);
+        setError(null);
+      })
+      .catch((e) => {
+        setRunning(false);
+        setError(`I couldn't start the voice app: ${reasonOf(e)}`);
+      });
   };
-  return { running, start };
+  return { running, start, error };
 }
