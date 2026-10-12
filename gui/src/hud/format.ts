@@ -79,3 +79,11 @@ export function lastSevenDays(now: Date): { date: string; label: string }[] {
   }
   return out;
 }
+
+/** A pane with no agent in it: a plain shell (title like `user@host:path`). Squad members always count. */
+export function isPlainShell(n: { agent: string; title: string; squad: string | null }): boolean {
+  if (n.squad) return false;
+  const agent = n.agent.trim().toLowerCase();
+  if (agent === "" || agent === "shell" || agent === "unknown" || agent === "none") return true;
+  return /^[^\s@:]+@[^\s:]+:/.test(n.title.trim()) && !["claude", "codex", "kimi", "opencode"].includes(agent);
+}

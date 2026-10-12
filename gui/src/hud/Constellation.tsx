@@ -10,57 +10,74 @@ export interface Placed {
   y: number;
   /** Where its link starts: the director for a squad specialist, otherwise the core. */
   from?: Placed;
+  /** A squad director: its band has its own links, none to the core. */
+  head?: boolean;
 }
 
-/** Distance from a director to its specialists. */
-const CLUSTER_R = 215;
+const RING_H = 560;
+const WIDE_CLUSTER_H = 330;
+const NARROW_W = 560;
+const KID_STEP = 158;
 
-/** Nodes sit on an ellipse around the core; past eight they use two. Squad specialists are not on
- *  the ring: they fan out around their director, away from the core. Pure, for the layout. */
-export function place(nodes: FleetNode[], w: number, h: number): { cx: number; cy: number; placed: Placed[] } {
-  const cx = w / 2;
-  const cy = h * 0.46;
+/** Ordinary agents sit on an ellipse around the core; past eight they use two. A squad is its own
+ *  band below the ring: the director in the middle, its specialists in an arc beneath it (a column
+ *  when the stage is narrow), each linked to the director. Pure, for the layout. */
+export function place(
+  nodes: FleetNode[],
+  w: number,
+  h: number,
+): { cx: number; cy: number; placed: Placed[]; height: number | null } {
   const ids = new Set(nodes.map((n) => n.paneId));
   const isKid = (n: FleetNode) => n.parent !== null && n.parent !== n.paneId && ids.has(n.parent);
-  const tops = nodes.filter((n) => !isKid(n));
   const kids = nodes.filter(isKid);
-  const two = tops.length > RING_LIMIT;
+  const family = new Map<string, FleetNode[]>();
+  for (const k of kids) family.set(k.parent as string, [...(family.get(k.parent as string) ?? []), k]);
+  // A specialist whose parent is itself a specialist (a malformed registry) is treated as ordinary.
+  const heads = nodes.filter((n) => family.has(n.paneId) && !isKid(n));
+  const headIds = new Set(heads.map((n) => n.paneId));
+  const hung = new Set<string>();
+  for (const [parent, group] of family) if (headIds.has(parent)) group.forEach((g) => hung.add(g.paneId));
+  const ring = nodes.filter((n) => !headIds.has(n.paneId) && !hung.has(n.paneId));
+
+  const narrow = w < NARROW_W;
+  const banded = heads.length > 0;
+  const ringH = banded ? (narrow ? Math.max(RING_H, ring.length * 130 + 200) : RING_H) : h;
+  const cx = w / 2;
+  const cy = ringH * 0.46;
+  const two = ring.length > RING_LIMIT;
   const rx = two ? Math.min(w * 0.4, 440) : Math.min(w * 0.36, 380);
-  const ry = two ? Math.min(h * 0.4, 360) : Math.min(h * 0.34, 230);
-  const outer = two ? Math.ceil(tops.length / 2) : tops.length;
-  const placed: Placed[] = tops.map((node, i) => {
+  const ry = two ? Math.min(ringH * 0.4, 360) : Math.min(ringH * 0.34, 230);
+  const outer = two ? Math.ceil(ring.length / 2) : ring.length;
+  const placed: Placed[] = ring.map((node, i) => {
     const onInner = two && i >= outer;
-    const count = onInner ? tops.length - outer : outer;
+    const count = onInner ? ring.length - outer : outer;
     const k = onInner ? i - outer : i;
     const scale = onInner ? 0.55 : 1;
     const ang = -Math.PI / 2 + (k + (onInner ? 1 : 0.5)) * ((2 * Math.PI) / count) + 0.35;
     return { node, x: cx + rx * scale * Math.cos(ang), y: cy + ry * scale * Math.sin(ang) };
   });
-  const byId = new Map(placed.map((p) => [p.node.paneId, p]));
-  const family = new Map<string, FleetNode[]>();
-  for (const k of kids) family.set(k.parent as string, [...(family.get(k.parent as string) ?? []), k]);
-  // A kid whose parent is itself a kid (a malformed registry) hangs off the ring node it was placed under.
-  for (const [parentId, group] of family) {
-    let parent = byId.get(parentId);
-    if (!parent) {
-      const up = kids.find((k) => k.paneId === parentId);
-      parent = up && byId.get(up.parent as string);
+  if (two || (banded && narrow)) relax(placed, w, ringH);
+
+  let top = banded ? ringH : 0;
+  for (const head of heads) {
+    const group = family.get(head.paneId) ?? [];
+    const n = group.length;
+    const hp: Placed = { node: head, x: cx, y: top + 70, head: true };
+    placed.push(hp);
+    if (narrow) {
+      group.forEach((node, i) => placed.push({ node, x: cx, y: hp.y + 130 + i * 112, from: hp }));
+      top += 150 + n * 112 + 40;
+    } else {
+      const step = n > 1 ? Math.min(KID_STEP, (w - 40 - 150) / (n - 1)) : 0;
+      group.forEach((node, i) => {
+        const off = n > 1 ? i - (n - 1) / 2 : 0;
+        const edge = n > 1 ? Math.abs(off) / ((n - 1) / 2) : 0;
+        placed.push({ node, x: cx + off * step, y: hp.y + 170 + 36 * edge * edge, from: hp });
+      });
+      top += WIDE_CLUSTER_H;
     }
-    if (!parent) {
-      group.forEach((node) => placed.push({ node, x: cx, y: cy }));
-      continue;
-    }
-    const out = Math.atan2(parent.y - cy, parent.x - cx);
-    const span = Math.min(2.7, 0.8 * (group.length - 1));
-    group.forEach((node, i) => {
-      const ang = group.length === 1 ? out : out - span / 2 + (span * i) / (group.length - 1);
-      const p: Placed = { node, x: parent.x + CLUSTER_R * Math.cos(ang), y: parent.y + CLUSTER_R * Math.sin(ang), from: parent };
-      placed.push(p);
-      byId.set(node.paneId, p);
-    });
   }
-  if (two || kids.length > 0) relax(placed, w, h);
-  return { cx, cy, placed };
+  return { cx, cy, placed, height: banded ? top : null };
 }
 
 const CARD_W = 232;
@@ -118,7 +135,7 @@ function useSize(): [React.RefObject<HTMLElement | null>, { w: number; h: number
   return [ref, size];
 }
 
-function Node({ p, now, rank, onFocus }: { p: Placed; now: number; rank: number; onFocus: (id: string) => void }) {
+function Node({ p, now, rank, replay, onFocus }: { p: Placed; now: number; rank: number; replay: boolean; onFocus: (id: string) => void }) {
   const n = p.node;
   const live = n.subagents.filter((s) => s.live);
   const done = n.subagents.length - live.length;
@@ -156,7 +173,7 @@ function Node({ p, now, rank, onFocus }: { p: Placed; now: number; rank: number;
     ["--c" as string]: statusColor(n.status),
   };
   const cls = `node${n.parent ? " kid" : ""} ${n.status === "working" ? "working" : n.status === "needs-you" ? "need" : "idle"}`;
-  return gone ? (
+  return gone || replay ? (
     <div className={cls} style={style}>
       {body}
     </div>
@@ -171,14 +188,19 @@ export function Constellation({
   fleet,
   now,
   onFocus,
+  onOpenJob,
+  replay = false,
 }: {
   fleet: Fleet | null;
   now: number;
   onFocus: (paneId: string) => void;
+  onOpenJob: (squad: string, job: string) => void;
+  /** Showing a past day: nothing is clickable. */
+  replay?: boolean;
 }) {
   const [ref, { w, h }] = useSize();
   const nodes = fleet?.nodes ?? [];
-  const { cx, cy, placed } = place(nodes, w, h);
+  const { cx, cy, placed, height } = place(nodes, w, h);
   const rank = new Map(byAttention(nodes).map((n, i) => [n.paneId, i]));
   const note =
     fleet === null
@@ -186,14 +208,22 @@ export function Constellation({
       : !fleet.herdrOk
         ? `I can't read herdr${fleet.error ? `: ${fleet.error}` : "."} Your agents may still be running.`
         : nodes.length === 0
-          ? "No agents running. Start one in herdr or ask me."
+          ? replay
+            ? "No agents were running that day."
+            : "No agents running. Start one in herdr or ask me."
           : null;
   const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const fault = fleet !== null && !fleet.herdrOk;
   return (
-    <section ref={ref} className={`stage${nodes.length > RING_LIMIT ? " many" : ""}`} aria-label="Your agents">
+    <section
+      ref={ref}
+      className={`stage${nodes.length > RING_LIMIT ? " many" : ""}`}
+      style={height ? { minHeight: height } : undefined}
+      aria-label="Your agents"
+    >
       <svg aria-hidden="true">
-        {placed.map(({ node, x, y, from }) => {
+        {placed.map(({ node, x, y, from, head }) => {
+          if (head) return null;
           const working = node.status === "working";
           const [sx, sy] = from ? [from.x, from.y] : [cx, cy];
           const d = link(sx, sy, x, y);
@@ -216,8 +246,21 @@ export function Constellation({
         <b>CORE</b>
       </div>
       {placed.map((p) => (
-        <Node key={p.node.paneId} p={p} now={now} rank={rank.get(p.node.paneId) ?? 0} onFocus={onFocus} />
+        <Node key={p.node.paneId} p={p} now={now} rank={rank.get(p.node.paneId) ?? 0} replay={replay} onFocus={onFocus} />
       ))}
+      {placed
+        .filter((p) => !replay && p.head && p.node.squad && p.node.job)
+        .map((p) => (
+          <button
+            key={`job-${p.node.paneId}`}
+            type="button"
+            className="cluster-open"
+            style={{ left: p.x, top: p.y + 82 }}
+            onClick={() => onOpenJob(p.node.squad as string, p.node.job as string)}
+          >
+            View job
+          </button>
+        ))}
       {note && (
         <p className={`stage-note${fault ? " fault" : ""}`} role="status">
           {note}

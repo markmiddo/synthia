@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { stamp } from "./format";
+import { lastSevenDays, stamp } from "./format";
 import { MOCK } from "./tauri";
 import type { FleetNode, UsageStats } from "./types";
 import { Wordmark } from "./Wordmark";
@@ -99,6 +99,51 @@ function WindowControls() {
   );
 }
 
+function DayMenu({ day, today, onDay }: { day: string; today: string; onDay: (d: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const days = lastSevenDays(new Date());
+  const current = days.find((d) => d.date === day)?.label ?? day;
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => {
+      if (!(e.target as HTMLElement).closest(".daymenu")) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  return (
+    <div className="daymenu">
+      <button type="button" className={`daychip${day !== today ? " past" : ""}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {current}
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" /></svg>
+      </button>
+      {open && (
+        <div className="daylist" role="menu">
+          {days.map((d) => (
+            <button
+              key={d.date}
+              type="button"
+              role="menuitem"
+              className={d.date === day ? "on" : ""}
+              onClick={() => {
+                setOpen(false);
+                onDay(d.date);
+              }}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export type View = "constellation" | "company";
 
 function ViewToggle({ view, onView }: { view: View; onView: (v: View) => void }) {
@@ -120,6 +165,9 @@ export function TopBar({
   preview,
   view,
   onView,
+  day,
+  today,
+  onDay,
 }: {
   nodes: FleetNode[];
   usage: UsageStats | null;
@@ -127,6 +175,9 @@ export function TopBar({
   preview: boolean;
   view: View;
   onView: (v: View) => void;
+  day: string;
+  today: string;
+  onDay: (d: string) => void;
 }) {
   const count = (s: FleetNode["status"]) => nodes.filter((n) => n.status === s).length;
   const total = nodes.length;
@@ -147,6 +198,7 @@ export function TopBar({
       <span className="clock" data-tauri-drag-region>{stamp(now)}</span>
       {preview && <span className="example">PREVIEW DATA</span>}
       <ViewToggle view={view} onView={onView} />
+      <DayMenu day={day} today={today} onDay={onDay} />
       <div className="gauges" data-tauri-drag-region>
         <Gauge value={count("working")} total={total} label="working" color="var(--blue)" />
         <Gauge value={count("needs-you")} total={total} label="need you" color="var(--amber)" />

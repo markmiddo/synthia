@@ -346,7 +346,11 @@ pub fn run() {
             commands::fleet::fleet_day,
             commands::squads::squads_list,
             commands::squads::squad_role_save,
-            commands::squads::squad_open_job
+            commands::squads::squad_open_job,
+            commands::squads::squad_job_detail,
+            commands::squads::squad_open_file,
+            commands::squads::squad_stop_job,
+            commands::squads::squad_start_job
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

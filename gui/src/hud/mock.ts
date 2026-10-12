@@ -1,5 +1,5 @@
 // Fake data for previewing the HUD in a plain browser (dev only, see tauri.ts).
-import type { DayChart, Fleet, SquadInfo, SynthiaState, UsageStats } from "./types";
+import type { DayChart, Fleet, JobDetail, SquadInfo, SynthiaState, UsageStats } from "./types";
 
 const now = () => Date.now();
 const min = 60_000;
@@ -44,6 +44,15 @@ function fleet(): Fleet {
       squad: null, job: null, role: null, roleTitle: null, parent: null, subagents: [],
     },
   ];
+  if (SQUAD) {
+    const base = { agent: "claude", repo: "eventflo", cwd: "", session: null, subagents: [], squad: "growth", job: "2026-10-13-week-of-posts" };
+    nodes.push(
+      { ...base, paneId: "w3:p1", status: "working", title: "growth-director", role: "growth-director", roleTitle: "Marketing Director", parent: null, sinceMs: t0 - 22 * min },
+      { ...base, paneId: "w3:p2", status: "working", title: "growth-writer-1", role: "growth-writer", roleTitle: "Writer", parent: "w3:p1", sinceMs: t0 - 6 * min },
+      { ...base, paneId: "w3:p3", status: "idle", title: "growth-seo-1", role: "growth-seo", roleTitle: "SEO Strategist", parent: "w3:p1", sinceMs: t0 - 9 * min },
+      { ...base, paneId: "w3:p4", status: "working", title: "growth-editor-1", role: "growth-editor", roleTitle: "Editor and Fact-checker", parent: "w3:p1", sinceMs: t0 - 2 * min },
+    );
+  }
   for (let i = 0; i < EXTRA; i++) {
     nodes.push({
       paneId: `w2:p${i}`, agent: "claude", status: i % 3 === 0 ? "working" : i % 3 === 1 ? "idle" : "done",
@@ -93,9 +102,10 @@ const SQUADS: SquadInfo[] = SQUAD
       {
         id: "growth", name: "Growth", director: "growth-director", cap: 4, cwd: "~/dev/eventflo",
         roles: [
-          { id: "growth-director", title: "Marketing Director", model: "claude-opus-5-5", hires: ["growth-seo", "growth-writer", "growth-editor"], description: "Runs the growth team.", prompt: "You run the growth team.\n\nHire specialists, review their work, deliver.", hasAgentFile: true },
+          { id: "growth-director", title: "Marketing Director", model: "claude-opus-5-5", hires: ["growth-seo", "growth-writer", "growth-editor", "growth-designer"], description: "Runs the growth team.", prompt: "You run the growth team.\n\nHire specialists, review their work, deliver.", hasAgentFile: true },
           { id: "growth-seo", title: "SEO Strategist", model: "claude-sonnet-5-5", hires: [], description: "Keywords and briefs.", prompt: "You find the topics worth writing.", hasAgentFile: true },
           { id: "growth-writer", title: "Writer", model: "claude-sonnet-5-5", hires: [], description: "Drafts posts.", prompt: "You write the posts.", hasAgentFile: true },
+          { id: "growth-designer", title: "Designer", model: "claude-sonnet-5-5", hires: [], description: "Images.", prompt: "You design.", hasAgentFile: true },
           { id: "growth-editor", title: "Editor and Fact-checker", model: "claude-haiku-5-5", hires: [], description: "Edits.", prompt: "You edit and check facts.", hasAgentFile: false },
         ],
         jobs: [
@@ -105,6 +115,22 @@ const SQUADS: SquadInfo[] = SQUAD
       },
     ]
   : [];
+
+const JOB: JobDetail = {
+  id: "2026-10-13-week-of-posts", squad: "growth", path: "/mock/job", state: "working",
+  brief: "# Week of posts\n\nWrite **five** blog posts for the eventflo blog this week.\n\n- Audience: promoters running first events\n- Tone: plain, practical\n- Each post links to one help article",
+  log: [
+    { at: new Date(t0 - 2 * min).toISOString(), who: "growth-writer", text: "Drafting post two of five" },
+    { at: new Date(t0 - 8 * min).toISOString(), who: "growth-seo", text: "Delivered keyword brief for all five posts" },
+    { at: new Date(t0 - 21 * min).toISOString(), who: "growth-director", text: "Hired SEO Strategist and Writer" },
+    { at: new Date(t0 - 22 * min).toISOString(), who: "growth-director", text: "Briefed" },
+  ],
+  deliverables: [
+    { name: "keywords.json", size: 3180, path: "keywords.json", kind: "json", thumb: null },
+    { name: "post-1.md", size: 6240, path: "post-1.md", kind: "md", thumb: null },
+    { name: "hero.png", size: 48200, path: "hero.png", kind: "image", thumb: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='40'><rect width='60' height='40' fill='%232c4a74'/><circle cx='30' cy='20' r='10' fill='%238ff0ff'/></svg>" },
+  ],
+};
 
 export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const table: Record<string, unknown> = {
@@ -116,6 +142,10 @@ export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promis
     get_hotkeys: ["none", "Key.alt_l"],
     get_synthia_state: { status: "ready", recording: false } satisfies SynthiaState,
     squads_list: SQUADS,
+    squad_job_detail: JOB,
+    squad_stop_job: "",
+    squad_start_job: "",
+    squad_open_file: null,
     squad_role_save: null,
     squad_open_job: null,
     fleet_day: day(String(args?.date ?? "")),
