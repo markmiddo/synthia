@@ -337,8 +337,8 @@ class Synthia:
             return
 
         # A new press while she is talking cuts her off, then records the next question.
-        if self.desk_voice is not None and self.desk_voice.busy:
-            self.desk_voice.interrupt()
+        if self.desk_voice is not None:
+            self.desk_voice.begin_utterance()
 
         try:
             self.recorder.start_recording()
@@ -376,9 +376,7 @@ class Synthia:
                         # The brain streams the reply; DeskVoice speaks it as it arrives.
                         self.desk_voice.ask(text)
                         self._save_to_history(text, "assistant")
-                        self._update_state("ready")
-                        if self.tray:
-                            self.tray.set_status(Status.READY)
+                        # DeskVoice reports thinking, speaking and ready as the reply plays.
                         return
 
                     # Process with Claude

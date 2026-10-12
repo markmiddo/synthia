@@ -114,3 +114,45 @@ def test_reconnects_after_the_server_drops(server, tmp_path):
     client.say("again")
     assert _wait(lambda: any(f["type"] == "reply_done" for f in frames))
     client.close()
+
+
+def test_send_failure_leaves_state_to_the_reader_which_dispatches_disconnected():
+    import queue
+
+    class FakeWS:
+        def __init__(self):
+            self.q = queue.Queue()
+
+        def __iter__(self):
+            while True:
+                item = self.q.get()
+                if item is None:
+                    return
+                yield item
+
+        def send(self, data):
+            raise OSError("broken pipe")
+
+        def close(self):
+            self.q.put(None)
+
+    frames = []
+    client = BrainClient(frames.append, backoff=())
+    ws = FakeWS()
+    client._ws = ws
+    threading.Thread(target=client._read_loop, args=(ws,), daemon=True).start()
+    with pytest.raises(BrainUnavailable, match="lost the brain connection"):
+        client.say("hi")
+    assert _wait(lambda: frames == [{"type": "disconnected"}])
+    assert not client.connected
+
+
+def test_missing_websockets_is_a_brain_unavailable(tmp_path, monkeypatch):
+    import sys
+
+    token = tmp_path / "desk.token"
+    token.write_text("x")
+    monkeypatch.setitem(sys.modules, "websockets.sync.client", None)
+    client = BrainClient(lambda f: None, token_file=token, backoff=())
+    with pytest.raises(BrainUnavailable, match="websockets is not installed"):
+        client.say("hi")

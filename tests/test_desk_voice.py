@@ -150,3 +150,120 @@ def test_confirm_answer_no():
     v.ask("no, leave it")
     assert client.confirms == [("x", False)]
     v.close()
+
+
+# ---- review fixes ----
+
+
+def _press(voice):
+    """Drive Synthia._on_assistant_press with just the parts it touches."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from synthia.main import Synthia
+
+    fake = SimpleNamespace(
+        running=True,
+        assistant_active=False,
+        dictation_active=False,
+        desk_voice=voice,
+        recorder=MagicMock(),
+        sounds=MagicMock(),
+        tray=None,
+        _update_state=lambda status: None,
+    )
+    Synthia._on_assistant_press(fake)
+
+
+def test_pressing_the_key_during_a_confirm_does_not_interrupt_the_turn():
+    v, client, spoken, stops = _voice()
+    v.ask("push it")
+    client.on_frame({"type": "confirm", "id": "abc", "question": "push to main"})
+    assert _wait(lambda: spoken and "push to main" in spoken[0])
+    _press(v)
+    assert client.interrupts == 0
+    assert stops == [1]  # only the spoken question was cut off
+    v.ask("yes")
+    assert client.confirms == [("abc", True)]
+    # the brain carries on with the same turn and the reply is spoken, not discarded
+    client.on_frame({"type": "delta", "text": "Pushed it to main. "})
+    client.on_frame({"type": "reply_done", "text": ""})
+    assert _wait(lambda: spoken[-1] == "Pushed it to main.")
+    v.close()
+
+
+def test_pressing_the_key_mid_reply_still_interrupts():
+    v, client, spoken, stops = _voice()
+    v.ask("tell me")
+    _press(v)
+    assert client.interrupts == 1
+    v.close()
+
+
+def test_confirm_done_clears_a_stale_confirm_so_the_next_question_is_a_question():
+    v, client, spoken, _ = _voice()
+    client.on_frame({"type": "confirm", "id": "abc", "question": "merge it"})
+    assert v.awaiting_confirmation
+    client.on_frame({"type": "confirm_done", "id": "other", "approved": None})
+    assert v.awaiting_confirmation  # a different question's close does not count
+    client.on_frame({"type": "confirm_done", "id": "abc", "approved": None})
+    assert not v.awaiting_confirmation
+    v.ask("what's the weather")
+    assert client.said == ["what's the weather"] and client.confirms == []
+    v.close()
+
+
+def test_disconnect_mid_reply_is_announced_once_and_clears_the_turn():
+    v, client, spoken, _ = _voice()
+    v.ask("tell me")
+    client.on_frame({"type": "delta", "text": "Half a sente"})
+    client.on_frame({"type": "disconnected"})
+    assert _wait(lambda: spoken == [UNREACHABLE_LINE])
+    client.on_frame({"type": "disconnected"})
+    time.sleep(0.1)
+    assert spoken == [UNREACHABLE_LINE]
+    assert not v.busy
+    v.ask("again")
+    client.on_frame({"type": "delta", "text": "Fresh whole reply. "})
+    client.on_frame({"type": "reply_done", "text": ""})
+    assert _wait(lambda: spoken[-1] == "Fresh whole reply.")
+    v.close()
+
+
+def test_state_goes_thinking_speaking_ready():
+    states = []
+    holder = {}
+
+    def factory(on_frame):
+        holder["c"] = FakeClient(on_frame)
+        return holder["c"]
+
+    v = DeskVoice(factory, lambda line: None, lambda: None, on_state=states.append)
+    client = holder["c"]
+    v.ask("hi")
+    assert states == ["thinking"]
+    client.on_frame({"type": "delta", "text": "A whole sentence. "})
+    assert _wait(lambda: "speaking" in states)
+    assert states[-1] != "ready"  # the turn is still open
+    client.on_frame({"type": "reply_done", "text": ""})
+    assert _wait(lambda: states[-1] == "ready")
+    assert states[0] == "thinking"
+    v.close()
+
+
+def test_state_is_ready_at_reply_done_when_the_last_sentence_already_finished():
+    states = []
+    holder = {}
+
+    def factory(on_frame):
+        holder["c"] = FakeClient(on_frame)
+        return holder["c"]
+
+    v = DeskVoice(factory, lambda line: None, lambda: None, on_state=states.append)
+    client = holder["c"]
+    v.ask("hi")
+    client.on_frame({"type": "delta", "text": "A whole sentence. "})
+    assert _wait(lambda: not v._outstanding)
+    client.on_frame({"type": "reply_done", "text": ""})
+    assert states[-1] == "ready"
+    v.close()

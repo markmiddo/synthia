@@ -50,8 +50,11 @@ class BrainClient:
         return self._ws is not None
 
     def _connect_once(self) -> None:
-        from websockets.exceptions import WebSocketException
-        from websockets.sync.client import connect
+        try:
+            from websockets.exceptions import WebSocketException
+            from websockets.sync.client import connect
+        except ImportError as e:
+            raise BrainUnavailable("websockets is not installed") from e
 
         try:
             token = self.token_file.read_text().strip()
@@ -122,7 +125,12 @@ class BrainClient:
         try:
             ws.send(json.dumps(frame))
         except Exception as e:
-            self._ws = None
+            # Close, don't null: the reader thread owns the connection state and will
+            # dispatch "disconnected" exactly once when the socket ends.
+            try:
+                ws.close()
+            except Exception:
+                pass
             raise BrainUnavailable(f"lost the brain connection: {e}") from e
 
     def say(self, text: str) -> None:

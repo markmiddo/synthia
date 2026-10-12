@@ -65,9 +65,11 @@ class DeskVoice:
         self._on_state = on_state or (lambda state: None)
         self._buffer = SentenceBuffer()
         self._lines: queue.Queue[tuple[int, str] | None] = queue.Queue()
+        # Lines queued or being spoken; the single truth for "is she still talking".
+        self._outstanding = 0
+        self._state_lock = threading.Lock()
         self._pending_confirm: str | None = None
         self._turn_active = False  # a turn is in flight at the brain
-        self._speaking = False  # a line is being spoken
         self._down_announced = False
         self._lock = threading.Lock()
         # Replies for turns that were interrupted must be dropped, not spoken.
@@ -81,7 +83,7 @@ class DeskVoice:
 
     @property
     def busy(self) -> bool:
-        return self._turn_active or self._speaking or not self._lines.empty()
+        return self._turn_active or self._outstanding > 0
 
     @property
     def awaiting_confirmation(self) -> bool:
@@ -97,6 +99,8 @@ class DeskVoice:
                 self.client.confirm_reply(confirm_id, bool(_YES.search(text)))
             except BrainUnavailable:
                 self._announce_down()
+                return
+            self._on_state("thinking")
             return
         try:
             self.client.say(text)
@@ -106,6 +110,23 @@ class DeskVoice:
             return
         self._down_announced = False
         self._turn_active = True
+        self._on_state("thinking")
+
+    def begin_utterance(self) -> None:
+        """The assistant key went down: she stops talking so Mark can speak.
+
+        While the brain is waiting for a yes or no, only the spoken question is cut off.
+        The turn must stay alive (interrupting it would abort the permission request), and
+        the next utterance is sent as the answer.
+        """
+        if not self.busy:
+            return
+        if self.awaiting_confirmation:
+            with self._lock:
+                self._drain_queue()
+            self._stop_speaking()
+            return
+        self.interrupt()
 
     def interrupt(self) -> None:
         """Stop talking now and tell the brain to stop the turn."""
@@ -120,6 +141,7 @@ class DeskVoice:
         except BrainUnavailable:
             pass
         self._turn_active = False
+        self._pending_confirm = None
 
     def close(self) -> None:
         self._lines.put(None)
@@ -128,7 +150,16 @@ class DeskVoice:
     # ---- incoming ----
 
     def _enqueue(self, text: str) -> None:
+        with self._state_lock:
+            self._outstanding += 1
         self._lines.put((self._epoch, text))
+
+    def _maybe_ready(self) -> None:
+        """Report "ready" once the turn is over and nothing is left to say."""
+        with self._state_lock:
+            idle = not self._turn_active and self._outstanding == 0
+        if idle:
+            self._on_state("ready")
 
     def _on_frame(self, frame: Frame) -> None:
         kind = frame.get("type")
@@ -145,6 +176,7 @@ class DeskVoice:
                     self._enqueue(rest)
             self._discarding = False
             self._turn_active = False
+            self._maybe_ready()
         elif kind == "event":
             text = str(frame.get("text", "")).strip()
             if text:
@@ -152,19 +184,35 @@ class DeskVoice:
         elif kind == "confirm":
             self._pending_confirm = str(frame.get("id", ""))
             self._enqueue(f"I want to {frame.get('question', 'do something')}. Say yes to confirm.")
+        elif kind == "confirm_done":
+            # The question closed (answered anywhere, timed out, or cancelled): a stale
+            # card must not swallow the next thing Mark says.
+            if self._pending_confirm == str(frame.get("id", "")):
+                self._pending_confirm = None
         elif kind == "error":
             logger.error("brain error: %s", frame.get("text"))
             self._enqueue(ERROR_LINE)
+            self._maybe_ready()
         elif kind == "disconnected":
+            was_active = self._turn_active
+            with self._lock:
+                self._buffer = SentenceBuffer()
             self._turn_active = False
             self._discarding = False
+            self._pending_confirm = None
+            if was_active:
+                self._announce_down()
+            self._maybe_ready()
 
     # ---- speech ----
 
     def _drain_queue(self) -> None:
         try:
             while True:
-                self._lines.get_nowait()
+                item = self._lines.get_nowait()
+                if item is not None:
+                    with self._state_lock:
+                        self._outstanding -= 1
         except queue.Empty:
             pass
 
@@ -180,14 +228,13 @@ class DeskVoice:
             if item is None:
                 return
             epoch, line = item
-            self._speaking = True
-            self._on_state("speaking")
             try:
                 if epoch == self._epoch:
+                    self._on_state("speaking")
                     self._speak(line)
             except Exception:
                 logger.exception("speaking failed")
             finally:
-                self._speaking = False
-            if self._lines.empty() and not self._turn_active:
-                self._on_state("ready")
+                with self._state_lock:
+                    self._outstanding -= 1
+            self._maybe_ready()
