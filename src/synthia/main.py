@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 from synthia.assistant import Assistant
 from synthia.audio import AudioRecorder, list_audio_devices
+from synthia.brain_client import BrainClient
 from synthia.clipboard_monitor import ClipboardMonitor
 from synthia.commands import execute_actions
 from synthia.config import (
@@ -28,6 +29,7 @@ from synthia.config import (
     get_google_credentials_path,
     load_config,
 )
+from synthia.desk_voice import DeskVoice
 from synthia.display import get_display_server, is_wayland
 from synthia.hotkeys import create_hotkey_listener
 from synthia.indicator import Status, TrayIndicator
@@ -109,6 +111,18 @@ class Synthia:
         logger.info("Assistant initialized (%s)", "local Ollama" if use_local_llm else "Claude API")
         if dev_mode:
             logger.info("Memory auto-retrieval enabled (dev mode)")
+
+        # Desk voice through the synthia-brain websocket (assistant_backend: brain)
+        self.desk_voice: Optional[DeskVoice] = None
+        if self.config.get("assistant_backend", "local") == "brain":
+            desk_port = int(self.config.get("brain_desk_port", 8766))
+            self.desk_voice = DeskVoice(
+                client_factory=lambda on_frame: BrainClient(on_frame, port=desk_port),
+                speak=self.tts.speak,
+                stop_speaking=self.tts.cancel,
+                on_state=lambda status: self._update_state(status),
+            )
+            logger.info("Assistant: synthia-brain desk (port %d)", desk_port)
 
         # Initialize LLM polisher for dictation accuracy (if enabled)
         use_llm_polish = self.config.get("use_llm_polish", True)
@@ -322,6 +336,10 @@ class Synthia:
         if not self.running or self.assistant_active or self.dictation_active:
             return
 
+        # A new press while she is talking cuts her off, then records the next question.
+        if self.desk_voice is not None and self.desk_voice.busy:
+            self.desk_voice.interrupt()
+
         try:
             self.recorder.start_recording()
             self.assistant_active = True
@@ -353,6 +371,15 @@ class Synthia:
 
                 if text:
                     logger.info("Command: %s", text)
+
+                    if self.desk_voice is not None:
+                        # The brain streams the reply; DeskVoice speaks it as it arrives.
+                        self.desk_voice.ask(text)
+                        self._save_to_history(text, "assistant")
+                        self._update_state("ready")
+                        if self.tray:
+                            self.tray.set_status(Status.READY)
+                        return
 
                     # Process with Claude
                     response = self.assistant.process(text)

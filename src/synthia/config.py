@@ -27,6 +27,10 @@ DEFAULT_CONFIG: ConfigDict = {
     # Assistant
     "assistant_model": "claude-sonnet-4-20250514",
     "conversation_memory": 10,
+    # "local" answers with the Claude API / Ollama in this process; "brain" sends the
+    # transcript to the synthia-brain desk websocket and speaks its streamed reply.
+    "assistant_backend": "local",
+    "brain_desk_port": 8766,
     "assistant_personality": "You are a helpful Linux assistant. Keep responses brief and friendly.",
     # Credentials
     "google_credentials": "~/.config/synthia/google-creds.json",
@@ -77,6 +81,7 @@ VALID_HOTKEYS = {
     "Key.shift_l",
 }
 VALID_SAMPLE_RATES = {8000, 16000, 22050, 44100, 48000}
+VALID_ASSISTANT_BACKENDS = {"local", "brain"}
 VALID_STT_MODELS = {"tiny", "base", "small", "medium", "large"}
 
 # Keys that must be boolean
@@ -121,6 +126,17 @@ def validate_config(config: ConfigDict) -> list[str]:
     speed = config.get("tts_speed")
     if speed is not None and not (0.25 <= speed <= 4.0):
         warnings.append(f"tts_speed={speed} is out of range (0.25–4.0)")
+
+    # Assistant backend
+    backend = config.get("assistant_backend")
+    if backend is not None and backend not in VALID_ASSISTANT_BACKENDS:
+        warnings.append(
+            f"assistant_backend={backend!r} is not valid (using local). "
+            f"Valid: {', '.join(sorted(VALID_ASSISTANT_BACKENDS))}"
+        )
+    port = config.get("brain_desk_port")
+    if port is not None and (not isinstance(port, int) or not 1 <= port <= 65535):
+        warnings.append(f"brain_desk_port={port!r} must be a port number (1-65535)")
 
     # Positive integers
     for key in ("conversation_memory", "clipboard_history_max_items"):

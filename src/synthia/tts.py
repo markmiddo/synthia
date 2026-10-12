@@ -9,6 +9,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -92,6 +93,10 @@ class TextToSpeech:
         self.voice_name = voice_name
         self.local_voice = os.path.expanduser(local_voice)
         self.client: texttospeech.TextToSpeechClient | None = None
+        # Playback process currently speaking, and a flag so cancel() also stops the
+        # remaining chunks of a multi-chunk reply.
+        self._playback: subprocess.Popen[bytes] | None = None
+        self._cancelled = threading.Event()
 
         if use_local:
             logger.info("Piper TTS initialized with voice: %s", os.path.basename(self.local_voice))
@@ -152,6 +157,7 @@ class TextToSpeech:
         if not text:
             return False
 
+        self._cancelled.clear()
         if is_voice_muted():
             logger.debug("TTS muted via runtime state; skipping speak")
             return False
@@ -176,6 +182,8 @@ class TextToSpeech:
 
                 chunks = self._split_into_chunks(text)
                 for chunk in chunks:
+                    if self._cancelled.is_set():
+                        return False
                     if chunk.strip() and not self._speak_google_chunk(chunk):
                         return False
                 return True
@@ -223,8 +231,10 @@ class TextToSpeech:
             # Wait for both processes to complete
             if piper_proc.stdout is not None:
                 piper_proc.stdout.close()
+            self._playback = aplay_proc
             aplay_proc.wait()
             piper_proc.wait()
+            self._playback = None
 
             return True
 
@@ -264,17 +274,26 @@ class TextToSpeech:
                 f.write(response.audio_content)
                 temp_path = f.name
 
-            subprocess.run(
-                ["mpv", "--no-video", "--really-quiet", temp_path],
-                check=True,
-            )
-
-            os.unlink(temp_path)
-            return True
+            try:
+                proc = subprocess.Popen(["mpv", "--no-video", "--really-quiet", temp_path])
+                self._playback = proc
+                if proc.wait() != 0 and not self._cancelled.is_set():
+                    raise subprocess.CalledProcessError(proc.returncode, "mpv")
+            finally:
+                self._playback = None
+                os.unlink(temp_path)
+            return not self._cancelled.is_set()
 
         except Exception as e:
             logger.error("Google TTS error: %s", e)
             return False
+
+    def cancel(self) -> None:
+        """Stop only the playback this instance started (unlike stop(), which pkills mpv)."""
+        self._cancelled.set()
+        proc = self._playback
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
 
     def stop(self) -> None:
         """Stop any currently playing audio."""

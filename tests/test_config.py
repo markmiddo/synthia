@@ -133,6 +133,8 @@ class TestDefaultConfig:
             "sample_rate",
             "tts_voice",
             "tts_speed",
+            "assistant_backend",
+            "brain_desk_port",
             "assistant_model",
             "conversation_memory",
             "assistant_personality",
@@ -166,6 +168,17 @@ class TestDefaultConfig:
 
 class TestValidateConfig:
     """Tests for validate_config function."""
+
+    def test_assistant_backend_validated(self):
+        assert validate_config({**DEFAULT_CONFIG, "assistant_backend": "brain"}) == []
+        warnings = validate_config({**DEFAULT_CONFIG, "assistant_backend": "cloud"})
+        assert any("assistant_backend" in w for w in warnings)
+
+    def test_brain_desk_port_validated(self):
+        assert any(
+            "brain_desk_port" in w
+            for w in validate_config({**DEFAULT_CONFIG, "brain_desk_port": 0})
+        )
 
     def test_default_config_passes_validation(self):
         """DEFAULT_CONFIG produces zero warnings."""
