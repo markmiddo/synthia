@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ago } from "./hive";
-import { asPayload, coverFor, itemTime, QUICK_PHRASES, revisedVersion, squadLabel, STATE_LABEL, type FeedbackEntry, type InboxFile, type InboxItem, type Payload } from "./inbox";
+import { answerOf, asPayload, callsMade, coverFor, groupOf, isRequired, itemTime, needsMark, pillLabel, QUICK_PHRASES, questionsOf, revisedVersion, squadLabel, withoutSection, type FeedbackEntry, type Group, type InboxFile, type InboxItem, type Payload } from "./inbox";
 import { Markdown } from "./markdown";
 import { call, reasonOf } from "./tauri";
 import type { Fleet } from "./types";
@@ -210,6 +210,58 @@ function useInfo(item: InboxItem): { covers: Set<string>; titles: Map<string, st
   return info;
 }
 
+/** The questions a report needs answered, as a highlighted box with Yes / No on each. */
+function NeedsBox({ item, busy, onAnswer }: { item: InboxItem; busy: boolean; onAnswer: (question: string, answer: "yes" | "no", note: string) => void }) {
+  const questions = questionsOf(item.summary_md);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  if (questions.length === 0) return null;
+  return (
+    <section className="needsbox" aria-label="Needs you">
+      <p className="lbl">NEEDS YOU</p>
+      {questions.map((q) => {
+        const done = answerOf(item, q);
+        return (
+          <div className="nq" key={q}>
+            <p>{q}</p>
+            {done ? (
+              <p className="nans">
+                Answered <b>{done.answer}</b>
+                {done.note ? ` · ${done.note}` : ""}
+              </p>
+            ) : (
+              <>
+                <div className="nbtns">
+                  <button type="button" className="primary sm" disabled={busy} onClick={() => onAnswer(q, "yes", notes[q] ?? "")}>
+                    Yes
+                  </button>
+                  <button type="button" className="ghost sm" disabled={busy} onClick={() => onAnswer(q, "no", notes[q] ?? "")}>
+                    No
+                  </button>
+                  {!open[q] && (
+                    <button type="button" className="link-btn" onClick={() => setOpen((o) => ({ ...o, [q]: true }))}>
+                      Add a note
+                    </button>
+                  )}
+                </div>
+                {open[q] && (
+                  <input
+                    className="nnote"
+                    value={notes[q] ?? ""}
+                    placeholder="Optional note for the squad"
+                    onChange={(e) => setNotes((n) => ({ ...n, [q]: e.target.value }))}
+                    aria-label={`Note for: ${q}`}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 const hhmm = (iso: string) => {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? "" : new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -292,6 +344,7 @@ function Reader({
   const [composing, setComposing] = useState(false);
   const [note, setNote] = useState("");
   const [targetKey, setTargetKey] = useState("job");
+  const [mode, setMode] = useState<"revise" | "call">("revise");
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -302,26 +355,36 @@ function Reader({
   useEffect(() => {
     if (composing) noteRef.current?.focus();
   }, [composing]);
+  const required = isRequired(item);
+  const calls = useMemo(() => callsMade(item.summary_md), [item.summary_md]);
   const readOnly = item.state === "approved" || item.state === "archived";
   const canUndo = undo !== null && undo.id === item.id && undo.until > now;
 
   const targets: Target[] = useMemo(
-    () => [
+    () =>
+      mode === "call"
+        ? [
+            ...calls.map((c) => ({ key: c, label: c.length > 60 ? `${c.slice(0, 58)}…` : c, path: null, title: c })),
+            { key: "job", label: "Something else", path: null, title: "Something else" },
+          ]
+        : [
       { key: "job", label: "Whole job", path: null, title: item.title },
       ...item.deliverables.map((d) => {
         const title = titles.get(d.path) ?? d.name;
         return { key: d.path, label: title, path: d.path, title };
       }),
     ],
-    [item, titles],
+    [item, titles, mode, calls],
   );
   const target = targets.find((t) => t.key === targetKey) ?? targets[0];
 
   /** The deliverable under the reader's top edge becomes the default target. */
-  const openComposer = () => {
+  const openComposer = (m: "revise" | "call" = "revise") => {
+    setMode(m);
     const box = bodyRef.current;
     let pick = "job";
-    if (box) {
+    if (m === "call") pick = calls[0] ?? "job";
+    else if (box) {
       const line = box.getBoundingClientRect().top + 120;
       for (const el of Array.from(box.querySelectorAll<HTMLElement>("[data-path]"))) {
         const r = el.getBoundingClientRect();
@@ -351,7 +414,7 @@ function Reader({
     call<InboxItem>("inbox_decide", { id: item.id, state, note: null })
       .then(() => {
         setUndo({ id: item.id, prev, until: Date.now() + UNDO_MS });
-        setToast({ ok: true, text: state === "approved" ? "Approved." : "Archived." });
+        setToast({ ok: true, text: state === "approved" ? "Approved." : required ? "Archived." : "Got it." });
         onChanged();
       })
       .catch((e) => setToast({ ok: false, text: `I couldn't save that: ${reasonOf(e)}` }))
@@ -359,12 +422,22 @@ function Reader({
   };
   const sendBack = () => {
     setBusy(true);
-    call<{ how: string; job: string | null }>("inbox_send_back", { id: item.id, note, target: { path: target.path, title: target.title } })
+    call<{ how: string; job: string | null }>("inbox_send_back", { id: item.id, note, target: { path: target.path, title: target.title }, mode })
       .then((r) => {
         setToast({ ok: true, text: r.how === "asked" ? "Sent. The director has your note." : `Sent. A revision job is starting${r.job ? ` (${r.job})` : ""}.` });
         setComposing(false);
         setNote("");
       })
+      .catch((e) => setToast({ ok: false, text: reasonOf(e) }))
+      .finally(() => {
+        setBusy(false);
+        onChanged();
+      });
+  };
+  const answer = (question: string, ans: "yes" | "no", qnote: string) => {
+    setBusy(true);
+    call<{ how: string }>("inbox_send_back", { id: item.id, note: qnote, target: { path: null, title: question }, mode: "answer", answer: ans })
+      .then(() => setToast({ ok: true, text: `Answered ${ans}. The squad has it.` }))
       .catch((e) => setToast({ ok: false, text: reasonOf(e) }))
       .finally(() => {
         setBusy(false);
@@ -390,13 +463,14 @@ function Reader({
         </p>
         <h2>{item.title}</h2>
         <p className="rstate">
-          <span className={`ipill s-${item.state}`}>{STATE_LABEL[item.state]}</span>
+          <span className={`ipill s-${item.state}${item.state === "new" && !required ? " rep" : ""}`}>{pillLabel(item)}</span>
         </p>
       </header>
       <div className="rbody" ref={bodyRef}>
+        <NeedsBox item={item} busy={busy} onAnswer={answer} />
         {item.summary_md && (
           <section className="rsummary">
-            <Markdown text={item.summary_md} />
+            <Markdown text={withoutSection(item.summary_md, "Needs you")} />
           </section>
         )}
         {item.deliverables.length > 0 && <p className="dsec">Deliverables</p>}
@@ -410,7 +484,7 @@ function Reader({
       <footer className="ractions">
         {composing ? (
           <div className="sendbox">
-            <p className="lbl">WHAT SHOULD CHANGE?</p>
+            <p className="lbl">{mode === "call" ? "WHICH CALL SHOULD CHANGE?" : "WHAT SHOULD CHANGE?"}</p>
             <div className="targets" role="radiogroup" aria-label="What is this about?">
               {targets.map((t) => (
                 <button key={t.key} type="button" role="radio" aria-checked={t.key === target.key} className={`toggle${t.key === target.key ? " on" : ""}`} onClick={() => setTargetKey(t.key)} title={t.path ?? undefined}>
@@ -419,7 +493,7 @@ function Reader({
               ))}
             </div>
             <div className="quick">
-              {QUICK_PHRASES.map(([label, phrase]) => (
+              {mode === "revise" && QUICK_PHRASES.map(([label, phrase]) => (
                 <button key={label} type="button" className="qchip" onClick={() => addPhrase(phrase)}>
                   {label}
                 </button>
@@ -430,13 +504,13 @@ function Reader({
               ref={noteRef}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              aria-label="What should change?"
-              placeholder="The bush doof post reads too formal. Make it sound like a mate who goes, keep the checklist."
+              aria-label={mode === "call" ? "Which call should change?" : "What should change?"}
+              placeholder={mode === "call" ? "Say what you would rather it did. Example: Keep the stale cards open until I have looked at them." : "The bush doof post reads too formal. Make it sound like a mate who goes, keep the checklist."}
             />
             <p className="routeline">{routeText}</p>
             <div className="co-actions">
               <button type="button" className="primary" disabled={busy || note.trim() === ""} onClick={sendBack}>
-                {busy ? "Sending…" : "Send back"}
+                {busy ? "Sending…" : mode === "call" ? "Send" : "Send back"}
               </button>
               <button type="button" className="ghost" disabled={busy} onClick={() => setComposing(false)}>
                 Cancel
@@ -446,7 +520,7 @@ function Reader({
         ) : readOnly ? (
           <div className="ro">
             <span>
-              {STATE_LABEL[item.state]}
+              {pillLabel(item)}
               {item.decided_at ? ` ${ago(Date.parse(item.decided_at), now)}` : ""}
             </span>
             {canUndo && (
@@ -455,16 +529,25 @@ function Reader({
               </button>
             )}
           </div>
-        ) : (
+        ) : required ? (
           <div className="co-actions">
             <button type="button" className="primary" disabled={busy} onClick={() => decide("approved")}>
               Approve
             </button>
-            <button type="button" className="ghost" disabled={busy} onClick={openComposer}>
+            <button type="button" className="ghost" disabled={busy} onClick={() => openComposer("revise")}>
               Send back
             </button>
             <button type="button" className="ghost" disabled={busy} onClick={() => decide("archived")}>
               Archive
+            </button>
+          </div>
+        ) : (
+          <div className="co-actions">
+            <button type="button" className="primary" disabled={busy} onClick={() => decide("archived")}>
+              Got it
+            </button>
+            <button type="button" className="ghost" disabled={busy} onClick={() => openComposer("call")}>
+              Change a call
             </button>
           </div>
         )}
@@ -496,7 +579,8 @@ export function InboxDrawer({
   const [now, setNow] = useState(() => Date.now());
   const shown = useMemo(() => items.filter((i) => (filter === "archived" ? i.state === "archived" : i.state !== "archived")), [items, filter]);
   const current = items.find((i) => i.id === sel) ?? shown[0] ?? null;
-  const newCount = items.filter((i) => i.state === "new").length;
+  const newCount = items.filter(needsMark).length;
+  const reportCount = items.filter((i) => groupOf(i) === "reports").length;
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -535,7 +619,8 @@ export function InboxDrawer({
           <div className="ihead">
             <div>
               <p className="eyebrow">Inbox</p>
-              <h2>{newCount > 0 ? `${newCount} to review` : "All caught up"}</h2>
+              <h2>{newCount > 0 ? `${newCount} need${newCount === 1 ? "s" : ""} you` : "Nothing needs you"}</h2>
+              {reportCount > 0 && <p className="isub">{reportCount} {reportCount === 1 ? "report" : "reports"} to skim</p>}
             </div>
           </div>
           <div className="dtabs" role="tablist">
@@ -548,18 +633,29 @@ export function InboxDrawer({
           </div>
           <ul className="iitems">
             {shown.length === 0 && <li className="co-quiet pad">{filter === "archived" ? "Nothing archived." : "Nothing here yet. Finished work lands here."}</li>}
-            {shown.map((i) => (
-              <li key={i.id}>
-                <button type="button" className={`iitem${current?.id === i.id ? " on" : ""}${i.state === "new" ? " fresh" : ""}`} onClick={() => setSel(i.id)}>
-                  <b>{i.title}</b>
-                  <span>
-                    <em className="hchip">{squadLabel(i)}</em>
-                    <time>{ago(itemTime(i), now)}</time>
-                    <span className={`ipill s-${i.state}`}>{STATE_LABEL[i.state]}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
+            {(["needs", "reports", "decided"] as Group[]).map((g) => {
+              const rows = shown.filter((i) => (filter === "archived" ? g === "decided" : groupOf(i) === g));
+              if (rows.length === 0) return null;
+              return (
+                <li key={g} className="igroup">
+                  {filter === "inbox" && <p className="lbl">{g === "needs" ? "NEEDS YOU" : g === "reports" ? "REPORTS" : "DECIDED"}</p>}
+                  <ul>
+                    {rows.map((i) => (
+                      <li key={i.id}>
+                        <button type="button" className={`iitem${current?.id === i.id ? " on" : ""}${g === "needs" ? " fresh" : ""}`} onClick={() => setSel(i.id)}>
+                          <b>{i.title}</b>
+                          <span>
+                            <em className="hchip">{squadLabel(i)}</em>
+                            <time>{ago(itemTime(i), now)}</time>
+                            <span className={`ipill s-${i.state}${g === "reports" ? " rep" : ""}${g === "needs" && !isRequired(i) ? " ask" : ""}`}>{pillLabel(i)}</span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              );
+            })}
           </ul>
         </div>
         <div className="ipane">
@@ -618,12 +714,25 @@ export function InboxDrawer({
   );
 }
 
-/** A chip like the Today chip: "Inbox" and, when there is work to review, a count pill inside it. */
-export function InboxButton({ count, onClick }: { count: number; onClick: () => void }) {
+/** A chip like the Today chip: "Inbox" and, when something needs Mark, an amber count pill inside it.
+ *  Plain reports are a quiet muted note beside it, never amber. */
+export function InboxButton({ count, reports, onClick }: { count: number; reports: number; onClick: () => void }) {
   return (
-    <button type="button" className={`inboxchip${count > 0 ? " has" : ""}`} onClick={onClick} aria-label={count > 0 ? `Inbox, ${count} to review` : "Inbox"}>
-      Inbox
-      {count > 0 && <b>{count}</b>}
-    </button>
+    <span className="inboxwrap">
+      <button
+        type="button"
+        className={`inboxchip${count > 0 ? " has" : ""}`}
+        onClick={onClick}
+        aria-label={count > 0 ? `Inbox, ${count} need${count === 1 ? "s" : ""} you` : "Inbox"}
+      >
+        Inbox
+        {count > 0 && <b>{count}</b>}
+      </button>
+      {reports > 0 && (
+        <button type="button" className="inboxreports" onClick={onClick}>
+          · {reports} {reports === 1 ? "report" : "reports"}
+        </button>
+      )}
+    </span>
   );
 }

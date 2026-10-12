@@ -120,7 +120,7 @@ pytest tests/ --tb=short -q     # Tests (878 tests)
 cd gui/src-tauri
 cargo build --release
 cargo clippy --all-targets -- -D warnings   # zero warnings policy
-cargo test --lib                            # 72 tests
+cargo test --lib                            # 73 tests
 ```
 
 The Rust side maintains a strict clippy gate. New code should not introduce warnings.

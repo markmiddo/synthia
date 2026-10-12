@@ -4,7 +4,7 @@ import { useBrain } from "./hud/brain";
 import { Connection } from "./hud/Connection";
 import { CompanyView } from "./hud/CompanyView";
 import { InboxDrawer } from "./hud/Inbox";
-import { newItems, useInbox } from "./hud/inbox";
+import { groupOf, isRequired, needsMark, useInbox } from "./hud/inbox";
 import { Constellation } from "./hud/Constellation";
 import { Feed } from "./hud/Feed";
 import { isPlainShell, lastSevenDays, localDate } from "./hud/format";
@@ -119,7 +119,7 @@ function App() {
       <TopBar nodes={nodes} usage={usage} now={now} preview={MOCK} view={screen} onView={(v) => {
           setDay(today);
           pickView(v);
-        }} day={day} today={today} onDay={pickDay} inboxNew={newItems(inboxItems).length} onInbox={() => openInbox()} />
+        }} day={day} today={today} onDay={pickDay} inboxNew={inboxItems.filter(needsMark).length} inboxReports={inboxItems.filter((i) => groupOf(i) === "reports").length} onInbox={() => openInbox()} />
       <aside className="left">
         <Orb state={orbState(voice.recording, view.state)} talkKey={talkKey} />
         <Connection
@@ -146,7 +146,7 @@ function App() {
           now={now}
           onFocus={focus}
           onConfirm={confirmReply}
-          reviews={newItems(inboxItems).map((i) => ({ id: i.id, title: i.title }))}
+          reviews={inboxItems.filter(needsMark).map((i) => ({ id: i.id, title: i.title, label: isRequired(i) ? "Review" : "Answer" }))}
           onReview={openInbox}
         />
       </aside>

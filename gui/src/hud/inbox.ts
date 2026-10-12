@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { call } from "./tauri";
 
+export * from "./inboxLogic";
+
 export interface InboxFile {
   path: string;
   name: string;
@@ -18,6 +20,9 @@ export interface FeedbackEntry {
   /** The director's role title, "revision job", or "not delivered". */
   routed_to: string;
   job: string | null;
+  /** `answer` for a yes/no answer to a Needs-you question. */
+  kind?: string | null;
+  answer?: string | null;
 }
 
 /** One finished piece of work. Python writes everything except `state`, `note` and `decided_at`. */
@@ -32,6 +37,8 @@ export interface InboxItem {
   desk: string;
   deliverables: InboxFile[];
   director: string;
+  /** `required`: public content Mark approves. `fyi` (or missing): a report. */
+  review?: "required" | "fyi" | string;
   state: InboxState;
   note: string | null;
   decided_at: string | null;
@@ -58,8 +65,6 @@ export function useInbox(tick: number): { items: InboxItem[]; reload: () => void
   }, [tick, reload]);
   return { items, reload };
 }
-
-export const newItems = (items: InboxItem[]): InboxItem[] => items.filter((i) => i.state === "new");
 
 export function itemTime(i: InboxItem): number {
   const t = Date.parse(i.created_at);
