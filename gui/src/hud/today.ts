@@ -70,6 +70,20 @@ export interface SpendToday {
   ok: boolean;
   percent: number;
   points: number[];
+  firstAt: number;
+  distinct: number;
+}
+
+export interface BugStatus {
+  ok: boolean;
+  asOf: string;
+  leftToFix: number;
+  high: number;
+  noFix: number;
+  planned: number;
+  fixInProgress: number;
+  awaitingQa: number;
+  awaitingRelease: number;
 }
 
 export interface Today {
@@ -80,6 +94,7 @@ export interface Today {
   release: ReleaseStatus | null;
   meeting: NextMeeting | null;
   spend: SpendToday | null;
+  bugs: BugStatus | null;
 }
 
 /** Poll one read-only command; a failure leaves the last good value (or null) in place. */
@@ -110,6 +125,7 @@ export function useToday(): Today {
     release: usePolled<ReleaseStatus>("today_release", 120_000),
     meeting: usePolled<NextMeeting>("today_meeting", 60_000),
     spend: usePolled<SpendToday>("today_spend", 60_000),
+    bugs: usePolled<BugStatus>("today_bugs", 300_000),
   };
 }
 
@@ -179,4 +195,22 @@ export function resetsText(iso: string | undefined, inText: string | undefined, 
   const day = d.toLocaleDateString([], { weekday: "short" });
   const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: false });
   return `resets ${day} ${time}`;
+}
+
+/** What to print for today's spend: "<1%" under a point, "—" until two different readings exist. */
+export function spendText(s: SpendToday): { value: string; note: string | null } {
+  const first = new Date(s.firstAt);
+  const late = first.getHours() * 60 + first.getMinutes() > 6 * 60;
+  const since = first.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: false });
+  if (s.distinct < 2) return { value: "—", note: `tracking since ${since}` };
+  const value = s.percent > 0 && s.percent < 1 ? "<1%" : `${s.percent < 10 ? s.percent.toFixed(1) : Math.round(s.percent)}%`;
+  return { value, note: late ? `since ${since}` : null };
+}
+
+/** "as of Mon 12" when a snapshot is not from today. */
+export function staleLabel(asOf: string, today: string): string | null {
+  if (!asOf || asOf === today) return null;
+  const d = new Date(`${asOf}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return `as of ${asOf}`;
+  return `as of ${d.toLocaleDateString([], { weekday: "short", day: "numeric" })}`;
 }

@@ -684,6 +684,10 @@ pub struct SpendToday {
     pub percent: f64,
     /// Running spend at each of today's readings, for the sparkline.
     pub points: Vec<f64>,
+    /// When today's first reading was taken (epoch ms), so the HUD can say "since 7:38".
+    pub first_at: i64,
+    /// How many different percentages were seen today; under 2 means "not enough to say".
+    pub distinct: usize,
 }
 
 /// A reset moment compared to the minute: the API's sub-second jitter is not a reset.
@@ -710,10 +714,15 @@ pub fn spend(readings: &[Reading]) -> SpendToday {
         points.push(total + (r.pct - seg_first.pct).max(0.0));
     }
     total += (seg_last.pct - seg_first.pct).max(0.0);
+    let mut seen: Vec<u64> = readings.iter().map(|r| (r.pct * 1000.0) as u64).collect();
+    seen.sort_unstable();
+    seen.dedup();
     SpendToday {
         ok: true,
         percent: total,
         points,
+        first_at: readings[0].t,
+        distinct: seen.len(),
     }
 }
 
@@ -774,6 +783,94 @@ pub fn today_spend() -> SpendToday {
         .filter(|r| r.t >= start && r.t < end)
         .collect();
     spend(&today)
+}
+
+// ---------------------------------------------------------------------------
+// Bugs left to fix (Mark's bug dashboard snapshot)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BugStatus {
+    pub ok: bool,
+    /// The snapshot's date, `YYYY-MM-DD`.
+    pub as_of: String,
+    /// No fix + fix in progress: what is actually left to fix.
+    pub left_to_fix: u64,
+    /// The same two stages, high priority only.
+    pub high: u64,
+    pub no_fix: u64,
+    pub planned: u64,
+    pub fix_in_progress: u64,
+    pub awaiting_qa: u64,
+    pub awaiting_release: u64,
+}
+
+pub fn parse_bugs(text: &str) -> Option<BugStatus> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let totals = v.get("totals")?;
+    let stage = |o: &serde_json::Value, k: &str| o.get(k).and_then(|n| n.as_u64()).unwrap_or(0);
+    let stages = totals.get("stages")?;
+    let high = totals.get("highStages");
+    let high_n = |k: &str| high.map(|h| stage(h, k)).unwrap_or(0);
+    let (no_fix, fix) = (stage(stages, "noFix"), stage(stages, "fixInProgress"));
+    Some(BugStatus {
+        ok: true,
+        as_of: v.get("asOf").and_then(|a| a.as_str()).unwrap_or_default().to_string(),
+        left_to_fix: no_fix + fix,
+        high: high_n("noFix") + high_n("fixInProgress"),
+        no_fix,
+        planned: stage(stages, "planned"),
+        fix_in_progress: fix,
+        awaiting_qa: stage(stages, "awaitingQa"),
+        awaiting_release: stage(stages, "awaitingRelease"),
+    })
+}
+
+fn bug_dir() -> std::path::PathBuf {
+    super::fleet::home_dir().join("dev/eventflo/docs/bug-dashboard")
+}
+
+/// The newest `snapshots/YYYY-MM-DD.json`.
+pub fn newest_snapshot(dir: &Path) -> Option<std::path::PathBuf> {
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            name.len() == 15 && name.ends_with(".json") && name[..10].chars().all(|c| c.is_ascii_digit() || c == '-')
+        })
+        .collect();
+    files.sort();
+    files.pop()
+}
+
+#[tauri::command]
+pub fn today_bugs() -> BugStatus {
+    newest_snapshot(&bug_dir().join("snapshots"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| parse_bugs(&t))
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn open_bug_dashboard() -> AppResult<()> {
+    let page = bug_dir().join("index.html");
+    if !page.is_file() {
+        return Err(AppError::NotFound("the bug dashboard page".into()));
+    }
+    let mut child = std::process::Command::new("xdg-open")
+        .arg(&page)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| AppError::Process(format!("could not run xdg-open: {e}")))?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// Open a merged PR in the browser. Only github.com links.
@@ -1046,5 +1143,39 @@ mod tests {
         );
         assert_eq!(parse_events(r#"{"items":[]}"#, now).unwrap(), (None, 0));
         assert!(parse_events("{bad", now).is_none());
+    }
+
+    #[test]
+    fn bugs_headline_is_no_fix_plus_in_progress() {
+        let json = r#"{"asOf":"2026-10-13","totals":{"open":114,"stages":{"noFix":38,"planned":13,"fixInProgress":4,"awaitingQa":22,"awaitingRelease":37},
+          "noFixHigh":3,"openHigh":14,"highStages":{"noFix":3,"planned":0,"fixInProgress":2,"awaitingQa":2,"awaitingRelease":7}}}"#;
+        let b = parse_bugs(json).unwrap();
+        assert_eq!((b.left_to_fix, b.high, b.as_of.as_str()), (42, 5, "2026-10-13"));
+        assert_eq!((b.planned, b.awaiting_qa, b.awaiting_release), (13, 22, 37));
+        assert!(parse_bugs("nope").is_none());
+        assert!(parse_bugs(r#"{"totals":{}}"#).is_none());
+        let sparse = parse_bugs(r#"{"totals":{"stages":{"noFix":2}}}"#).unwrap();
+        assert_eq!((sparse.left_to_fix, sparse.high), (2, 0));
+    }
+
+    #[test]
+    fn newest_snapshot_is_the_latest_dated_file() {
+        let dir = std::env::temp_dir().join(format!("synthia-bugs-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        for n in ["2026-10-08.json", "2026-10-13.json", "2026-10-12.json", "notes.json", "2026-10-14.txt"] {
+            fs::write(dir.join(n), "{}").unwrap();
+        }
+        assert_eq!(newest_snapshot(&dir).unwrap().file_name().unwrap(), "2026-10-13.json");
+        assert!(newest_snapshot(&dir.join("missing")).is_none());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn spend_reports_first_reading_time_and_distinct_values() {
+        let same = [rd(5, 41.0, "a"), rd(9, 41.0, "a")];
+        let s = spend(&same);
+        assert_eq!((s.percent, s.first_at, s.distinct), (0.0, 5, 1));
+        let moved = [rd(5, 41.0, "a"), rd(9, 42.0, "a")];
+        assert_eq!(spend(&moved).distinct, 2);
     }
 }

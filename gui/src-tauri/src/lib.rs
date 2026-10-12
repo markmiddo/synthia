@@ -307,6 +307,17 @@ pub fn run() {
             }
 
             commands::fleet::spawn_emitter(app.handle().clone());
+            // Record weekly usage every ten minutes even while the window is hidden, so "spend today"
+            // has readings to work from. The fetch records its own snapshot.
+            let usage_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut ticker = tokio::time::interval(std::time::Duration::from_secs(600));
+                loop {
+                    ticker.tick().await;
+                    let state = usage_app.state::<state::AppState>();
+                    let _ = commands::usage::get_usage_stats(state).await;
+                }
+            });
 
             Ok(())
         })
@@ -350,7 +361,9 @@ pub fn run() {
             commands::today::open_url,
             commands::today::today_release,
             commands::today::today_meeting,
-            commands::today::today_spend
+            commands::today::today_spend,
+            commands::today::today_bugs,
+            commands::today::open_bug_dashboard
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

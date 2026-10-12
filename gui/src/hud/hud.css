@@ -14,16 +14,25 @@ body {
 
 body {
   margin: 0;
-  background:
-    radial-gradient(ellipse 60% 70% at 55% 45%, rgba(46, 96, 170, 0.2), transparent 70%),
-    radial-gradient(ellipse 40% 50% at 12% 10%, rgba(124, 196, 255, 0.1), transparent 70%),
-    linear-gradient(180deg, #0a1424, #060b14) fixed;
   background-color: var(--void);
   color: var(--ink);
   font-family: var(--ui);
   font-size: 14.5px;
   padding: 0;
   overflow-x: hidden;
+}
+
+/* One continuous backdrop on a fixed full-viewport layer: scrolling never reveals a seam. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 70% at 55% 45%, rgba(46, 96, 170, 0.2), transparent 70%),
+    radial-gradient(ellipse 40% 50% at 12% 10%, rgba(124, 196, 255, 0.1), transparent 70%),
+    linear-gradient(180deg, #0a1424, #060b14);
 }
 
 #root {
@@ -44,7 +53,7 @@ button:focus-visible {
   position: relative;
   width: 100%;
   min-height: 100vh;
-  overflow: hidden;
+  overflow: clip;
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr) 300px;
   grid-template-rows: auto minmax(0, 1fr);
@@ -56,7 +65,7 @@ button:focus-visible {
 
 .hud::before {
   content: "";
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
   background-image: radial-gradient(rgba(124, 196, 255, 0.1) 1px, transparent 1.2px);
@@ -65,7 +74,7 @@ button:focus-visible {
 }
 
 .sweep {
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
   background: linear-gradient(100deg, transparent 40%, rgba(143, 240, 255, 0.05) 50%, transparent 60%);
@@ -83,7 +92,7 @@ button:focus-visible {
 }
 
 .bracket {
-  position: absolute;
+  position: fixed;
   width: 22px;
   height: 22px;
   border: 2px solid rgba(124, 196, 255, 0.45);
@@ -500,19 +509,11 @@ button:focus-visible {
 .node {
   position: absolute;
   transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
-  cursor: pointer;
-  text-align: center;
   width: 220px;
-  background: none;
-  border: 0;
-  padding: 0;
+  text-align: center;
 }
 
-div.node {
+div.card {
   cursor: default;
 }
 
@@ -523,8 +524,12 @@ div.node {
   border-radius: 50%;
   background: var(--c);
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--c) 18%, transparent), 0 0 26px var(--c);
-  position: relative;
-  flex: none;
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  margin-left: -10px;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .node.idle .dot {
@@ -576,23 +581,25 @@ div.node {
 }
 
 .card {
+  display: block;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
   background: var(--panel);
   backdrop-filter: blur(6px);
   border: 1px solid var(--line-hi);
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 14px 14px 10px;
   max-width: 220px;
   width: 100%;
-  transition: border-color 0.2s, transform 0.2s;
+  margin: 0;
+  transition: border-color 0.2s;
 }
 
-.node:hover .card,
-.node:focus-visible .card {
+.node .card:hover,
+.node .card:focus-visible {
   border-color: var(--c);
-  transform: translateY(-2px);
-}
-
-.node:focus-visible {
   outline: none;
 }
 
@@ -1791,7 +1798,7 @@ div.node {
 }
 
 .node.kid .card {
-  padding: 7px 10px;
+  padding: 12px 10px 7px;
   max-width: 150px;
 }
 
@@ -1806,6 +1813,8 @@ div.node {
 .node.kid .dot {
   width: 14px;
   height: 14px;
+  top: -7px;
+  margin-left: -7px;
 }
 
 .views {
@@ -2603,4 +2612,94 @@ div.node {
     align-self: start;
     max-height: calc(100vh - 36px);
   }
+}
+
+.node.head .card {
+  padding-bottom: 38px;
+}
+
+.job-chip {
+  position: absolute;
+  left: 50%;
+  bottom: 9px;
+  transform: translateX(-50%);
+  background: rgba(10, 19, 34, 0.7);
+  border: 1px solid var(--line-hi);
+  border-radius: 999px;
+  padding: 2px 11px;
+  font-size: 11px;
+  color: var(--cyan);
+  cursor: pointer;
+  z-index: 3;
+}
+
+.job-chip:hover {
+  border-color: var(--cyan);
+}
+
+.bugs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bugs-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.bugs-head b {
+  font-size: 34px;
+  font-weight: 300;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.bugs-head em {
+  font-style: normal;
+  font-size: 12.5px;
+  color: var(--amber);
+}
+
+.bugs .bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+}
+
+.bugs .bar i {
+  display: block;
+  min-width: 3px;
+  border-radius: 3px;
+  opacity: 0.85;
+}
+
+.bugs:hover .rcounts {
+  color: var(--soft);
+}
+
+.stale,
+.spend small {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+@media (max-width: 1000px) {
+  .gauge > div > span:not(.lead) {
+    display: none;
+  }
+}
+
+.top {
+  background: rgba(6, 11, 20, 0.82);
+  backdrop-filter: blur(10px);
 }

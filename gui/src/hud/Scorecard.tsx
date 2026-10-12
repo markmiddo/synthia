@@ -2,11 +2,19 @@ import { useState } from "react";
 import { clock } from "./format";
 import { NeedsYou } from "./Left";
 import type { BrainView } from "./brain";
-import { agentsToday, countdown, releaseLabel, type AgentsToday, type DueItem, type LedgerItem, type Today } from "./today";
+import { agentsToday, countdown, releaseLabel, spendText, staleLabel, type AgentsToday, type DueItem, type LedgerItem, type Today } from "./today";
 import { call } from "./tauri";
 import type { FleetNode } from "./types";
 
 const MORE = 8;
+
+const BUG_STAGES = [
+  ["noFix", "No fix", "var(--red)"],
+  ["planned", "Fix planned (after release)", "var(--slate)"],
+  ["fixInProgress", "In progress", "var(--amber)"],
+  ["awaitingQa", "Awaiting QA", "var(--blue)"],
+  ["awaitingRelease", "Awaiting release", "var(--green)"],
+] as const;
 
 type Open = "done" | "calls" | "shipped" | "agents" | null;
 
@@ -111,6 +119,7 @@ function Due({ items }: { items: DueItem[] }) {
 
 export function Scorecard({
   today,
+  todayDate,
   nodes,
   chart,
   fleet,
@@ -120,6 +129,7 @@ export function Scorecard({
   onConfirm,
 }: {
   today: Today;
+  todayDate: string;
   nodes: FleetNode[];
   chart: import("./types").DayChart | null;
   fleet: import("./types").Fleet | null;
@@ -221,6 +231,33 @@ export function Scorecard({
         )}
       </section>
 
+      {today.bugs?.ok && (
+        <section aria-label="Bugs left to fix">
+          <p className="lbl">
+            BUGS LEFT TO FIX
+            {staleLabel(today.bugs.asOf, todayDate) && <small className="stale"> · {staleLabel(today.bugs.asOf, todayDate)}</small>}
+          </p>
+          <button type="button" className="bugs" onClick={() => call("open_bug_dashboard").catch(() => {})}>
+            <span className="bugs-head">
+              <b>{today.bugs.leftToFix}</b>
+              {today.bugs.high > 0 && <em>{today.bugs.high} high</em>}
+            </span>
+            <span className="bar" aria-hidden="true">
+              {BUG_STAGES.map(([key, , color]) => (
+                <i key={key} style={{ flex: today.bugs?.[key] ?? 0, background: color }} />
+              ))}
+            </span>
+            <span className="rcounts">
+              {BUG_STAGES.map(([key, label]) => (
+                <span key={key}>
+                  {label} <b>{today.bugs?.[key]}</b>
+                </span>
+              ))}
+            </span>
+          </button>
+        </section>
+      )}
+
       {release?.ok && release.total > 0 && (
         <section aria-label="Release status">
           <p className="lbl">{releaseLabel(release.title).toUpperCase()}</p>
@@ -249,9 +286,10 @@ export function Scorecard({
       {today.spend?.ok && (
         <section aria-label="Claude spend today">
           <p className="lbl">SPEND TODAY</p>
-          <div className="spend">
+          <div className="spend" title="Share of your weekly Claude allowance used today">
             <span>
-              <b>{today.spend.percent < 0.05 ? "0" : today.spend.percent.toFixed(today.spend.percent < 10 ? 1 : 0)}%</b> of the week
+              <b>{spendText(today.spend).value}</b> of the week
+              {spendText(today.spend).note && <small> · {spendText(today.spend).note}</small>}
             </span>
             <Spark points={today.spend.points} />
           </div>

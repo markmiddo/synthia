@@ -10,7 +10,8 @@ const params = new URLSearchParams(window.location.search);
 const EXTRA = Math.max(0, Number(params.get("n") ?? 0) - 3);
 const NEEDS = params.has("need");
 /** `?mock&squad` adds a live growth squad to the fleet and the Company view. */
-const SQUAD = params.has("squad");
+const REAL = params.has("real");
+const SQUAD = params.has("squad") || REAL;
 
 /** Changes that arrive after load, so the activity feed has something to show. */
 let step = 0;
@@ -28,7 +29,36 @@ function subs(prefix: string, done: number, live: string[]) {
   return out;
 }
 
+/** `?mock&real`: the shape of Mark's real day. Five agents, a growth squad (director and one live
+ *  member, plus a designer that finished long ago) and an office squad (director and PM). */
+function realFleet(): Fleet {
+  const none = { squad: null, job: null, role: null, roleTitle: null, parent: null, session: null, cwd: "", subagents: [] };
+  const agent = (id: string, title: string, repo: string, status: Fleet["nodes"][number]["status"], mins: number, subs = 0) => ({
+    ...none, paneId: id, agent: "claude", title, repo, status, sinceMs: t0 - mins * min,
+    subagents: Array.from({ length: subs }, (_, i) => ({ id: `${id}-${i}`, description: `Task ${i + 1}`, agentType: "general-purpose", model: "opus", live: i === 0 })),
+  });
+  const member = (id: string, squad: string, job: string, role: string, roleTitle: string, parent: string | null, status: Fleet["nodes"][number]["status"], mins: number) => ({
+    ...none, paneId: id, agent: "claude", title: role, repo: "eventflo", squad, job, role, roleTitle, parent, status, sinceMs: t0 - mins * min,
+  });
+  return {
+    herdrOk: true, error: null,
+    nodes: [
+      agent("r1", "Synthia to Jarvis brainstorm", "synthia", "working", 41, 3),
+      agent("r2", "Weekly scheduling setup", "eventflo", "working", 12, 1),
+      agent("r3", "Claude Code", "personal", "idle", 95),
+      agent("r4", "Eva's performance yesterday", "eva-core", "needs-you", 6, 2),
+      agent("r5", "Admin panel PR 175", "admin-panel", "working", 17, 5),
+      member("g1", "growth", "2026-10-13-week-of-posts", "growth-director", "Marketing Director", null, "working", 22),
+      member("g2", "growth", "2026-10-13-week-of-posts", "growth-writer", "Writer", "g1", "working", 6),
+      member("g3", "growth", "2026-10-13-week-of-posts", "growth-designer", "Designer", "g1", "done", 9),
+      member("o1", "office", "2026-10-13-board-sweep", "office-chief", "Chief of Staff", null, "working", 15),
+      member("o2", "office", "2026-10-13-board-sweep", "office-pm", "Project Manager", "o1", "working", 4),
+    ],
+  };
+}
+
 function fleet(): Fleet {
+  if (REAL) return realFleet();
   const nodes: Fleet["nodes"] = [
     {
       paneId: "w1:p1", agent: "claude", status: "working", title: "Admin panel PR 175",
@@ -192,7 +222,8 @@ const MEETING = {
   next: { title: "Weekly management and product jam", startMs: t0 + 8 * min, link: "https://calendar.google.com/calendar/event?eid=mock" },
   moreToday: 2,
 };
-const SPEND = { ok: true, percent: 6.2, points: [0, 0.4, 1.1, 1.6, 2.9, 3.4, 4.8, 5.1, 6.2] };
+const SPEND = { ok: true, percent: 6.2, points: [0, 0.4, 1.1, 1.6, 2.9, 3.4, 4.8, 5.1, 6.2], firstAt: t0 - 6 * 60 * min, distinct: 8 };
+const BUGS = { ok: true, asOf: new Date(t0 - 24 * 60 * min).toISOString().slice(0, 10), leftToFix: 42, high: 5, noFix: 38, planned: 13, fixInProgress: 4, awaitingQa: 22, awaitingRelease: 37 };
 const SQUAD_OUT = { deliverables: 4, jobsFinished: 1 };
 
 export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -211,6 +242,8 @@ export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promis
     today_release: RELEASE,
     today_meeting: MEETING,
     today_spend: SPEND,
+    today_bugs: BUGS,
+    open_bug_dashboard: null,
     today_squad_output: SQUAD_OUT,
     open_url: null,
     squad_job_detail: JOB,
