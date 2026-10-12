@@ -25,6 +25,9 @@ export interface BrainView {
   notice: string | null;
 }
 
+/** How long a notice stays up when nothing else clears it. */
+const NOTICE_MS = 8_000;
+
 export const INITIAL_VIEW: BrainView = {
   link: "connecting",
   reason: null,
@@ -38,6 +41,7 @@ export type Action =
   | { type: "connecting" }
   | { type: "offline"; reason: string }
   | { type: "notice"; text: string }
+  | { type: "clear_notice" }
   | { type: "frame"; frame: Record<string, unknown> };
 
 /** Pure: fold one message from the brain (or a link change) into the view. */
@@ -46,12 +50,15 @@ export function reduce(view: BrainView, action: Action): BrainView {
     case "connecting":
       return { ...view, link: "connecting" };
     case "offline":
-      return { ...view, link: "offline", reason: action.reason, state: "idle", confirms: [], notice: null };
+      return { ...view, link: "offline", reason: action.reason, state: "idle", confirms: [] };
     case "notice":
       return { ...view, notice: action.text };
+    case "clear_notice":
+      return view.notice === null ? view : { ...view, notice: null };
     case "frame": {
       const f = action.frame;
-      const online: BrainView = { ...view, link: "online", reason: null, notice: null };
+      // The notice is not cleared by incoming frames: it goes on the next user action or a timeout.
+      const online: BrainView = { ...view, link: "online", reason: null };
       switch (f.type) {
         case "state": {
           const value = f.value;
@@ -87,6 +94,12 @@ export function reduce(view: BrainView, action: Action): BrainView {
 export function useBrain(): { view: BrainView; confirmReply: (id: string, yes: boolean) => void } {
   const [view, dispatch] = useReducer(reduce, INITIAL_VIEW);
   const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!view.notice) return;
+    const t = setTimeout(() => dispatch({ type: "clear_notice" }), NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [view.notice]);
 
   useEffect(() => {
     if (MOCK) return startMockBrain((frame) => dispatch({ type: "frame", frame }));
@@ -152,13 +165,14 @@ export function useBrain(): { view: BrainView; confirmReply: (id: string, yes: b
     // The card goes away only when the brain says the question is closed (confirm_done),
     // so an answer that never left this window cannot look like it was given.
     const ws = wsRef.current;
+    dispatch({ type: "clear_notice" });
     try {
       if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("not connected");
       ws.send(JSON.stringify({ type: "confirm_reply", id, yes }));
     } catch {
       dispatch({
         type: "notice",
-        text: "I can't reach my brain, so I couldn't send your answer. The question stays until I'm back.",
+        text: "I can't reach my brain, so your answer wasn't sent.",
       });
     }
   }, []);
