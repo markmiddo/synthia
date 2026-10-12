@@ -93,10 +93,14 @@ class TextToSpeech:
         self.voice_name = voice_name
         self.local_voice = os.path.expanduser(local_voice)
         self.client: texttospeech.TextToSpeechClient | None = None
-        # Playback process currently speaking, and a flag so cancel() also stops the
-        # remaining chunks of a multi-chunk reply.
+        # Processes currently speaking. cancel() bumps a generation; every speak() call
+        # snapshots it on entry, so a cancel that lands while the call is still waiting for
+        # the speech lock, synthesising, or between chunks is never lost (and never wiped
+        # by a later call starting).
         self._playback: subprocess.Popen[bytes] | None = None
-        self._cancelled = threading.Event()
+        self._synth: subprocess.Popen[bytes] | None = None
+        self._gen = 0
+        self._gen_lock = threading.Lock()
 
         if use_local:
             logger.info("Piper TTS initialized with voice: %s", os.path.basename(self.local_voice))
@@ -157,7 +161,7 @@ class TextToSpeech:
         if not text:
             return False
 
-        self._cancelled.clear()
+        gen = self._gen
         if is_voice_muted():
             logger.debug("TTS muted via runtime state; skipping speak")
             return False
@@ -173,18 +177,21 @@ class TextToSpeech:
             try:
                 logger.debug("Speaking: %s%s", text[:50], "..." if len(text) > 50 else "")
 
+                if self._cancelled_since(gen):
+                    return False
+
                 if self.use_local:
-                    return self._speak_piper(text)
+                    return self._speak_piper(text, gen)
 
                 # For Google TTS, use chunking for longer text
                 if len(text) < 150:
-                    return self._speak_google_chunk(text)
+                    return self._speak_google_chunk(text, gen)
 
                 chunks = self._split_into_chunks(text)
                 for chunk in chunks:
-                    if self._cancelled.is_set():
+                    if self._cancelled_since(gen):
                         return False
-                    if chunk.strip() and not self._speak_google_chunk(chunk):
+                    if chunk.strip() and not self._speak_google_chunk(chunk, gen):
                         return False
                 return True
 
@@ -192,7 +199,10 @@ class TextToSpeech:
                 logger.error("TTS error: %s", e)
                 return False
 
-    def _speak_piper(self, text: str) -> bool:
+    def _cancelled_since(self, gen: int) -> bool:
+        return self._gen != gen
+
+    def _speak_piper(self, text: str, gen: int) -> bool:
         """Speak using local Piper TTS.
 
         SECURITY: Uses subprocess pipes instead of shell=True to prevent injection.
@@ -207,6 +217,9 @@ class TextToSpeech:
                 # Fallback to system piper
                 piper_bin = "piper"
 
+            if self._cancelled_since(gen):
+                return False
+
             # SECURITY: Use subprocess pipes instead of shell=True
             # This prevents command injection via $(cmd), `cmd`, ; cmd, etc.
             piper_proc = subprocess.Popen(
@@ -215,6 +228,10 @@ class TextToSpeech:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
             )
+            self._synth = piper_proc
+            if self._cancelled_since(gen):
+                self._terminate(piper_proc)
+                return False
 
             aplay_proc = subprocess.Popen(
                 ["aplay", "-r", str(PIPER_SAMPLE_RATE), "-f", "S16_LE", "-t", "raw", "-q"],
@@ -222,6 +239,11 @@ class TextToSpeech:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            self._playback = aplay_proc
+            if self._cancelled_since(gen):
+                self._terminate(aplay_proc)
+                self._terminate(piper_proc)
+                return False
 
             # Send text directly to piper's stdin (no shell escaping needed)
             if piper_proc.stdin is not None:
@@ -231,12 +253,14 @@ class TextToSpeech:
             # Wait for both processes to complete
             if piper_proc.stdout is not None:
                 piper_proc.stdout.close()
-            self._playback = aplay_proc
-            aplay_proc.wait()
-            piper_proc.wait()
-            self._playback = None
+            try:
+                aplay_proc.wait()
+                piper_proc.wait()
+            finally:
+                self._playback = None
+                self._synth = None
 
-            return True
+            return not self._cancelled_since(gen)
 
         except FileNotFoundError as e:
             logger.error("Piper TTS error: piper or aplay not found - %s", e)
@@ -245,7 +269,7 @@ class TextToSpeech:
             logger.error("Piper TTS error: %s", e)
             return False
 
-    def _speak_google_chunk(self, text: str) -> bool:
+    def _speak_google_chunk(self, text: str, gen: int) -> bool:
         """Speak a single chunk using Google Cloud TTS."""
         from google.cloud import texttospeech
 
@@ -269,6 +293,9 @@ class TextToSpeech:
                 audio_config=audio_config,
             )
 
+            if self._cancelled_since(gen):
+                return False
+
             # Save to temp file and play with mpv
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
                 f.write(response.audio_content)
@@ -277,12 +304,14 @@ class TextToSpeech:
             try:
                 proc = subprocess.Popen(["mpv", "--no-video", "--really-quiet", temp_path])
                 self._playback = proc
-                if proc.wait() != 0 and not self._cancelled.is_set():
+                if self._cancelled_since(gen):
+                    self._terminate(proc)
+                if proc.wait() != 0 and not self._cancelled_since(gen):
                     raise subprocess.CalledProcessError(proc.returncode, "mpv")
             finally:
                 self._playback = None
                 os.unlink(temp_path)
-            return not self._cancelled.is_set()
+            return not self._cancelled_since(gen)
 
         except Exception as e:
             logger.error("Google TTS error: %s", e)
@@ -290,9 +319,15 @@ class TextToSpeech:
 
     def cancel(self) -> None:
         """Stop only the playback this instance started (unlike stop(), which pkills mpv)."""
-        self._cancelled.set()
-        proc = self._playback
-        if proc is not None and proc.poll() is None:
+        with self._gen_lock:
+            self._gen += 1
+        for proc in (self._playback, self._synth):
+            if proc is not None:
+                self._terminate(proc)
+
+    @staticmethod
+    def _terminate(proc: subprocess.Popen[bytes]) -> None:
+        if proc.poll() is None:
             proc.terminate()
 
     def stop(self) -> None:
