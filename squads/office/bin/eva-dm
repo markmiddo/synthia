@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Send a Slack direct message as Eva (the eva-core bot), not as Mark.
+#
+#   eva-dm --name "Syed" < message.txt     # match a teammate by display or real name
+#   eva-dm --user U0123ABCD < message.txt  # or by Slack user id
+#   eva-dm --list                          # list workspace members (id, name) to pick from
+#
+# The message body is read from stdin (Slack mrkdwn). The bot token never leaves the
+# eva-core server: everything runs there over SSH and the message travels on stdin.
+set -euo pipefail
+
+HOST="${EVA_DM_HOST:-server}"   # LAN alias first; set EVA_DM_HOST=middo247 for Tailscale
+mode="" target=""
+case "${1:-}" in
+  --name) mode=name; target="${2:?name required}" ;;
+  --user) mode=user; target="${2:?user id required}" ;;
+  --list) mode=list ;;
+  *) echo "usage: eva-dm --name NAME | --user UID | --list  (message on stdin)" >&2; exit 2 ;;
+esac
+
+if [ "$mode" = list ]; then
+  body=""
+else
+  body="$(cat)"
+  if [ -z "${body//[[:space:]]/}" ]; then echo "eva-dm: empty message on stdin" >&2; exit 2; fi
+fi
+
+payload="$(python3 -c 'import json,sys; print(json.dumps({"mode":sys.argv[1],"target":sys.argv[2],"text":sys.stdin.read()}))' "$mode" "$target" <<<"$body")"
+
+ssh -o BatchMode=yes -o ConnectTimeout=8 "$HOST" 'cd ~/dev/eventflo/eva-core && python3 -c "
+import json, os, re, sys, urllib.request
+req = json.loads(sys.stdin.read())
+tok = None
+for line in open(\".env\"):
+    m = re.match(r\"^SLACK_BOT_TOKEN=(.*)$\", line.strip())
+    if m:
+        tok = m.group(1).strip().strip(chr(34)).strip(chr(39))
+if not tok:
+    sys.exit(\"eva-dm: SLACK_BOT_TOKEN missing on server\")
+def api(method, data=None):
+    body = json.dumps(data).encode() if data is not None else None
+    r = urllib.request.Request(\"https://slack.com/api/\" + method, data=body, headers={\"Authorization\": \"Bearer \" + tok, \"Content-Type\": \"application/json; charset=utf-8\"})
+    out = json.load(urllib.request.urlopen(r, timeout=15))
+    if not out.get(\"ok\"):
+        sys.exit(\"eva-dm: slack \" + method + \" failed: \" + str(out.get(\"error\")))
+    return out
+def members():
+    out, cur = [], \"\"
+    while True:
+        page = api(\"users.list?limit=200\" + (\"&cursor=\" + cur if cur else \"\"))
+        out += [u for u in page[\"members\"] if not u.get(\"deleted\") and not u.get(\"is_bot\") and u[\"id\"] != \"USLACKBOT\"]
+        cur = page.get(\"response_metadata\", {}).get(\"next_cursor\", \"\")
+        if not cur:
+            return out
+if req[\"mode\"] == \"list\":
+    for u in members():
+        p = u.get(\"profile\", {})
+        print(u[\"id\"], \"|\", p.get(\"display_name\") or \"-\", \"|\", p.get(\"real_name\") or u.get(\"name\"))
+    sys.exit(0)
+uid = req[\"target\"]
+if req[\"mode\"] == \"name\":
+    want = req[\"target\"].lower()
+    hits = [u for u in members() if want in {(u.get(\"profile\", {}).get(\"display_name\") or \"\").lower(), (u.get(\"profile\", {}).get(\"real_name\") or \"\").lower(), u.get(\"name\", \"\").lower()} or (u.get(\"profile\", {}).get(\"real_name\") or \"\").lower().split(\" \")[0] == want]
+    if len(hits) != 1:
+        sys.exit(\"eva-dm: name \" + repr(req[\"target\"]) + \" matched \" + str(len(hits)) + \" people; use --list then --user\")
+    uid = hits[0][\"id\"]
+res = api(\"chat.postMessage\", {\"channel\": uid, \"text\": req[\"text\"], \"unfurl_links\": False})
+print(\"sent to\", uid, \"ts\", res[\"ts\"])
+"' <<<"$payload"

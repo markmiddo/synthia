@@ -73,10 +73,10 @@ Also check the live dev blog for newer posts with WebFetch if it is reachable; i
 cat > "$WORK/req.json" <<'JSON'
 [{"keywords": ["bush doof", "festival ticket resale"], "location_code": 2036, "language_code": "en"}]
 JSON
-ssh middo247 'set -a; . ~/dev/eventflo/eva-core/.env; set +a; curl -s -u "$DATAFORSEO_LOGIN:$DATAFORSEO_PASSWORD" -H "Content-Type: application/json" -d @- https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live' < "$WORK/req.json" > "$WORK/raw-overview.json"
+ssh server 'set -a; . ~/dev/eventflo/eva-core/.env; set +a; curl -s -u "$DATAFORSEO_LOGIN:$DATAFORSEO_PASSWORD" -H "Content-Type: application/json" -d @- https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live' < "$WORK/req.json" > "$WORK/raw-overview.json"
 ```
 
-(`ssh middo247` is the host alias used by Mark's tooling; `ssh server` is the older alias. If ssh fails, say so in your summary and stop spending; do not guess numbers.)
+(`ssh server` is the LAN alias for the eva-core box and is fast; `ssh middo247` is the Tailscale alias and can hang, so use it only if `server` fails. If ssh fails, say so in your summary and stop spending; do not guess numbers.)
 
 Australia is `location_code` 2036, language `en`. Useful endpoints, all under `https://api.dataforseo.com/v3/`:
 - `dataforseo_labs/google/keyword_overview/live` volume, keyword difficulty, intent, CPC for a list of terms (cheapest per term)
