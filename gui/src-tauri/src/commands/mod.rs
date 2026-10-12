@@ -4,6 +4,7 @@ pub mod brain;
 pub mod desk;
 pub mod fleet;
 pub mod history;
+pub mod inbox;
 pub mod hotkeys;
 pub mod lifecycle;
 pub mod overlay;

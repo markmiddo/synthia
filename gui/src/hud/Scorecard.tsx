@@ -127,7 +127,11 @@ export function Scorecard({
   now,
   onFocus,
   onConfirm,
+  reviews,
+  onReview,
 }: {
+  reviews: { id: string; title: string }[];
+  onReview: (id: string) => void;
   today: Today;
   todayDate: string;
   nodes: FleetNode[];
@@ -153,7 +157,7 @@ export function Scorecard({
 
   return (
     <div className="scorecard">
-      <NeedsYou nodes={nodes} confirms={confirms} now={now} onFocus={onFocus} onConfirm={onConfirm} ledger={ledger?.waiting ?? []} onDetail={detail} />
+      <NeedsYou nodes={nodes} confirms={confirms} now={now} onFocus={onFocus} onConfirm={onConfirm} ledger={ledger?.waiting ?? []} onDetail={detail} reviews={reviews} onReview={onReview} />
 
       <section aria-label="Next meeting">
         <p className="lbl">NEXT MEETING</p>

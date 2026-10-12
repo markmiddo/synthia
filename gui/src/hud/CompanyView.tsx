@@ -5,6 +5,7 @@ import type { BrainView } from "./brain";
 import { Engineering, groupByRepo } from "./Engineering";
 import { BrainDrawer } from "./BrainDrawer";
 import { Hive, type HiveTeam } from "./Hive";
+import type { InboxItem } from "./inbox";
 import { useOverview } from "./hive";
 import { JobPanel } from "./JobPanel";
 import { RolePanel } from "./RolePanel";
@@ -264,7 +265,11 @@ export function CompanyView({
   onFocus,
   request,
   brain,
+  inbox,
+  onOpenInbox,
 }: {
+  inbox: InboxItem[];
+  onOpenInbox: (id: string) => void;
   fleet: Fleet | null;
   now: number;
   onFocus: (paneId: string) => void;
@@ -395,6 +400,8 @@ export function CompanyView({
           now={now}
           onClose={() => setPick(null)}
           onFocus={onFocus}
+          inboxItem={inbox.find((i) => i.squad === pickedSquad.id && i.job === pick.job) ?? null}
+          onOpenInbox={onOpenInbox}
         />
       )}
     </section>

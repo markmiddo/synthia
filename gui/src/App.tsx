@@ -3,6 +3,8 @@ import { useActivity } from "./hud/activity";
 import { useBrain } from "./hud/brain";
 import { Connection } from "./hud/Connection";
 import { CompanyView } from "./hud/CompanyView";
+import { InboxDrawer } from "./hud/Inbox";
+import { newItems, useInbox } from "./hud/inbox";
 import { Constellation } from "./hud/Constellation";
 import { Feed } from "./hud/Feed";
 import { isPlainShell, lastSevenDays, localDate } from "./hud/format";
@@ -69,6 +71,10 @@ function App() {
     },
     [pickView],
   );
+  const { items: inboxItems, reload: reloadInbox } = useInbox(view.inboxTick);
+  const [inboxOpen, setInboxOpen] = useState<{ id: string | null } | null>(null);
+  const openInbox = useCallback((id?: string) => setInboxOpen({ id: id ?? null }), []);
+  const closeInbox = useCallback(() => setInboxOpen(null), []);
   const [focusError, setFocusError] = useState<string | null>(null);
   const viewingToday = day === today;
 
@@ -113,7 +119,7 @@ function App() {
       <TopBar nodes={nodes} usage={usage} now={now} preview={MOCK} view={screen} onView={(v) => {
           setDay(today);
           pickView(v);
-        }} day={day} today={today} onDay={pickDay} />
+        }} day={day} today={today} onDay={pickDay} inboxNew={newItems(inboxItems).length} onInbox={() => openInbox()} />
       <aside className="left">
         <Orb state={orbState(voice.recording, view.state)} talkKey={talkKey} />
         <Connection
@@ -140,6 +146,8 @@ function App() {
           now={now}
           onFocus={focus}
           onConfirm={confirmReply}
+          reviews={newItems(inboxItems).map((i) => ({ id: i.id, title: i.title }))}
+          onReview={openInbox}
         />
       </aside>
       {!viewingToday && (
@@ -152,7 +160,7 @@ function App() {
         </p>
       )}
       {screen === "company" && viewingToday ? (
-        <CompanyView fleet={fleet} now={now} onFocus={focus} request={jobRequest} brain={view} />
+        <CompanyView fleet={fleet} now={now} onFocus={focus} request={jobRequest} brain={view} inbox={inboxItems} onOpenInbox={openInbox} />
       ) : (
         <Constellation
           fleet={viewingToday ? fleet : past.status === "ready" ? past.fleet : null}
@@ -163,6 +171,7 @@ function App() {
         />
       )}
       <Feed items={activity} />
+      {inboxOpen && <InboxDrawer items={inboxItems} initialId={inboxOpen.id} onClose={closeInbox} reload={reloadInbox} />}
     </main>
   );
 }

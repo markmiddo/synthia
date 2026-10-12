@@ -789,6 +789,7 @@ mod tests {
 
     fn member(squad: &str, role: &str, title: &str, parent: Option<&str>) -> Member {
         Member {
+            agent_name: String::new(),
             squad: squad.into(),
             job: "2026-10-13-posts".into(),
             role: role.into(),

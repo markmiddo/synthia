@@ -308,7 +308,85 @@ function hiveMock(args?: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+
+/* ---- inbox ---- */
+function svgImg(a: string, b: string, label: string): string {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='960' height='540'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${a}'/><stop offset='1' stop-color='${b}'/></linearGradient></defs><rect width='960' height='540' fill='url(%23g)'/><circle cx='700' cy='170' r='90' fill='rgba(255,255,255,0.18)'/><text x='60' y='470' font-family='sans-serif' font-size='44' fill='white'>${label}</text></svg>`;
+  return `data:image/svg+xml;utf8,${svg.replace(/#/g, "%23")}`;
+}
+const PAYLOADS: Record<string, unknown> = {
+  "/mock/inbox/growth/out/how-to-sell-out-your-first-gig.json": {
+    title: "How to sell out your first gig", slug: "how-to-sell-out-your-first-gig",
+    excerpt: "Most first-time promoters price too late and promote too early. Here is the order that works.",
+    body: "## Start with the room\n\nPick a venue **40% smaller** than the crowd you hope for. A full small room beats an empty big one every time.\n\n## Price in three waves\n\n1. Early bird for your own followers\n2. General release two weeks out\n3. A final-week release you only announce once\n\nSee the [pricing guide](https://example.com/pricing) for the maths.\n\n| Wave | Share of tickets | When |\n|---|---|---|\n| Early bird | 20% | 8 weeks out |\n| General | 60% | 4 weeks out |\n| Final | 20% | last week |",
+    tags: ["promoters", "ticketing", "first event"],
+    faq: [{ question: "How early should I put tickets on sale?", answer: "Eight weeks out is a good default for a club night." }, { question: "What if the early bird sells slowly?", answer: "Bring the general release forward rather than discounting." }],
+  },
+  "/mock/inbox/growth/out/resale-without-the-headache.json": {
+    title: "Resale without the headache", slug: "resale-without-the-headache",
+    excerpt: "Fans will resell. Give them a safe way to do it and you keep the relationship.",
+    body: "Resale is going to happen whether you plan for it or not.\n\n- Cap the price at face value\n- Let the buyer see the seller is verified\n- Pay the organiser a fee on every resale\n\nThat is the whole idea.",
+    tags: ["resale", "fans"], faq: [],
+  },
+};
+const FILE_TEXT: Record<string, string> = {
+  "/mock/inbox/office/out/board-cleanup.md": "## Board cleanup\n\nI moved **7** double-listed cards and closed 3 stale ones.\n\n| Board | Moved | Closed |\n|---|---|---|\n| v3.2 release | 5 | 2 |\n| Bug tracker | 2 | 1 |\n\n### Proposals for you\n\n- Close the five cards older than 90 days\n- Nudge Syed about two merged fixes still in triage",
+};
+const IMAGES: Record<string, string> = {
+  "/mock/inbox/growth/out/how-to-sell-out-your-first-gig-cover.png": svgImg("#2c4a74", "#7cc4ff", "Sell out your first gig"),
+  "/mock/inbox/growth/out/resale-without-the-headache-cover.png": svgImg("#3a2c74", "#b39cff", "Resale without the headache"),
+};
+const iso = (ago: number) => new Date(t0 - ago * min).toISOString();
+let INBOX: Record<string, unknown>[] = [
+  {
+    version: 1, id: "growth-week-of-posts", created_at: iso(14), source: "squad", squad: "growth", job: "2026-10-13-week-of-posts",
+    title: "Growth: week of posts", director: "growth-director", state: "new", note: null, decided_at: null, desk: "/mock/inbox/growth",
+    summary_md: "## Two drafts are ready\n\nThe editor passed both and every competitor claim was re-checked on the day.\n\n- **How to sell out your first gig**: fan-side search term first\n- **Resale without the headache**: links to the help article\n\nCovers are 16:9, no text in the image. See the [brief](https://example.com/brief).",
+    deliverables: [
+      { path: "/mock/inbox/growth/out/how-to-sell-out-your-first-gig.json", name: "how-to-sell-out-your-first-gig.json", kind: "json", bytes: 5120 },
+      { path: "/mock/inbox/growth/out/how-to-sell-out-your-first-gig-cover.png", name: "how-to-sell-out-your-first-gig-cover.png", kind: "png", bytes: 48200 },
+      { path: "/mock/inbox/growth/out/resale-without-the-headache.json", name: "resale-without-the-headache.json", kind: "json", bytes: 3100 },
+      { path: "/mock/inbox/growth/out/resale-without-the-headache-cover.png", name: "resale-without-the-headache-cover.png", kind: "png", bytes: 51200 },
+    ],
+  },
+  {
+    version: 1, id: "office-board-cleanup", created_at: iso(62), source: "squad", squad: "office", job: "2026-10-13-board-sweep",
+    title: "Office: board cleanup", director: "office-chief", state: "new", note: null, decided_at: null, desk: "/mock/inbox/office",
+    summary_md: "The sweep finished. Everything is in the report below, with two proposals that need your yes.",
+    deliverables: [{ path: "/mock/inbox/office/out/board-cleanup.md", name: "board-cleanup.md", kind: "md", bytes: 900 }],
+  },
+  {
+    version: 1, id: "release-faq-v31", created_at: iso(60 * 20), source: "squad", squad: "release", job: "2026-10-12-v31-faq",
+    title: "Release: v3.1 Help Centre updates", director: "release-lead", state: "approved", note: null, decided_at: iso(60 * 19), desk: "/mock/inbox/release",
+    summary_md: "Four articles updated, two new ones drafted.", deliverables: [],
+  },
+];
+function inboxMock(cmd: string, args?: Record<string, unknown>): unknown {
+  const id = String(args?.id ?? "");
+  const patch = (fields: Record<string, unknown>) => {
+    INBOX = INBOX.map((i) => (i.id === id ? { ...i, ...fields } : i));
+    return INBOX.find((i) => i.id === id) ?? null;
+  };
+  switch (cmd) {
+    case "inbox_list": {
+      const rank = (s: unknown) => (s === "new" ? 0 : s === "archived" ? 2 : 1);
+      return [...INBOX].sort((a, b) => rank(a.state) - rank(b.state));
+    }
+    case "inbox_decide": return patch({ state: args?.state, decided_at: new Date().toISOString() });
+    case "inbox_restore": return patch({ state: args?.state, note: args?.note ?? null, decided_at: args?.decided_at ?? null });
+    case "inbox_send_back": patch({ state: "sent_back", note: args?.note, decided_at: new Date().toISOString() }); return { how: "asked", detail: "" };
+    case "inbox_read_file": {
+      const p = String(args?.path);
+      return p in PAYLOADS ? JSON.stringify(PAYLOADS[p]) : FILE_TEXT[p] ?? "";
+    }
+    case "inbox_image": return IMAGES[String(args?.path)] ?? svgImg("#2c4a74", "#7cc4ff", "image");
+    default: return undefined;
+  }
+}
+
 export function mockCall<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const inboxHit = inboxMock(cmd, args);
+  if (inboxHit !== undefined) return Promise.resolve(inboxHit as T);
   const table: Record<string, unknown> = {
     ...hiveMock(args),
     fleet_snapshot: fleet(),

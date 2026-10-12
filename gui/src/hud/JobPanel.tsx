@@ -40,7 +40,11 @@ export function JobPanel({
   now,
   onClose,
   onFocus,
+  inboxItem,
+  onOpenInbox,
 }: {
+  inboxItem?: { id: string } | null;
+  onOpenInbox?: (id: string) => void;
   squad: SquadInfo;
   jobId: string;
   fleet: Fleet | null;
@@ -100,6 +104,11 @@ export function JobPanel({
         <>
           <p className="job-line">
             <span className={`job-state s-${detail.state}`}>{detail.state}</span>
+            {inboxItem && onOpenInbox && (
+              <button type="button" className="link-btn" onClick={() => onOpenInbox(inboxItem.id)}>
+                Open in inbox
+              </button>
+            )}
             <button type="button" className="link-btn" onClick={() => call("squad_open_job", { path: detail.path }).catch((e) => setNote({ ok: false, text: `I couldn't open that folder: ${reasonOf(e)}` }))}>
               Open folder
             </button>

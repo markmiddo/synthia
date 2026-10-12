@@ -51,6 +51,10 @@ pub fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
 }
 
+pub fn check_squad_id(id: &str) -> AppResult<()> {
+    check_id("squad", id)
+}
+
 fn check_id(kind: &str, id: &str) -> AppResult<()> {
     if valid_id(id) {
         Ok(())
@@ -73,6 +77,8 @@ fn is_inside(root: &Path, path: &Path) -> bool {
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 pub struct Member {
+    #[serde(default)]
+    pub agent_name: String,
     #[serde(default)]
     pub squad: String,
     #[serde(default)]
@@ -881,7 +887,7 @@ fn squad_bin(home: &Path) -> PathBuf {
     fallback
 }
 
-async fn run_squad(args: Vec<String>) -> AppResult<String> {
+pub async fn run_squad(args: Vec<String>) -> AppResult<String> {
     let home = super::fleet::home_dir();
     let mut cmd = tokio::process::Command::new(squad_bin(&home));
     cmd.args(&args)
