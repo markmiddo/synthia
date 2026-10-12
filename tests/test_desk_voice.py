@@ -267,3 +267,97 @@ def test_state_is_ready_at_reply_done_when_the_last_sentence_already_finished():
     client.on_frame({"type": "reply_done", "text": ""})
     assert states[-1] == "ready"
     v.close()
+
+
+def _voice_states(down=False, speak=None):
+    states = []
+    holder = {}
+
+    def factory(on_frame):
+        holder["client"] = FakeClient(on_frame, down)
+        return holder["client"]
+
+    spoken = []
+    v = DeskVoice(factory, speak or spoken.append, lambda: None, on_state=states.append)
+    return v, holder["client"], spoken, states
+
+
+def test_late_speaker_and_reply_done_do_not_overwrite_recording():
+    gate = threading.Event()
+    started = threading.Event()
+
+    def slow_speak(line):  # a real thread blocked in TTS, like the live speaker
+        started.set()
+        gate.wait(2)
+
+    v, client, _, states = _voice_states(speak=slow_speak)
+    v.ask("tell me a story")
+    client.on_frame({"type": "delta", "text": "Once upon a long time ago. "})
+    assert started.wait(2)
+    v.begin_utterance()  # Right Alt goes down mid-sentence
+    states.append("recording")  # what main.py writes next
+    gate.set()  # the speaker returns after tts.cancel
+    client.on_frame({"type": "reply_done", "text": ""})  # the brain's tail of the old reply
+    time.sleep(0.2)
+    assert states[-1] == "recording"
+    assert "ready" not in states[states.index("recording") :]
+    # Once the question is sent, state reporting resumes.
+    v.ask("never mind")
+    assert states[-1] == "thinking"
+    client.on_frame({"type": "reply_done", "text": ""})
+    assert _wait(lambda: states[-1] == "ready")
+
+
+def test_abandoned_utterance_restores_ready():
+    v, _, _, states = _voice_states()
+    v.begin_utterance()
+    states.append("recording")
+    v.end_utterance()
+    assert states[-1] == "ready"
+
+
+def test_unreachable_every_press_ends_ready_and_speaks_sparingly(monkeypatch):
+    import synthia.desk_voice as dv
+
+    clock = [1000.0]
+    monkeypatch.setattr(dv.time, "monotonic", lambda: clock[0])
+    v, client, spoken, states = _voice_states(down=True)
+    v.ask("hello")
+    assert _wait(lambda: spoken == [UNREACHABLE_LINE] and states[-1] == "ready")
+    v.ask("hello again")  # throttled: no new speech, but the state is restored
+    states.append("thinking")  # what main.py writes on release
+    v.ask("and again")
+    assert _wait(lambda: states[-1] == "ready")
+    assert spoken == [UNREACHABLE_LINE]
+    clock[0] += 31
+    v.ask("once more")
+    assert _wait(lambda: spoken == [UNREACHABLE_LINE, dv.STILL_DOWN_LINE])
+    assert _wait(lambda: states[-1] == "ready")
+    # A successful say resets the announcement.
+    client.down = False
+    v.ask("back")
+    client.down = True
+    clock[0] += 1
+    v.ask("down again")
+    assert _wait(lambda: spoken[-1] == UNREACHABLE_LINE)
+
+
+def test_desk_state_drives_state_file_and_tray():
+    from unittest.mock import MagicMock
+
+    from synthia.indicator import Status
+    from synthia.main import Synthia
+
+    s = Synthia.__new__(Synthia)
+    s.tray = MagicMock()
+    s._update_state = MagicMock()
+    for state, tray in [
+        ("thinking", Status.THINKING),
+        ("speaking", Status.ASSISTANT),
+        ("ready", Status.READY),
+    ]:
+        s._on_desk_state(state)
+        s._update_state.assert_called_with(state)
+        s.tray.set_status.assert_called_with(tray)
+    s.tray = None
+    s._on_desk_state("ready")  # tray disabled: no error

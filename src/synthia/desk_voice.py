@@ -11,6 +11,7 @@ import logging
 import queue
 import re
 import threading
+import time
 from typing import Any, Callable
 
 from synthia.brain_client import BrainClient, BrainUnavailable, Frame
@@ -18,6 +19,9 @@ from synthia.brain_client import BrainClient, BrainUnavailable, Frame
 logger = logging.getLogger(__name__)
 
 UNREACHABLE_LINE = "I can't reach my brain."
+STILL_DOWN_LINE = "Still can't reach my brain."
+# Between short "still down" reminders while the brain stays unreachable.
+STILL_DOWN_INTERVAL_S = 30.0
 ERROR_LINE = "Something went wrong on my side."
 # Sentence end: . ! ? (optionally followed by a closing quote or bracket) then whitespace.
 _BOUNDARY = re.compile(r"(?<=[.!?])[\"')\]]*\s+|\n+")
@@ -71,6 +75,11 @@ class DeskVoice:
         self._pending_confirm: str | None = None
         self._turn_active = False  # a turn is in flight at the brain
         self._down_announced = False
+        self._last_down_notice = 0.0
+        # Mark's key is down or his words are in flight: a state report from the previous
+        # reply (reply_done, the speaker finishing) must not overwrite "recording".
+        self._utterance_open = False
+        self._emit_lock = threading.Lock()
         self._lock = threading.Lock()
         # Replies for turns that were interrupted must be dropped, not spoken.
         self._epoch = 0
@@ -93,24 +102,48 @@ class DeskVoice:
 
     def ask(self, text: str) -> None:
         """Send a transcript. If the brain asked a yes/no question, this is the answer."""
+        self._close_utterance()
         if self._pending_confirm is not None:
             confirm_id, self._pending_confirm = self._pending_confirm, None
             try:
                 self.client.confirm_reply(confirm_id, bool(_YES.search(text)))
             except BrainUnavailable:
-                self._announce_down()
+                self._fail_unreachable()
                 return
-            self._on_state("thinking")
+            self._down_announced = False
+            self._emit("thinking")
             return
         try:
             self.client.say(text)
         except BrainUnavailable as e:
             logger.warning("brain unreachable: %s", e)
-            self._announce_down()
+            self._fail_unreachable()
             return
         self._down_announced = False
         self._turn_active = True
-        self._on_state("thinking")
+        self._emit("thinking")
+
+    def end_utterance(self) -> None:
+        """The utterance was abandoned (nothing heard, or recording failed): resume state reports."""
+        self._close_utterance()
+        self._maybe_ready()
+
+    def _close_utterance(self) -> None:
+        with self._emit_lock:
+            self._utterance_open = False
+
+    def _emit(self, state: str) -> None:
+        """Report a state, unless Mark is mid-utterance (his "recording" wins)."""
+        with self._emit_lock:
+            if self._utterance_open:
+                return
+            self._on_state(state)
+
+    def _fail_unreachable(self) -> None:
+        """A send failed: the turn is gone, so tell Mark and never leave the state on thinking."""
+        self._turn_active = False
+        self._announce_down()
+        self._maybe_ready()
 
     def begin_utterance(self) -> None:
         """The assistant key went down: she stops talking so Mark can speak.
@@ -119,6 +152,8 @@ class DeskVoice:
         The turn must stay alive (interrupting it would abort the permission request), and
         the next utterance is sent as the answer.
         """
+        with self._emit_lock:
+            self._utterance_open = True
         if not self.busy:
             return
         if self.awaiting_confirmation:
@@ -159,7 +194,7 @@ class DeskVoice:
         with self._state_lock:
             idle = not self._turn_active and self._outstanding == 0
         if idle:
-            self._on_state("ready")
+            self._emit("ready")
 
     def _on_frame(self, frame: Frame) -> None:
         kind = frame.get("type")
@@ -217,10 +252,15 @@ class DeskVoice:
             pass
 
     def _announce_down(self) -> None:
-        if self._down_announced:
-            return
-        self._down_announced = True
-        self._enqueue(UNREACHABLE_LINE)
+        """Say the full line the first time, a short reminder at most every 30 s after."""
+        now = time.monotonic()
+        if not self._down_announced:
+            self._down_announced = True
+            self._last_down_notice = now
+            self._enqueue(UNREACHABLE_LINE)
+        elif now - self._last_down_notice >= STILL_DOWN_INTERVAL_S:
+            self._last_down_notice = now
+            self._enqueue(STILL_DOWN_LINE)
 
     def _speak_loop(self) -> None:
         while True:
@@ -230,7 +270,7 @@ class DeskVoice:
             epoch, line = item
             try:
                 if epoch == self._epoch:
-                    self._on_state("speaking")
+                    self._emit("speaking")
                     self._speak(line)
             except Exception:
                 logger.exception("speaking failed")

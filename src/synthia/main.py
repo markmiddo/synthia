@@ -42,6 +42,13 @@ from synthia.tts import TextToSpeech
 
 logger = logging.getLogger(__name__)
 
+# DeskVoice state -> tray status (brain mode); the tray follows the same reports as the state file.
+_DESK_TRAY_STATUS = {
+    "thinking": Status.THINKING,
+    "speaking": Status.ASSISTANT,
+    "ready": Status.READY,
+}
+
 
 class Synthia:
     """Main Synthia application."""
@@ -120,7 +127,7 @@ class Synthia:
                 client_factory=lambda on_frame: BrainClient(on_frame, port=desk_port),
                 speak=self.tts.speak,
                 stop_speaking=self.tts.cancel,
-                on_state=lambda status: self._update_state(status),
+                on_state=self._on_desk_state,
             )
             logger.info("Assistant: synthia-brain desk (port %d)", desk_port)
 
@@ -213,6 +220,12 @@ class Synthia:
                 json.dump(state, f)
         except Exception as e:
             logger.debug("Could not update state file: %s", e)
+
+    def _on_desk_state(self, status: str) -> None:
+        """Brain-mode state from DeskVoice: the state file and the tray move together."""
+        self._update_state(status)
+        if self.tray is not None:
+            self.tray.set_status(_DESK_TRAY_STATUS.get(status, Status.READY))
 
     def _save_to_history(self, text: str, mode: str, response: Optional[str] = None) -> None:
         """Save transcription to history file for GUI display."""
@@ -328,6 +341,7 @@ class Synthia:
             self.sounds.play_error()
             if self.config.get("show_notifications", True):
                 notify_error(str(e))
+            self._update_state("ready")
             if self.tray:
                 self.tray.set_status(Status.READY)
 
@@ -350,6 +364,8 @@ class Synthia:
         except Exception as e:
             logger.error("Could not start recording: %s", e)
             self.sounds.play_error()
+            if self.desk_voice is not None:
+                self.desk_voice.end_utterance()
 
     def _on_assistant_release(self) -> None:
         """Handle assistant key release (Right Alt)."""
@@ -376,7 +392,8 @@ class Synthia:
                         # The brain streams the reply; DeskVoice speaks it as it arrives.
                         self.desk_voice.ask(text)
                         self._save_to_history(text, "assistant")
-                        # DeskVoice reports thinking, speaking and ready as the reply plays.
+                        # DeskVoice reports thinking, speaking and ready (state file and
+                        # tray) as the reply plays.
                         return
 
                     # Process with Claude
@@ -399,6 +416,11 @@ class Synthia:
                         if command_output:
                             self.tts.speak(command_output)
 
+            if self.desk_voice is not None:
+                # Nothing heard: no turn starts, so hand state reporting back to DeskVoice.
+                self.desk_voice.end_utterance()
+                return
+
             self._update_state("ready")
             if self.tray:
                 self.tray.set_status(Status.READY)
@@ -408,8 +430,12 @@ class Synthia:
             self.sounds.play_error()
             if self.config.get("show_notifications", True):
                 notify_error(str(e))
-            if self.tray:
-                self.tray.set_status(Status.READY)
+            if self.desk_voice is not None:
+                self.desk_voice.end_utterance()
+            else:
+                self._update_state("ready")
+                if self.tray:
+                    self.tray.set_status(Status.READY)
 
     def run(self) -> None:
         """Run the main keyboard listener loop."""
