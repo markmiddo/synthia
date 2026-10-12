@@ -30,6 +30,9 @@ CAPTION_LIMIT = 1024
 
 # How long to wait before retrying an event we could not push, or restarting a crashed pump.
 EVENT_RETRY_DELAY_S = 30
+# Each retry re-synthesises the voice note (paid TTS), so a push that keeps failing is
+# given up after this many attempts; the job's result is already in the walk journal.
+MAX_EVENT_PUSH_ATTEMPTS = 5
 
 # python-telegram-bot's Application is generic over six type parameters; we don't
 # customise any of them, so spell them out as Any rather than reach for # type: ignore.
@@ -78,6 +81,8 @@ class TelegramTransport:
         self._pending_confirm: asyncio.Future[bool] | None = None
         # How the current question closed when another transport answered it first.
         self._resolution: bool | None = None
+        # Failed Telegram pushes per job id, so a dead chat cannot retry forever.
+        self._push_failures: dict[str, int] = {}
         self._pump_task: asyncio.Task[None] | None = None
 
     # ---- helpers ----
@@ -263,12 +268,22 @@ class TelegramTransport:
                             await asyncio.sleep(EVENT_RETRY_DELAY_S)
                             continue
                         await self._speak(bot, self.chat_id, ev.text or f"{ev.job.name} finished.")
+                        self._push_failures.pop(ev.job.id, None)
                         self.brain.ack(ev.job)
                     except asyncio.CancelledError:
                         raise
                     except Exception:
                         # Keep the event: its spoken text is cached, so the retry costs no
                         # model turn, and the router remembers the desk already has its copy.
+                        failures = self._push_failures.get(ev.job.id, 0) + 1
+                        if failures >= MAX_EVENT_PUSH_ATTEMPTS:
+                            logger.exception(
+                                "event push failed %d times; giving up on %s", failures, ev.job.id
+                            )
+                            self._push_failures.pop(ev.job.id, None)
+                            self.brain.ack(ev.job)
+                            continue
+                        self._push_failures[ev.job.id] = failures
                         logger.exception("event push failed; requeuing %s", ev.job.id)
                         self.brain.requeue(ev.job)
                         await asyncio.sleep(EVENT_RETRY_DELAY_S)

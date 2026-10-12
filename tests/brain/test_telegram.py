@@ -351,6 +351,22 @@ async def test_pump_events_requeues_on_push_failure_without_acking(parts, monkey
     assert brain.acked == []
 
 
+async def test_pump_events_gives_up_after_max_push_attempts(parts, monkeypatch):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    monkeypatch.setattr(telegram_module, "EVENT_RETRY_DELAY_S", 0.001)
+    bot.fail_send_voice_times = 100
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    for _ in range(telegram_module.MAX_EVENT_PUSH_ATTEMPTS):
+        await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.1)
+    pump.cancel()
+    assert len(brain.requeued) == telegram_module.MAX_EVENT_PUSH_ATTEMPTS - 1
+    assert brain.acked == [rec]
+
+
 async def test_losing_telegram_leg_says_where_it_was_answered(parts):
     brain, speech, bot, tr, ctx = parts
     tr.bot = bot
