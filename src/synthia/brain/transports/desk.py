@@ -68,9 +68,12 @@ class DeskTransport:
         confirm_timeout_s: int,
         host: str = HOST,
         clock: Callable[[], float] = time.monotonic,
+        session_active: Callable[[], bool] | None = None,
     ) -> None:
         self.brain = brain
         self._clock = clock
+        # Desktop-level presence (logind: unlocked and not idle); None = not consulted.
+        self._session_active = session_active
         self._presence_at: float | None = None
         self._voice_at: float | None = None
         self.port = port
@@ -96,10 +99,14 @@ class DeskTransport:
 
         Recently means an active presence frame within PRESENCE_TTL_S, or a desk voice turn
         within VOICE_TTL_S. A presence frame with active=false (window hidden or blurred)
-        withdraws the presence claim; a recent voice turn still counts.
+        withdraws the presence claim; a recent voice turn still counts. When a desktop
+        session check is wired in, an unlocked, non-idle session also counts: Mark works in a
+        terminal with the HUD in the background, so its focus alone misses him.
         """
         if not self._clients:
             return False
+        if self._session_active is not None and self._session_active():
+            return True
         now = self._clock()
         if self._presence_at is not None and now - self._presence_at <= PRESENCE_TTL_S:
             return True

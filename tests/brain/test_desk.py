@@ -541,3 +541,24 @@ async def test_push_inbox_frame_shape(clocked):
     frame = await _until(ws, "inbox")
     assert frame == {"type": "inbox", "id": "abc", "title": "Growth: week of posts"}
     await ws.close()
+
+
+async def test_unlocked_desktop_session_counts_as_present(tmp_path):
+    active = {"v": True}
+    d = DeskTransport(
+        FakeBrain(),
+        0,
+        tmp_path / "desk.token",
+        confirm_timeout_s=1,
+        session_active=lambda: active["v"],
+    )
+    await d.start()
+    try:
+        assert d.is_present is False  # no client connected
+        d._clients.add(object())
+        assert d.is_present is True  # connected and the desktop is in use
+        active["v"] = False
+        assert d.is_present is False  # locked or idle, no other signal
+    finally:
+        d._clients.clear()
+        await d.stop()

@@ -64,11 +64,18 @@ def _attach_squad_tail(brain: Any, cfg: BrainConfig) -> None:
 def run_serve(cfg: BrainConfig) -> int:
     from synthia.brain.cli import pull_repos
     from synthia.brain.concierge import Brain
+    from synthia.brain.presence import CachedSessionActive
     from synthia.brain.speech import Speech
     from synthia.brain.transports.desk import DeskTransport
 
     pull_repos(cfg.repos)
-    desk = DeskTransport(None, cfg.desk_port, cfg.desk_token_file, cfg.confirm_timeout_s)
+    desk = DeskTransport(
+        None,
+        cfg.desk_port,
+        cfg.desk_token_file,
+        cfg.confirm_timeout_s,
+        session_active=CachedSessionActive(),
+    )
 
     if not cfg.telegram_token:
         # No token means no Telegram poller at all; the desk still works.
