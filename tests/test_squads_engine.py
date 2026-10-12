@@ -227,6 +227,90 @@ def test_install_never_overwrites_without_force(env):
     assert (agents / "growth-writer.md").read_text() == "new"
 
 
+def _shared_repo(tmp):
+    repo = tmp / "repo_squads"
+    (repo / "office" / "agents").mkdir(parents=True)
+    (repo / "shared" / "agents").mkdir(parents=True)
+    (repo / "office" / "squad.yaml").write_text(
+        "id: office\ndirector: chief\nroles:\n  chief: {hires: [pm, studio-designer]}\n"
+        "  pm: {}\n  studio-designer: {}\n"
+    )
+    (repo / "office" / "agents" / "chief.md").write_text("chief")
+    (repo / "office" / "agents" / "pm.md").write_text("pm")
+    (repo / "shared" / "agents" / "studio-designer.md").write_text("designer v1")
+    (repo / "shared" / "agents" / "unrelated.md").write_text("nope")
+    return repo
+
+
+def test_install_adds_referenced_shared_agents_only(env):
+    eng, _, tmp = env
+    repo = _shared_repo(tmp)
+    agents = tmp / "agents"
+    report = eng.install("office", repo, agents)
+    assert (agents / "studio-designer.md").read_text() == "designer v1"
+    assert (agents / "chief.md").is_file() and (agents / "pm.md").is_file()
+    assert not (agents / "unrelated.md").exists()
+    assert "installed" in report and str(agents / "studio-designer.md") in report
+
+
+def test_install_shared_agent_never_overwrites_without_force(env):
+    eng, _, tmp = env
+    repo = _shared_repo(tmp)
+    agents = tmp / "agents"
+    agents.mkdir()
+    (agents / "studio-designer.md").write_text("mine")
+    report = eng.install("office", repo, agents)
+    assert "SKIPPED" in report and (agents / "studio-designer.md").read_text() == "mine"
+    eng.install("office", repo, agents, force=True)
+    assert (agents / "studio-designer.md").read_text() == "designer v1"
+    assert "unchanged" in eng.install("office", repo, agents)
+
+
+def test_squad_own_agent_wins_over_shared(env):
+    eng, _, tmp = env
+    repo = _shared_repo(tmp)
+    (repo / "office" / "agents" / "studio-designer.md").write_text("office version")
+    agents = tmp / "agents"
+    eng.install("office", repo, agents)
+    assert (agents / "studio-designer.md").read_text() == "office version"
+
+
+def test_shipped_squads_are_consistent():
+    """Every shipped squad parses, and every role has an agent file (own or shared)."""
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1] / "squads"
+    shared = {f.stem for f in (root / "shared" / "agents").glob("*.md")}
+    squads = [d for d in sorted(root.iterdir()) if (d / "squad.yaml").is_file()]
+    assert {d.name for d in squads} >= {"growth", "office", "release"}
+    for d in squads:
+        squad = parse_squad(yaml.safe_load((d / "squad.yaml").read_text()), d.name)
+        own = {f.stem for f in (d / "agents").glob("*.md")}
+        assert squad.cap == 4
+        for rid in squad.roles:
+            assert rid in own | shared, f"{d.name}: no agent file for {rid}"
+            text = next(
+                f
+                for f in [d / "agents" / f"{rid}.md", root / "shared" / "agents" / f"{rid}.md"]
+                if f.is_file()
+            ).read_text()
+            assert f"name: {rid}\n" in text
+    assert (
+        "studio-designer"
+        in parse_squad(yaml.safe_load((root / "growth" / "squad.yaml").read_text()))
+        .role("growth-director")
+        .hires
+    )
+    for sid, hires in {
+        "office": {"office-pm", "office-investor", "studio-designer"},
+        "release": {"release-faq", "release-video", "studio-designer"},
+    }.items():
+        sq = parse_squad(yaml.safe_load((root / sid / "squad.yaml").read_text()))
+        assert set(sq.role(sq.director).hires) == hires
+
+
 def test_engine_imports_without_the_sdk():
     import subprocess
     import sys
