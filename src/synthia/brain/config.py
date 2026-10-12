@@ -31,6 +31,14 @@ DEFAULT_ALLOWED_TOOLS = [
     "mcp__jobs__job_status",
     "mcp__jobs__list_jobs",
     "mcp__jobs__cancel_job",
+    "mcp__herdr__fleet",
+    "mcp__herdr__open_agent",
+    "mcp__herdr__prompt_agent",
+    "mcp__herdr__read_agent",
+    "mcp__herdr__close_agent",
+    "mcp__herdr__start_squad",
+    "mcp__herdr__squad_status",
+    "mcp__herdr__stop_squad",
 ]
 
 # Workers are headless: nobody can answer a permission prompt, so anything not in this
