@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from synthia.assistant import Assistant
 from synthia.audio import AudioRecorder, list_audio_devices
-from synthia.brain_client import BrainClient
+from synthia.brain_client import DEFAULT_PORT, BrainClient
 from synthia.clipboard_monitor import ClipboardMonitor
 from synthia.commands import execute_actions
 from synthia.config import (
@@ -115,7 +115,7 @@ class Synthia:
         # Desk voice through the synthia-brain websocket (assistant_backend: brain)
         self.desk_voice: Optional[DeskVoice] = None
         if self.config.get("assistant_backend", "local") == "brain":
-            desk_port = int(self.config.get("brain_desk_port", 8766))
+            desk_port = int(self.config.get("brain_desk_port", DEFAULT_PORT))
             self.desk_voice = DeskVoice(
                 client_factory=lambda on_frame: BrainClient(on_frame, port=desk_port),
                 speak=self.tts.speak,

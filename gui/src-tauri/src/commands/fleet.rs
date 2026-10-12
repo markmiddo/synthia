@@ -375,8 +375,7 @@ fn merge_day(chart: &mut DayChart, fleet: &Fleet, now_ms: i64) -> bool {
 }
 
 fn orgcharts_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".local/share/synthia/orgcharts")
+    home_dir().join(".local/share/synthia/orgcharts")
 }
 
 fn valid_date(date: &str) -> bool {
@@ -429,7 +428,7 @@ async fn run_herdr(args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn home_dir() -> PathBuf {
+pub(super) fn home_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()))
 }
 

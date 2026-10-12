@@ -180,7 +180,9 @@ def load_brain_config(
 
     cfg = BrainConfig(**kwargs)
     if not 1 <= cfg.desk_port <= 65535:
-        logger.warning("brain.yaml: desk.port %r out of range; using %r", cfg.desk_port, 8766)
+        logger.warning(
+            "brain.yaml: desk.port %r out of range; using %r", cfg.desk_port, defaults.desk_port
+        )
         cfg.desk_port = defaults.desk_port
     token = env.get("BRAIN_TELEGRAM_TOKEN")
     if token:

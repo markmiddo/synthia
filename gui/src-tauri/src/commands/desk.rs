@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use crate::error::{AppError, AppResult};
 
 fn token_file() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".local/share/synthia/brain/desk.token")
+    super::fleet::home_dir().join(".local/share/synthia/brain/desk.token")
 }
 
 /// The auth token synthia-brain wrote when it started. Missing means the brain is not running.

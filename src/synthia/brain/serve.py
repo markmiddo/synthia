@@ -58,7 +58,7 @@ async def _pump_desk_events(brain: Any, desk: Any) -> None:
             await asyncio.sleep(EVENT_RETRY_DELAY_S)
 
 
-async def _serve_desk_only(cfg: BrainConfig, router: ConfirmRouter, desk: Any, brain: Any) -> None:
+async def _serve_desk_only(desk: Any, brain: Any) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -91,7 +91,7 @@ def run_serve(cfg: BrainConfig) -> int:
         router = ConfirmRouter(desk, None)
         brain = Brain(cfg, router.confirm)
         router.brain = desk.brain = brain
-        asyncio.run(_serve_desk_only(cfg, router, desk, brain))
+        asyncio.run(_serve_desk_only(desk, brain))
         return 0
 
     from telegram import Update
