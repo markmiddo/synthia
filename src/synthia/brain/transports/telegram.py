@@ -8,7 +8,7 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 try:
     from telegram import Update
@@ -62,11 +62,13 @@ class TelegramTransport:
         confirm_timeout_s: int,
         work_dir: Path,
         desk: Any = None,
+        mirror_event: Callable[[Any], Awaitable[None]] | None = None,
     ) -> None:
         self.brain = brain
-        # When serving both transports: job events go to the desk while a client is
-        # connected, and the desk server's life is tied to this application's.
+        # When serving both transports the desk server's life is tied to this application's.
         self.desk = desk
+        # Best-effort copy of each job event to the desk; Telegram stays the delivery of record.
+        self.mirror_event = mirror_event
         self.speech = speech
         self.allowed_users = set(allowed_users)
         self.chat_id = chat_id
@@ -156,7 +158,7 @@ class TelegramTransport:
     async def on_stop(self, update: Any, context: Any) -> None:
         if not self._authorised(update) or not update.message:
             return
-        await self.brain.interrupt()
+        await self.brain.interrupt("telegram")
         await update.message.reply_text("Stopped.")
 
     async def on_new(self, update: Any, context: Any) -> None:
@@ -184,24 +186,31 @@ class TelegramTransport:
 
     # ---- confirmation (Confirmer for the brain's gate) ----
 
-    async def confirm(self, question: str) -> bool:
+    async def ask(self, question: str) -> bool | None:
+        """Ask in the chat. True/False is an answer; None means nobody answered (no chat,
+        another question pending, timed out, or the question was cancelled)."""
         if self.bot is None or self.chat_id is None:
-            logger.warning("confirm requested with no chat; denying: %s", question)
-            return False
+            logger.warning("confirm requested with no chat: %s", question)
+            return None
         if self._pending_confirm is not None and not self._pending_confirm.done():
             # Overwriting the future would strand the first waiter forever.
-            logger.warning("confirmation already pending; denying: %s", question)
-            return False
+            logger.warning("confirmation already pending: %s", question)
+            return None
         loop = asyncio.get_running_loop()
-        self._pending_confirm = loop.create_future()
-        await self._speak(self.bot, self.chat_id, f"I want to {question}. Say yes to confirm.")
+        fut: asyncio.Future[bool] = loop.create_future()
+        self._pending_confirm = fut
         try:
-            approved = await asyncio.wait_for(self._pending_confirm, self.confirm_timeout_s)
+            await self._speak(self.bot, self.chat_id, f"I want to {question}. Say yes to confirm.")
+            return await asyncio.wait_for(fut, self.confirm_timeout_s)
         except asyncio.TimeoutError:
             await self._speak(self.bot, self.chat_id, "No confirmation, so I did not do it.")
-            approved = False
+            return None
         finally:
-            self._pending_confirm = None
+            if self._pending_confirm is fut:
+                self._pending_confirm = None
+
+    async def confirm(self, question: str) -> bool:
+        approved = bool(await self.ask(question))
         journal = getattr(self.brain, "journal", None)
         if journal is not None:
             journal.confirmation(question, approved)
@@ -219,10 +228,8 @@ class TelegramTransport:
             try:
                 async for ev in self.brain.events():
                     try:
-                        if self.desk is not None and self.desk.has_clients:
-                            await self.desk.push_event(ev.text or f"{ev.job.name} finished.")
-                            self.brain.ack(ev.job)
-                            continue
+                        if self.mirror_event is not None:
+                            await self.mirror_event(ev)
                         if self.chat_id is None:
                             # No chat yet (Mark has not messaged since boot); keep it.
                             logger.warning("job event with no chat id; requeuing %s", ev.job.id)

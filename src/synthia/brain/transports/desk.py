@@ -9,6 +9,7 @@ brain to client (broadcast to every authenticated client):
     {"type":"state","value":"idle|thinking|speaking"}  {"type":"delta","text":...}
     {"type":"reply_done","text":...}  {"type":"event","text":...}
     {"type":"confirm","id":...,"question":...}  {"type":"error","text":...}
+    {"type":"confirm_done","id":...,"approved":true|false|null}   (null: nobody answered)
 """
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ class DeskTransport:
         self.token = ""
         self._server: Server | None = None
         self._clients: set[ServerConnection] = set()
-        self._pending: dict[str, asyncio.Future[bool]] = {}
+        self._pending: dict[str, asyncio.Future[bool | None]] = {}
         self._turns: set[asyncio.Task[None]] = set()
         self.state = "idle"
 
@@ -99,7 +100,7 @@ class DeskTransport:
                 await task
         for fut in self._pending.values():
             if not fut.done():
-                fut.set_result(False)
+                fut.set_result(None)
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
@@ -127,20 +128,30 @@ class DeskTransport:
 
     # ---- confirmation (Confirmer for the brain's gate) ----
 
-    async def confirm(self, question: str) -> bool:
+    async def ask(self, question: str) -> bool | None:
+        """Ask every connected client. True/False is an answer; None means nobody answered
+        (no client, every client dropped, timed out, or the question was cancelled)."""
         if not self._clients:
-            logger.warning("desk confirm with no client; denying: %s", question)
-            return False
+            logger.warning("desk confirm with no client: %s", question)
+            return None
         cid = uuid.uuid4().hex[:8]
-        fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        fut: asyncio.Future[bool | None] = asyncio.get_running_loop().create_future()
         self._pending[cid] = fut
+        approved: bool | None = None
         try:
             await self.broadcast({"type": "confirm", "id": cid, "question": question})
             approved = await asyncio.wait_for(fut, self.confirm_timeout_s)
         except asyncio.TimeoutError:
-            approved = False
+            approved = None
         finally:
             self._pending.pop(cid, None)
+            # Tell every client the question is closed, so a stale card cannot linger and
+            # swallow the next utterance as its answer.
+            await self.broadcast({"type": "confirm_done", "id": cid, "approved": approved})
+        return approved
+
+    async def confirm(self, question: str) -> bool:
+        approved = bool(await self.ask(question))
         journal = getattr(self.brain, "journal", None)
         if journal is not None:
             journal.confirmation(question, approved)
@@ -176,6 +187,12 @@ class DeskTransport:
             pass
         finally:
             self._clients.discard(ws)
+            if not self._clients:
+                # Nobody is left who could answer: release the brain instead of making it
+                # wait out the full timeout while holding its turn lock.
+                for fut in self._pending.values():
+                    if not fut.done():
+                        fut.set_result(None)
 
     async def _on_frame(self, raw: str | bytes) -> None:
         try:
@@ -191,7 +208,7 @@ class DeskTransport:
                 self._turns.add(task)
                 task.add_done_callback(self._turns.discard)
         elif kind == "interrupt":
-            await self.brain.interrupt()
+            await self.brain.interrupt("desk")
         elif kind == "confirm_reply":
             fut = self._pending.get(str(frame.get("id", "")))
             if fut is not None and not fut.done():

@@ -104,6 +104,8 @@ class Brain:
         # Which transport started the turn holding the lock ("telegram", "desk"), or
         # None for a job-event or housekeeping turn. Read by confirmation routing.
         self.turn_origin: str | None = None
+        # Spoken text per undelivered job id, so a requeued event never costs a second LLM turn.
+        self._spoken: dict[str, str] = {}
         config.state_dir.mkdir(parents=True, exist_ok=True)
         self.journal = WalkJournal(config.journal_dir)
         self.jobs = JobManager(
@@ -311,8 +313,13 @@ class Brain:
                 finally:
                     self.turn_origin = None
 
-    async def interrupt(self) -> None:
-        if not self._in_flight:
+    async def interrupt(self, origin: str | None = None) -> None:
+        """Stop the current turn, but only for the transport that started it.
+
+        A /stop on Telegram must not cut off a desk turn (and vice versa), so this is a
+        no-op unless `origin` matches the origin of the turn holding the lock.
+        """
+        if not self._in_flight or origin != self.turn_origin:
             return
         client = self._require_client()
         if self._reader_active:
@@ -326,6 +333,10 @@ class Brain:
         while True:
             finished = await self._job_events.get()
             rec = finished.job
+            cached = self._spoken.get(rec.id)
+            if cached is not None:
+                yield SpokenEvent(rec, cached)
+                continue
             prompt = f"[job event] {rec.name} finished ({rec.status}): {rec.summary}"
             try:
                 async with self._lock:
@@ -336,6 +347,7 @@ class Brain:
                 await self._job_events.put(finished)
                 await asyncio.sleep(EVENT_RETRY_DELAY_S)
                 continue
+            self._spoken[rec.id] = text
             self.journal.job_finished(rec.name, rec.status, rec.summary, text)
             # Marked delivered only once a transport has actually pushed it (see ack).
             yield SpokenEvent(rec, text)
@@ -343,6 +355,7 @@ class Brain:
     def ack(self, rec: JobRecord) -> None:
         """Mark a job event as delivered. Transports call this after the push succeeds."""
         rec.delivered = True
+        self._spoken.pop(rec.id, None)
         self.jobs.store.save(rec)
 
     def requeue(self, rec: JobRecord) -> None:

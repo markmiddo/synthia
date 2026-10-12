@@ -103,8 +103,11 @@ can be ticked off from either side.
   first frame a client sends must be `{"type":"auth","token":...}`; anything else is closed (4401).
 - Client to brain: `say`, `interrupt`, `confirm_reply` (`id`, `yes`).
 - Brain to every client: `state` (`idle|thinking|speaking`), `delta`, `reply_done`, `event` (job
-  results), `confirm` (`id`, `question`), `error`.
-- A permission question goes to the transport that started the turn. Job events go to the desk
-  while a client is connected, otherwise to Telegram.
+  results), `confirm` (`id`, `question`), `confirm_done` (`id`, `approved`: true, false or null when
+  nobody answered), `error`.
+- A permission question goes to the transport that started the turn; a turn with no origin
+  (a job event) asks on both and the first answer wins. Job events always go to Telegram (acked
+  after its push) and are also copied to the desk when a client is connected. `interrupt` and
+  `/stop` only stop a turn that their own transport started. (`routing.py` holds these rules.)
 - Desktop unit: `deploy/brain/desktop/synthia-brain.service` (`serve`, `Restart=always`). Moving
   the brain off middo247 is a runbook step: only one process may poll the Telegram token.

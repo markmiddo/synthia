@@ -14,6 +14,7 @@ class FakeBrain:
         self.sent = []
         self.origins = []
         self.interrupts = 0
+        self.interrupt_origins = []
         self.new_sessions = 0
         self._events: asyncio.Queue = asyncio.Queue()
         self.jobs = SimpleNamespace(list_jobs=lambda: [])
@@ -35,8 +36,9 @@ class FakeBrain:
         yield "reply to "
         yield text
 
-    async def interrupt(self):
+    async def interrupt(self, origin=None):
         self.interrupts += 1
+        self.interrupt_origins.append(origin)
 
     async def new_session(self, handover=None):
         self.new_sessions += 1
@@ -152,6 +154,7 @@ async def test_commands(parts):
     await tr.on_new(_update(text="/new", bot=bot), ctx)
     await tr.on_jobs(_update(text="/jobs", bot=bot), ctx)
     assert brain.interrupts == 1
+    assert brain.interrupt_origins == ["telegram"]
     assert brain.new_sessions == 1
     assert any("No jobs" in t for _, t in bot.texts)
 
@@ -293,21 +296,39 @@ async def test_confirmation_is_journaled(parts, tmp_path):
     assert "**Confirmation denied:** run git push origin main" in text
 
 
-async def test_pump_events_go_to_desk_when_a_client_is_connected(parts):
+async def test_pump_events_go_to_telegram_and_are_mirrored_to_the_desk(parts):
     brain, speech, bot, tr, ctx = parts
     from synthia.brain.concierge import SpokenEvent
 
-    pushed = []
+    mirrored = []
 
-    async def push_event(text):
-        pushed.append(text)
+    async def mirror(ev):
+        mirrored.append(ev.text)
 
-    tr.desk = SimpleNamespace(has_clients=True, push_event=push_event)
+    tr.mirror_event = mirror
     rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
     pump = asyncio.create_task(tr.pump_events(bot))
     await brain._events.put(SpokenEvent(rec, "Briefing is done."))
     await asyncio.sleep(0.05)
     pump.cancel()
-    assert pushed == ["Briefing is done."]
-    assert bot.voices == []
+    assert mirrored == ["Briefing is done."]
+    assert bot.voices[-1] == (1, "Briefing is done.")
     assert brain.acked == [rec]
+
+
+async def test_pump_events_with_a_desk_client_still_requeues_when_no_chat(parts):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    async def mirror(ev):
+        pass
+
+    tr.mirror_event = mirror
+    tr.chat_id = None
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert brain.requeued == [rec]
+    assert brain.acked == []

@@ -468,3 +468,50 @@ async def test_desk_turn_is_tagged_and_origin_is_scoped_to_the_turn(tmp_path):
     await _collect(brain.send("hello", origin="telegram"))
     assert FakeClient.instances[-1].queries[-1] == "hello"
     await brain.stop()
+
+
+async def test_interrupt_only_stops_a_turn_from_the_same_transport(tmp_path):
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=BlockingClient, runner=None)
+    await brain.start()
+    gen = brain.send("hi", origin="desk")
+    assert await gen.__anext__() == "hello "
+    client = BlockingClient.instances[0]
+    await brain.interrupt("telegram")  # a Telegram /stop must not cut off a desk turn
+    assert client.interrupted is False
+    await brain.interrupt(None)
+    assert client.interrupted is False
+    await brain.interrupt("desk")
+    assert client.interrupted is True
+    client.release.set()
+    [c async for c in gen]
+
+    BlockingClient.instances.clear()
+    brain2 = Brain(_cfg(tmp_path / "b"), _yes, client_factory=BlockingClient, runner=None)
+    await brain2.start()
+    gen = brain2.send("hi", origin="telegram")
+    await gen.__anext__()
+    c2 = BlockingClient.instances[0]
+    await brain2.interrupt("desk")  # and the desk must not cut off a Telegram turn
+    assert c2.interrupted is False
+    await brain2.interrupt("telegram")
+    assert c2.interrupted is True
+    c2.release.set()
+    [c async for c in gen]
+
+
+async def test_requeued_job_event_is_not_asked_again(tmp_path):
+    async def runner(rec):
+        return 0, json.dumps({"is_error": False, "result": "Done."}), ""
+
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=FakeClient, runner=runner)
+    await brain.start()
+    events = brain.events()
+    await brain.jobs.dispatch("morning", "/morning")
+    ev = await asyncio.wait_for(events.__anext__(), 2)
+    client = FakeClient.instances[-1]
+    asked = len(client.queries)
+    brain.requeue(ev.job)
+    again = await asyncio.wait_for(events.__anext__(), 2)
+    assert again.text == ev.text
+    assert len(client.queries) == asked
+    await brain.stop()

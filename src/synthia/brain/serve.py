@@ -9,47 +9,23 @@ import signal
 from typing import Any
 
 from synthia.brain.config import BrainConfig
+from synthia.brain.routing import Router
 
 logger = logging.getLogger(__name__)
 
 
-class ConfirmRouter:
-    """Sends a permission question to the transport that started the current turn.
-
-    A turn with no origin (a job-event or housekeeping turn) goes to the desk when a
-    client is connected, otherwise to Telegram. If the originating desk client has
-    dropped mid-turn the question falls back to Telegram rather than being lost.
-    """
-
-    def __init__(self, desk: Any, telegram: Any) -> None:
-        self.desk = desk
-        self.telegram = telegram
-        self.brain: Any = None
-
-    async def confirm(self, question: str) -> bool:
-        origin = getattr(self.brain, "turn_origin", None)
-        if origin == "telegram" and self.telegram is not None:
-            return bool(await self.telegram.confirm(question))
-        if self.desk.has_clients:
-            return bool(await self.desk.confirm(question))
-        if self.telegram is not None:
-            return bool(await self.telegram.confirm(question))
-        logger.warning("no transport to confirm with; denying: %s", question)
-        return False
-
-
-async def _pump_desk_events(brain: Any, desk: Any) -> None:
-    """Desk-only mode: deliver job events to the desk, requeueing while no client is there."""
+async def _pump_desk_events(brain: Any, router: Router) -> None:
+    """Desk-only mode: the desk is the only transport, so an event with no client waits."""
     from synthia.brain.concierge import EVENT_RETRY_DELAY_S
 
     while True:
         try:
             async for ev in brain.events():
-                if not desk.has_clients:
+                if not router.desk.has_clients:
                     brain.requeue(ev.job)
                     await asyncio.sleep(EVENT_RETRY_DELAY_S)
                     continue
-                await desk.push_event(ev.text or f"{ev.job.name} finished.")
+                await router.mirror_event(ev)
                 brain.ack(ev.job)
         except asyncio.CancelledError:
             raise
@@ -58,14 +34,14 @@ async def _pump_desk_events(brain: Any, desk: Any) -> None:
             await asyncio.sleep(EVENT_RETRY_DELAY_S)
 
 
-async def _serve_desk_only(desk: Any, brain: Any) -> None:
+async def _serve_desk_only(desk: Any, brain: Any, router: Router) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
     await brain.start()
     await desk.start()
-    pump = asyncio.create_task(_pump_desk_events(brain, desk))
+    pump = asyncio.create_task(_pump_desk_events(brain, router))
     try:
         await stop.wait()
     finally:
@@ -88,10 +64,10 @@ def run_serve(cfg: BrainConfig) -> int:
     if not cfg.telegram_token:
         # No token means no Telegram poller at all; the desk still works.
         logger.warning("BRAIN_TELEGRAM_TOKEN is not set; serving the desk only")
-        router = ConfirmRouter(desk, None)
+        router = Router(desk, None)
         brain = Brain(cfg, router.confirm)
         router.brain = desk.brain = brain
-        asyncio.run(_serve_desk_only(desk, brain))
+        asyncio.run(_serve_desk_only(desk, brain, router))
         return 0
 
     from telegram import Update
@@ -112,7 +88,8 @@ def run_serve(cfg: BrainConfig) -> int:
         work_dir=work_dir,
         desk=desk,
     )
-    router = ConfirmRouter(desk, telegram)
+    router = Router(desk, telegram)
+    telegram.mirror_event = router.mirror_event
     brain = Brain(cfg, router.confirm)
     router.brain = desk.brain = telegram.brain = brain
     app = telegram.build_app(cfg.telegram_token)

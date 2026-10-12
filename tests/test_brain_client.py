@@ -19,7 +19,7 @@ class FakeBrain:
         yield "You said "
         yield text
 
-    async def interrupt(self):
+    async def interrupt(self, origin=None):
         self.interrupts += 1
 
 
