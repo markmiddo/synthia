@@ -1,0 +1,10 @@
+id: release
+name: Release
+director: release-lead
+cap: 4                 # live specialists at once, director not counted
+cwd: ~/dev/eventflo
+roles:
+  release-lead:       {title: Release Lead, model: claude-opus-5-5, hires: [release-faq, release-video, studio-designer]}
+  release-faq:        {title: Help Centre Writer, model: claude-sonnet-5-5}
+  release-video:      {title: Video Editor, model: claude-sonnet-5-5}
+  studio-designer:    {title: Designer, model: claude-sonnet-5-5}   # shared role: squads/shared/agents/studio-designer.md

@@ -14,6 +14,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+import yaml
+
 from synthia import herdr as _herdr
 from synthia.squads import desk
 from synthia.squads.model import DEFAULT_CONFIG_DIR, Squad, SquadError, load_squad
@@ -354,13 +356,30 @@ class Engine:
 
     # ---- install ----
 
+    @staticmethod
+    def _yaml_role_ids(yaml_path: Path) -> list[str]:
+        try:
+            data = yaml.safe_load(yaml_path.read_text())
+        except (OSError, yaml.YAMLError):
+            return []
+        roles = data.get("roles") if isinstance(data, dict) else None
+        return [str(r) for r in roles] if isinstance(roles, dict) else []
+
     def install(self, squad_id: str, source: Path, agents_dir: Path, force: bool = False) -> str:
         src = source / squad_id
         yaml_src = src / "squad.yaml"
         if not yaml_src.is_file():
             raise SquadError(f"no squad files at {src}")
         pairs = [(yaml_src, self.config_dir / f"{squad_id}.yaml")]
-        pairs += [(f, agents_dir / f.name) for f in sorted((src / "agents").glob("*.md"))]
+        own = sorted((src / "agents").glob("*.md"))
+        pairs += [(f, agents_dir / f.name) for f in own]
+        # Roles the yaml references that the squad does not ship itself come from
+        # source/shared/agents/ (one agent file serving several squads).
+        have = {f.stem for f in own}
+        for role_id in self._yaml_role_ids(yaml_src):
+            shared = source / "shared" / "agents" / f"{role_id}.md"
+            if role_id not in have and shared.is_file():
+                pairs.append((shared, agents_dir / shared.name))
         report: list[str] = []
         for from_, to in pairs:
             data = from_.read_bytes()
