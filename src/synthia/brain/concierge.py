@@ -21,6 +21,7 @@ from claude_agent_sdk import (
     StreamEvent,
 )
 
+from synthia import inbox
 from synthia.brain.config import BrainConfig
 from synthia.brain.fleet_context import FleetContext, wrap_context
 from synthia.brain.gate import Confirmer, make_can_use_tool
@@ -239,6 +240,10 @@ class Brain:
             self.jobs.store.prune()
         except OSError as exc:
             logger.warning("Could not prune old job records: %s", exc)
+        try:
+            inbox.prune()
+        except OSError as exc:
+            logger.warning("Could not prune the inbox: %s", exc)
         for rec in self.jobs.store.undelivered():
             self._job_events.put_nowait(JobFinished(rec))
         if self.squad_tail is not None and self._squad_task is None:
@@ -411,6 +416,11 @@ class Brain:
         await self._drain_leftover()
 
     async def events(self) -> AsyncIterator[SpokenEvent]:
+        """Finished jobs, each with its inbox item made and one short line to speak.
+
+        No model turn: the work lives in the inbox, and the line is a template. Routing
+        (see `Router.deliver_event`) decides whether it is spoken at the desk or texted.
+        """
         while True:
             finished = await self._job_events.get()
             rec = finished.job
@@ -418,16 +428,14 @@ class Brain:
             if cached is not None:
                 yield SpokenEvent(rec, cached)
                 continue
-            prompt = f"[job event] {rec.name} finished ({rec.status}): {rec.summary}"
-            try:
-                async with self._lock:
-                    await self._rollover_if_new_day()
-                    text = await self._ask(prompt)
-            except Exception:
-                logger.exception("Failed to deliver job event for %s", rec.name)
-                await self._job_events.put(finished)
-                await asyncio.sleep(EVENT_RETRY_DELAY_S)
-                continue
+            if not rec.inbox_id and not rec.id.startswith("squad-"):
+                try:
+                    rec.inbox_id = inbox.create_from_job(rec)["id"]
+                except Exception:
+                    logger.exception("Could not create an inbox item for %s", rec.name)
+            item = inbox.get(rec.inbox_id) if rec.inbox_id else None
+            ok = rec.ok is not False
+            text = inbox.desk_line(item, ok) if item else f"{rec.name} finished."
             self._spoken[rec.id] = text
             self.journal.job_finished(rec.name, rec.status, rec.summary, text)
             # Marked delivered only once a transport has actually pushed it (see ack).

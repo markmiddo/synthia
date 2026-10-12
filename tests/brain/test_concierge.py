@@ -5,6 +5,7 @@ from datetime import date
 import pytest
 from claude_agent_sdk import ResultMessage, StreamEvent
 
+from synthia import inbox
 from synthia.brain import concierge as concierge_module
 from synthia.brain.concierge import Brain, SpokenEvent
 from synthia.brain.config import BrainConfig
@@ -301,9 +302,11 @@ async def test_job_event_spoken_when_idle(tmp_path):
     assert isinstance(ev, SpokenEvent)
     assert ev.job.name == "morning"
     client = FakeClient.instances[-1]
-    assert client.queries[-1].startswith("[job event] morning finished")
-    assert "Briefing done" in client.queries[-1]
-    assert ev.text.strip() == "hello there"
+    # No model turn: the work is in the inbox and the spoken line is a template.
+    assert not any(q.startswith("[job event]") for q in client.queries)
+    assert ev.text == "morning is done. It's in your inbox."
+    item = inbox.get(ev.job.inbox_id)
+    assert item["source"] == "job" and item["summary_md"] == "Briefing done. Two meetings."
     # Not delivered until the transport has actually pushed it.
     assert brain.jobs.status(ev.job.id).delivered is False
     brain.ack(ev.job)
@@ -331,34 +334,6 @@ async def test_interrupt_drains_then_allows_send(tmp_path):
 
     text = await _collect(brain.send("again"))
     assert text.strip() == "hello"
-    await brain.stop()
-
-
-async def test_job_event_waits_until_reply_finishes(tmp_path):
-    async def runner(rec):
-        return 0, json.dumps({"is_error": False, "result": "Briefing done."}), ""
-
-    brain = Brain(_cfg(tmp_path), _yes, client_factory=BlockingClient, runner=runner)
-    await brain.start()
-
-    send_task = asyncio.create_task(_collect(brain.send("hi")))
-    await asyncio.sleep(0.05)
-    client = BlockingClient.instances[-1]
-    assert client.queries == ["hi"]
-
-    await brain.jobs.dispatch("morning", "/morning")
-    events = brain.events()
-    events_task = asyncio.create_task(events.__anext__())
-    await asyncio.sleep(0.05)
-    assert not any(q.startswith("[job event]") for q in client.queries)
-
-    client.release.set()
-    text = await asyncio.wait_for(send_task, 2)
-    ev = await asyncio.wait_for(events_task, 2)
-
-    assert text.strip() == "hello"
-    assert isinstance(ev, SpokenEvent)
-    assert any(q.startswith("[job event]") for q in client.queries)
     await brain.stop()
 
 
@@ -434,33 +409,6 @@ async def test_concurrent_interrupt_during_abandoned_send_drains_once(tmp_path):
 
     text = await asyncio.wait_for(_collect(brain.send("two")), 2)
     assert text.strip() == "hello"
-    await brain.stop()
-
-
-async def test_ask_retry_drains_dirty_stream(tmp_path, monkeypatch):
-    monkeypatch.setattr(concierge_module, "EVENT_RETRY_DELAY_S", 0.01)
-
-    async def runner(rec):
-        return 0, json.dumps({"is_error": False, "result": "Briefing done."}), ""
-
-    brain = Brain(_cfg(tmp_path), _yes, client_factory=DirtyStreamClient, runner=runner)
-    await brain.start()
-    events = brain.events()
-    await brain.jobs.dispatch("morning", "/morning")
-    ev = await asyncio.wait_for(events.__anext__(), 2)
-
-    client = FakeClient.instances[-1]
-    job_event_indices = [
-        i for i, c in enumerate(client.call_order) if c.startswith("query:[job event]")
-    ]
-    interrupt_indices = [i for i, c in enumerate(client.call_order) if c == "interrupt"]
-    assert client.interrupt_calls >= 1
-    assert len(job_event_indices) >= 2
-    assert interrupt_indices[0] < job_event_indices[1]
-
-    assert ev.text.strip() == "hello there"
-    brain.ack(ev.job)
-    assert brain.jobs.status(ev.job.id).delivered is True
     await brain.stop()
 
 

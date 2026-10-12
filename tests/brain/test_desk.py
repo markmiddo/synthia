@@ -176,6 +176,8 @@ class FakeTransport:
         self.delay = delay
         self.cancelled = False
         self.pushed = []
+        self.inboxed = []
+        self.present = True
         self.resolution = "unset"
 
     async def ask(self, question):
@@ -190,6 +192,13 @@ class FakeTransport:
 
     async def push_event(self, text):
         self.pushed.append(text)
+
+    async def push_inbox(self, item_id, title):
+        self.inboxed.append((item_id, title))
+
+    @property
+    def is_present(self):
+        return self.present
 
     def resolved(self, approved):
         self.resolution = approved
@@ -244,42 +253,102 @@ async def test_no_transport_denies():
     assert await r.confirm("q") is False
 
 
-async def test_mirror_event_copies_to_desk_once_and_never_raises():
-    r, desk, _ = _router(None)
-    ev = SimpleNamespace(job=SimpleNamespace(id="a", name="n"), text="Done.")
-    await r.mirror_event(ev)
-    await r.mirror_event(ev)
-    assert desk.pushed == ["Done."]
-    desk.has_clients = False
-    await r.mirror_event(SimpleNamespace(job=SimpleNamespace(id="b", name="n"), text="x"))
-    assert desk.pushed == ["Done."]
+def _ev(name="growth squad", jid="squad-1", ok=True, summary="Two blog drafts are ready."):
+    from synthia import inbox
+    from synthia.brain.jobs import JobRecord
+
+    rec = JobRecord(id=jid, name=name, prompt="", started="t", ok=ok, summary=summary)
+    rec.inbox_id = inbox.create_from_job(rec)["id"]
+    return SimpleNamespace(job=rec, text="Growth's posts are ready in your inbox.")
+
+
+async def _away(sent):
+    async def send(text):
+        sent.append(text)
+
+    return send
+
+
+async def test_desk_mode_pushes_inbox_frame_and_spoken_line_and_skips_telegram():
+    from synthia import inbox
+
+    r, desk, tg = _router(None)  # connected and present
+    ev = _ev()
+    sent = []
+    assert await r.deliver_event(ev, await _away(sent)) is True
+    assert desk.inboxed == [(ev.job.inbox_id, ev.job.name)]
+    assert desk.pushed == [ev.text]
+    assert sent == []
+    assert inbox.get(ev.job.inbox_id)["notified"] == {
+        "desk": True,
+        "telegram": False,
+        "email": False,
+    }
+
+
+async def test_away_mode_sends_one_short_text_and_leaves_the_desk_alone():
+    from synthia import inbox
+
+    r, desk, tg = _router(None)
+    desk.present = False
+    ev = _ev()
+    sent = []
+    assert await r.deliver_event(ev, await _away(sent)) is True
+    assert len(sent) == 1 and len(sent[0]) < 300
+    assert "Say 'email it'" in sent[0] and "Two blog drafts are ready." in sent[0]
+    assert desk.pushed == [] and desk.inboxed == []
+    assert inbox.get(ev.job.inbox_id)["notified"]["telegram"] is True
+    # A requeue after a lost ack does not text a second time.
+    assert await r.deliver_event(ev, await _away(sent)) is True
+    assert len(sent) == 1
+
+
+async def test_away_mode_with_no_client_connected():
+    r, desk, tg = _router(None, desk_connected=False)
+    sent = []
+    assert await r.deliver_event(_ev(), await _away(sent)) is True
+    assert len(sent) == 1
+
+
+async def test_away_send_failure_propagates_so_the_caller_retries():
+    from synthia import inbox
+
+    r, desk, tg = _router(None, desk_connected=False)
+    ev = _ev()
 
     async def boom(text):
-        raise RuntimeError("socket")
+        raise RuntimeError("telegram down")
 
-    desk.has_clients = True
-    desk.push_event = boom
-    await r.mirror_event(SimpleNamespace(job=SimpleNamespace(id="c", name="n"), text="x"))
+    with pytest.raises(RuntimeError):
+        await r.deliver_event(ev, boom)
+    assert inbox.get(ev.job.inbox_id)["notified"]["telegram"] is False
 
 
-async def test_mirror_event_reports_whether_the_desk_has_it():
-    r, desk, _ = _router(None)
-    ev = SimpleNamespace(job=SimpleNamespace(id="a", name="n"), text="Done.")
-    desk.has_clients = False
-    assert await r.mirror_event(ev) is False  # nobody to hear it: not delivered
+async def test_desk_only_with_idle_client_still_delivers_to_the_desk():
+    r, desk, _ = _router(None, with_telegram=False)
+    desk.present = False
+    assert await r.deliver_event(_ev()) is True
+    assert len(desk.pushed) == 1
 
-    desk.has_clients = True
+
+async def test_nobody_to_tell_means_not_delivered():
+    r, desk, _ = _router(None, desk_connected=False, with_telegram=False)
+    assert await r.deliver_event(_ev()) is False
+
+
+async def test_desk_push_failure_means_not_delivered_then_retry_delivers_once():
+    r, desk, _ = _router(None, with_telegram=False)
+    ev = _ev()
 
     async def boom(text):
         raise RuntimeError("socket")
 
     real, desk.push_event = desk.push_event, boom
-    assert await r.mirror_event(ev) is False  # push failed: not delivered
+    assert await r.deliver_event(ev) is False
     desk.push_event = real
-    assert await r.mirror_event(ev) is True
-    desk.has_clients = False
-    assert await r.mirror_event(ev) is True  # already copied: stays delivered across requeues
-    assert desk.pushed == ["Done."]
+    assert await r.deliver_event(ev) is True
+    assert await r.deliver_event(ev) is True  # already told: stays delivered across requeues
+    assert desk.pushed == [ev.text]
 
 
 async def test_losing_leg_is_told_the_winning_answer():
@@ -359,7 +428,7 @@ async def test_desk_only_pump_acks_only_when_the_desk_has_the_event(monkeypatch)
 
     monkeypatch.setattr("synthia.brain.concierge.EVENT_RETRY_DELAY_S", 0.01)
     r, desk, _ = _router(None, with_telegram=False)
-    ev = SimpleNamespace(job=SimpleNamespace(id="a", name="n"), text="Done.")
+    ev = SimpleNamespace(job=SimpleNamespace(id="a", name="n", inbox_id="", ok=True), text="Done.")
     calls = {"acked": [], "requeued": []}
 
     class B:
@@ -377,7 +446,98 @@ async def test_desk_only_pump_acks_only_when_the_desk_has_the_event(monkeypatch)
         raise RuntimeError("socket")
 
     desk.push_event = boom
+    ev.job.inbox_id = ""
     pump = asyncio.create_task(serve._pump_desk_events(B(), r))
     await asyncio.sleep(0.05)
     pump.cancel()
     assert calls["acked"] == [] and calls["requeued"] == [ev.job]
+
+
+# ---- presence ----
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+async def clocked(tmp_path):
+    clock = Clock()
+    d = DeskTransport(FakeBrain(), 0, tmp_path / "desk.token", confirm_timeout_s=1, clock=clock)
+    await d.start()
+    yield d, clock
+    await d.stop()
+
+
+async def _presence(ws, desk, active):
+    await ws.send(json.dumps({"type": "presence", "active": active}))
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if (desk._presence_at is not None) == active:
+            return
+
+
+async def test_not_present_without_a_client_or_a_signal(clocked):
+    desk, clock = clocked
+    assert desk.is_present is False
+    ws = await _client(desk)
+    assert desk.is_present is False  # connected, but nothing says Mark is here
+    await ws.close()
+
+
+async def test_presence_frame_counts_for_ten_minutes_then_lapses(clocked):
+    desk, clock = clocked
+    ws = await _client(desk)
+    await _presence(ws, desk, True)
+    assert desk.is_present is True
+    clock.now += 9 * 60
+    assert desk.is_present is True
+    clock.now += 2 * 60
+    assert desk.is_present is False
+    await ws.close()
+
+
+async def test_presence_inactive_withdraws_the_claim(clocked):
+    desk, clock = clocked
+    ws = await _client(desk)
+    await _presence(ws, desk, True)
+    await _presence(ws, desk, False)
+    assert desk.is_present is False
+    await ws.close()
+
+
+async def test_recent_desk_voice_turn_counts_for_thirty_minutes(clocked):
+    desk, clock = clocked
+    ws = await _client(desk)
+    await ws.send(json.dumps({"type": "say", "text": "hello"}))
+    await _until(ws, "reply_done")
+    clock.now += 29 * 60
+    assert desk.is_present is True
+    clock.now += 2 * 60
+    assert desk.is_present is False
+    await ws.close()
+
+
+async def test_present_requires_a_connected_client(clocked):
+    desk, clock = clocked
+    ws = await _client(desk)
+    await _presence(ws, desk, True)
+    await ws.close()
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if not desk.has_clients:
+            break
+    assert desk.is_present is False
+
+
+async def test_push_inbox_frame_shape(clocked):
+    desk, clock = clocked
+    ws = await _client(desk)
+    await desk.push_inbox("abc", "Growth: week of posts")
+    frame = await _until(ws, "inbox")
+    assert frame == {"type": "inbox", "id": "abc", "title": "Growth: week of posts"}
+    await ws.close()

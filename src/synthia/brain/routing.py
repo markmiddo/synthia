@@ -1,8 +1,14 @@
 """The one place that decides which transport hears what.
 
 Rules:
-- Telegram is the delivery of record for job events (acked only after its push); the desk
-  gets a best-effort copy when a client is connected. The desk never acks or blocks.
+- A finished job or squad always lands in the HUD Inbox first. Then, exactly one channel hears
+  about it, and only that channel's success acks the event (at-least-once):
+  - Desk mode (a desk client is connected and Mark is present: an active HUD presence frame
+    within 10 minutes, or a desk voice turn within 30): an `inbox` frame plus one short
+    spoken `event` line at the desk. Nothing goes to Telegram.
+  - Away mode: one short Telegram TEXT message (never a voice note, never a model turn).
+  - If Telegram cannot be used (desk-only serve, or no chat yet) and a desk client is
+    connected, the desk gets it even when Mark is not present; with neither, the event waits.
 - A permission question goes to the transport that started the turn. A turn with no origin
   (a job-event or housekeeping turn) asks on both, and the first real answer wins.
 - A desk turn whose client has gone falls back to Telegram rather than being lost.
@@ -13,7 +19,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
+
+from synthia import inbox
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +31,6 @@ class Router:
         self.desk = desk
         self.telegram = telegram
         self.brain: Any = None
-        # Job ids already copied to the desk, so a requeued event is not shown twice.
-        self._mirrored: set[str] = set()
 
     def _legs(self, origin: str | None) -> list[Any]:
         telegram = [self.telegram] if self.telegram is not None else []
@@ -70,20 +76,42 @@ class Router:
             journal.confirmation(question, approved)
         return approved
 
-    async def mirror_event(self, ev: Any) -> bool:
-        """Copy a finished-job event to the desk. Never raises, never acks.
+    async def deliver_event(
+        self, ev: Any, away_send: Callable[[str], Awaitable[None]] | None = None
+    ) -> bool:
+        """Route one finished-job event to the desk or, when Mark is away, to Telegram.
 
-        True when the desk has the event (now, or from an earlier attempt). False when
-        there was no client or the push failed, so a desk-only caller must not ack.
+        `away_send` sends one short text to Telegram (None when it cannot right now). True
+        means the event was delivered and the caller should ack it. False means nothing could
+        hear it yet, so the caller requeues. Exceptions from `away_send` propagate so the
+        caller can count failures.
         """
-        if ev.job.id in self._mirrored:
-            return True
-        if self.desk is None or not self.desk.has_clients:
+        rec = ev.job
+        item = inbox.get(rec.inbox_id) if rec.inbox_id else None
+        desk_up = self.desk is not None and self.desk.has_clients
+        if desk_up and (away_send is None or self.desk.is_present):
+            return await self._to_desk(ev, item)
+        if away_send is None:
             return False
+        if item is not None and (item.get("notified") or {}).get("telegram"):
+            return True  # sent before a restart or a failed ack; do not text twice
+        ok = rec.ok is not False
+        text = inbox.away_line(item, ok) if item is not None else ev.text
+        await away_send(text or f"{rec.name} finished.")
+        if item is not None:
+            inbox.mark_notified(item["id"], "telegram")
+        return True
+
+    async def _to_desk(self, ev: Any, item: dict[str, Any] | None) -> bool:
+        if item is not None and (item.get("notified") or {}).get("desk"):
+            return True
         try:
+            if item is not None:
+                await self.desk.push_inbox(item["id"], str(item.get("title") or ""))
             await self.desk.push_event(ev.text or f"{ev.job.name} finished.")
         except Exception:
-            logger.exception("desk copy of a job event failed")
+            logger.exception("desk delivery of a job event failed")
             return False
-        self._mirrored.add(ev.job.id)
+        if item is not None:
+            inbox.mark_notified(item["id"], "desk")
         return True

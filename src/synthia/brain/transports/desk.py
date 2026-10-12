@@ -5,11 +5,14 @@ Frames are JSON, one per websocket message. The first frame from a client must b
 
 client to brain:
     {"type":"say","text":...}  {"type":"interrupt"}  {"type":"confirm_reply","id":...,"yes":bool}
+    {"type":"presence","active":true|false}   (HUD window visible/focused; every 2 minutes)
 brain to client (broadcast to every authenticated client):
     {"type":"state","value":"idle|thinking|speaking"}  {"type":"delta","text":...}
     {"type":"reply_done","text":...}  {"type":"event","text":...}
     {"type":"confirm","id":...,"question":...}  {"type":"error","text":...}
     {"type":"confirm_done","id":...,"approved":true|false|null}   (null: nobody answered)
+    {"type":"inbox","id":...,"title":...}   (new item in the HUD Inbox; an "event" frame with
+                                              the spoken line follows it)
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import secrets
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
@@ -33,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 HOST = "127.0.0.1"
 AUTH_TIMEOUT_S = 5.0
+# Mark counts as at his desk for this long after the HUD's last "active" presence frame,
+# or after his last desk voice turn.
+PRESENCE_TTL_S = 10 * 60
+VOICE_TTL_S = 30 * 60
 # Close codes in the private-use range.
 CLOSE_UNAUTHORISED = 4401
 # Frames from a client are tiny JSON; refuse anything large.
@@ -60,8 +67,12 @@ class DeskTransport:
         token_file: Path,
         confirm_timeout_s: int,
         host: str = HOST,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.brain = brain
+        self._clock = clock
+        self._presence_at: float | None = None
+        self._voice_at: float | None = None
         self.port = port
         self.host = host
         self.token_file = token_file
@@ -78,6 +89,21 @@ class DeskTransport:
     @property
     def has_clients(self) -> bool:
         return bool(self._clients)
+
+    @property
+    def is_present(self) -> bool:
+        """Mark is at his desk: a client is connected and he showed up recently.
+
+        Recently means an active presence frame within PRESENCE_TTL_S, or a desk voice turn
+        within VOICE_TTL_S. A presence frame with active=false (window hidden or blurred)
+        withdraws the presence claim; a recent voice turn still counts.
+        """
+        if not self._clients:
+            return False
+        now = self._clock()
+        if self._presence_at is not None and now - self._presence_at <= PRESENCE_TTL_S:
+            return True
+        return self._voice_at is not None and now - self._voice_at <= VOICE_TTL_S
 
     @property
     def bound_port(self) -> int:
@@ -128,6 +154,10 @@ class DeskTransport:
     async def push_event(self, text: str) -> None:
         """Deliver a finished-job event to every connected client."""
         await self.broadcast({"type": "event", "text": text})
+
+    async def push_inbox(self, item_id: str, title: str) -> None:
+        """Tell every connected client a new item is waiting in the Inbox."""
+        await self.broadcast({"type": "inbox", "id": item_id, "title": title})
 
     # ---- confirmation (Confirmer for the brain's gate) ----
 
@@ -215,9 +245,12 @@ class DeskTransport:
         if kind == "say":
             text = str(frame.get("text", "")).strip()
             if text:
+                self._voice_at = self._clock()
                 task = asyncio.create_task(self._run_turn(text))
                 self._turns.add(task)
                 task.add_done_callback(self._turns.discard)
+        elif kind == "presence":
+            self._presence_at = self._clock() if frame.get("active") is True else None
         elif kind == "interrupt":
             await self.brain.interrupt("desk")
         elif kind == "confirm_reply":

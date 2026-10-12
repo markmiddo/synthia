@@ -21,11 +21,7 @@ async def _pump_desk_events(brain: Any, router: Router) -> None:
     while True:
         try:
             async for ev in brain.events():
-                if not router.desk.has_clients:
-                    brain.requeue(ev.job)
-                    await asyncio.sleep(EVENT_RETRY_DELAY_S)
-                    continue
-                if await router.mirror_event(ev):
+                if await router.deliver_event(ev):
                     brain.ack(ev.job)
                 else:
                     # The push failed: keep the event (its spoken text is cached) and retry.
@@ -103,7 +99,7 @@ def run_serve(cfg: BrainConfig) -> int:
         desk=desk,
     )
     router = Router(desk, telegram)
-    telegram.mirror_event = router.mirror_event
+    telegram.deliver_event = router.deliver_event
     brain = Brain(cfg, router.confirm)
     _attach_squad_tail(brain, cfg)
     router.brain = desk.brain = telegram.brain = brain

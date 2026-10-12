@@ -72,13 +72,15 @@ class TelegramTransport:
         confirm_timeout_s: int,
         work_dir: Path,
         desk: Any = None,
-        mirror_event: Callable[[Any], Awaitable[bool]] | None = None,
+        deliver_event: (
+            Callable[[Any, Callable[[str], Awaitable[None]] | None], Awaitable[bool]] | None
+        ) = None,
     ) -> None:
         self.brain = brain
         # When serving both transports the desk server's life is tied to this application's.
         self.desk = desk
-        # Best-effort copy of each job event to the desk; Telegram stays the delivery of record.
-        self.mirror_event = mirror_event
+        # Routes each job event to the desk or, when Mark is away, to a short text here.
+        self.deliver_event = deliver_event
         self.speech = speech
         self.allowed_users = set(allowed_users)
         self.chat_id = chat_id
@@ -264,8 +266,17 @@ class TelegramTransport:
 
     # ---- job events ----
 
+    async def _send_text(self, bot: Any, chat_id: int, text: str) -> None:
+        """One short plain text message. A timeout counts as sent: Telegram usually has it."""
+        try:
+            await bot.send_message(chat_id=chat_id, text=text)
+        except TimedOut:
+            logger.warning("text message timed out waiting for Telegram; assuming delivered")
+
     async def pump_events(self, bot: Any) -> None:
-        """Push finished-job events as voice notes, for the life of the process.
+        """Route finished-job events, for the life of the process.
+
+        Mark at his desk hears them there; away, he gets one short text message here.
 
         Restarts itself if `events()` raises: the pump is the only thing that tells Mark
         a job finished, so it must outlive a bad turn.
@@ -274,15 +285,23 @@ class TelegramTransport:
             try:
                 async for ev in self.brain.events():
                     try:
-                        if self.mirror_event is not None:
-                            await self.mirror_event(ev)
-                        if self.chat_id is None:
-                            # No chat yet (Mark has not messaged since boot); keep it.
-                            logger.warning("job event with no chat id; requeuing %s", ev.job.id)
+                        chat_id = self.chat_id
+                        away = None
+                        if chat_id is not None:
+
+                            async def away(text: str, chat_id: int = chat_id) -> None:
+                                await self._send_text(bot, chat_id, text)
+
+                        route = self.deliver_event
+                        if route is None:
+                            from synthia.brain.routing import Router
+
+                            route = Router(self.desk, self).deliver_event
+                        if not await route(ev, away):
+                            logger.warning("no way to deliver %s yet; requeuing", ev.job.id)
                             self.brain.requeue(ev.job)
                             await asyncio.sleep(EVENT_RETRY_DELAY_S)
                             continue
-                        await self._speak(bot, self.chat_id, ev.text or f"{ev.job.name} finished.")
                         self._push_failures.pop(ev.job.id, None)
                         self.brain.ack(ev.job)
                     except asyncio.CancelledError:
