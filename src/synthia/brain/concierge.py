@@ -21,6 +21,7 @@ from claude_agent_sdk import (
 )
 
 from synthia.brain.config import BrainConfig
+from synthia.brain.fleet_context import FleetContext, wrap_context
 from synthia.brain.gate import Confirmer, make_can_use_tool
 from synthia.brain.job_tools import build_jobs_server
 from synthia.brain.jobs import JobFinished, JobManager, JobRecord, JobStore, Runner, claude_runner
@@ -124,11 +125,13 @@ class Brain:
         client_factory: ClientFactory | None = None,
         runner: Runner | None = None,
         today: Callable[[], date] = date.today,
+        fleet: FleetContext | None = None,
     ) -> None:
         self.config = config
         self.confirm = confirm
         self._factory: ClientFactory = client_factory or (lambda o: ClaudeSDKClient(options=o))
         self._today = today
+        self.fleet = fleet or FleetContext()
         self.session_id: str | None = None
         self._session_date: str | None = None
         self._client: ClientLike | None = None
@@ -314,6 +317,14 @@ class Brain:
         self._session_date = self._session_date or self._today().isoformat()
         self._save_session()
 
+    async def _turn_prompt(self, text: str, origin: str | None) -> str:
+        """Mark's words, tagged and, for desk and Telegram turns, led by the live fleet block."""
+        tag = DESK_TAG if origin == "desk" else ""
+        if origin not in ("desk", "telegram"):
+            return tag + text
+        block = wrap_context(await self.fleet.summary())
+        return tag + block + text
+
     async def send(self, text: str, origin: str | None = None) -> AsyncIterator[str]:
         """Stream a reply to `text` as text chunks, one per finished text-only message.
 
@@ -331,7 +342,7 @@ class Brain:
             client = self._require_client()
             await self._drain_leftover()  # in case a previous turn was abandoned
             self.turn_origin = origin
-            prompt = DESK_TAG + text if origin == "desk" else text
+            prompt = await self._turn_prompt(text, origin)
             await client.query(prompt)
             self._in_flight = True
             self._reader_active = True
