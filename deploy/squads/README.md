@@ -5,7 +5,7 @@ Scheduled starts for the Office squad. They are **not enabled** by the repo; ena
 | Unit | When | What it runs |
 |------|------|--------------|
 | `synthia-squad-office-daily.timer` | weekdays 07:30 local | `synthia-squad start office "Daily board sweep: ..." --slug board-sweep` (nudges stay drafts) |
-| `synthia-squad-office-monthly.timer` | 1st of each month, 08:00 local | `synthia-squad start office "Monthly investor update for the previous month ..." --slug investor-update` |
+| `synthia-squad-office-monthly.timer` | 1st of each month, 08:00 local | `synthia-squad start office "Monthly development update for the previous month ..." --slug dev-update` |
 
 The release squad is on demand only (`synthia-squad start release "v3.2 ..."` or by voice).
 

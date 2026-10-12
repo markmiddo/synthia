@@ -1,5 +1,5 @@
 [Unit]
-Description=Synthia Office squad: monthly investor update, 1st of the month 08:00
+Description=Synthia Office squad: monthly development update, 1st of the month 08:00
 
 [Timer]
 OnCalendar=*-*-01 08:00

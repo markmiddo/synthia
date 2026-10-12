@@ -4,7 +4,7 @@ director: office-chief
 cap: 4                 # live specialists at once, director not counted
 cwd: ~/dev/eventflo
 roles:
-  office-chief:       {title: Chief of Staff, model: claude-opus-5-5, hires: [office-pm, office-investor, studio-designer]}
+  office-chief:       {title: Chief of Staff, model: claude-opus-5-5, hires: [office-pm, office-dev-release, studio-designer]}
   office-pm:          {title: Project Manager, model: claude-sonnet-5-5}
-  office-investor:    {title: Investor Update Writer, model: claude-sonnet-5-5}
+  office-dev-release:    {title: Development Release Writer, model: claude-sonnet-5-5}
   studio-designer:    {title: Designer, model: claude-sonnet-5-5}   # shared role: squads/shared/agents/studio-designer.md

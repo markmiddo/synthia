@@ -1,6 +1,6 @@
 [Unit]
-Description=Synthia Office squad: monthly investor update
+Description=Synthia Office squad: monthly development update
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/synthia-squad start office "Monthly investor update for the previous calendar month (the month before today's date). Draft the development update as a private Google Doc plus a one-page PDF, and list every number you are unsure of. Do not email or share anything." --slug investor-update
+ExecStart=%h/.local/bin/synthia-squad start office "Monthly development update for the previous calendar month (the month before today's date). Draft the development update as a private Google Doc plus a one-page PDF, and list every number you are unsure of. Do not email or share anything." --slug dev-update

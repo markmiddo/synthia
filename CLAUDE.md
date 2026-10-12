@@ -48,8 +48,8 @@ Synthia is a voice assistant + dev workstation companion for Linux with:
 - `docs/` - Documentation, specs, plans
 - `src/synthia/brain/` - mobile voice brain (Agent SDK concierge, job workers, Telegram transport); see `docs/brain.md`
 - `src/synthia/squads/` - squad engine (SDK-free): registry, job desks, hire/dismiss/stop, `synthia-squad` CLI; `src/synthia/herdr.py` wraps the herdr CLI
-- `squads/` - squad definitions installed with `synthia-squad install <squad>` (yaml plus Claude Code agent files): `growth` (blog), `office` (board sweep, investor update), `release` (Help Centre, release video); `squads/shared/agents/` holds roles several squads hire (`studio-designer`), installed with any squad whose yaml references them
-- `deploy/squads/` - systemd user timers for the Office squad (daily board sweep, monthly investor update); not enabled by default, see its README
+- `squads/` - squad definitions installed with `synthia-squad install <squad>` (yaml plus Claude Code agent files): `growth` (blog), `office` (board sweep, development update), `release` (Help Centre, release video); `squads/shared/agents/` holds roles several squads hire (`studio-designer`), installed with any squad whose yaml references them
+- `deploy/squads/` - systemd user timers for the Office squad (daily board sweep, monthly development update); not enabled by default, see its README
 - `deploy/brain/` - systemd units and install script for the brain on middo247; `deploy/brain/desktop/synthia-brain.service` runs it on the desktop (`serve`: Telegram plus the desk websocket)
 
 ## Brand
