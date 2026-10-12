@@ -52,8 +52,8 @@ SAFE_MCP_ACTION_PREFIXES = (
     "tavily_",
 )
 
-# The brain's own in-process job server; its tools are the brain's own API.
-_OWN_MCP_SERVER = "jobs"
+# The brain's own in-process servers (jobs, herdr); their tools are the brain's own API.
+_OWN_MCP_SERVERS = ("jobs", "herdr")
 
 
 def _mcp_parts(tool_name: str) -> tuple[str, str] | None:
@@ -184,7 +184,7 @@ def classify(tool_name: str, tool_input: dict[str, Any]) -> tuple[Decision, str]
     parts = _mcp_parts(tool_name)
     if parts is not None:
         server, action = parts
-        if server != _OWN_MCP_SERVER and not action.startswith(SAFE_MCP_ACTION_PREFIXES):
+        if server not in _OWN_MCP_SERVERS and not action.startswith(SAFE_MCP_ACTION_PREFIXES):
             return "confirm", f"connector action {action}"
     return "allow", "ok"
 

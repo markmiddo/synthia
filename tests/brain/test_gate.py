@@ -34,6 +34,8 @@ from synthia.brain.gate import classify, describe, make_can_use_tool
         ("mcp__eva-core__task_dispatch", {}, "confirm"),
         ("mcp__eva-core__job_list", {}, "allow"),
         ("mcp__jobs__dispatch_job", {}, "allow"),
+        ("mcp__herdr__start_squad", {}, "allow"),
+        ("mcp__herdr__close_agent", {}, "allow"),
         ("TodoWrite", {"todos": []}, "allow"),
     ],
 )

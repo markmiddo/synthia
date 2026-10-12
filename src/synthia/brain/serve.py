@@ -56,6 +56,15 @@ async def _serve_desk_only(desk: Any, brain: Any, router: Router) -> None:
         await brain.stop()
 
 
+def _attach_squad_tail(brain: Any, cfg: BrainConfig) -> None:
+    """Have the brain follow squad done signals; the offset lives in the brain state dir."""
+    from synthia.squads.engine import EVENTS_FILE
+    from synthia.squads.events import EventTail
+    from synthia.squads.registry import DEFAULT_ROOT
+
+    brain.squad_tail = EventTail(DEFAULT_ROOT / EVENTS_FILE, cfg.state_dir / "squad_events.offset")
+
+
 def run_serve(cfg: BrainConfig) -> int:
     from synthia.brain.cli import pull_repos
     from synthia.brain.concierge import Brain
@@ -70,6 +79,7 @@ def run_serve(cfg: BrainConfig) -> int:
         logger.warning("BRAIN_TELEGRAM_TOKEN is not set; serving the desk only")
         router = Router(desk, None)
         brain = Brain(cfg, router.confirm)
+        _attach_squad_tail(brain, cfg)
         router.brain = desk.brain = brain
         asyncio.run(_serve_desk_only(desk, brain, router))
         return 0
@@ -95,6 +105,7 @@ def run_serve(cfg: BrainConfig) -> int:
     router = Router(desk, telegram)
     telegram.mirror_event = router.mirror_event
     brain = Brain(cfg, router.confirm)
+    _attach_squad_tail(brain, cfg)
     router.brain = desk.brain = telegram.brain = brain
     app = telegram.build_app(cfg.telegram_token)
     logger.info("Synthia brain serving Telegram and the desk")

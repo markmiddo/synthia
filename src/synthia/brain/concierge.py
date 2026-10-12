@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -23,10 +24,14 @@ from claude_agent_sdk import (
 from synthia.brain.config import BrainConfig
 from synthia.brain.fleet_context import FleetContext, wrap_context
 from synthia.brain.gate import Confirmer, make_can_use_tool
+from synthia.brain.herdr_tools import build_herdr_server
 from synthia.brain.job_tools import build_jobs_server
 from synthia.brain.jobs import JobFinished, JobManager, JobRecord, JobStore, Runner, claude_runner
 from synthia.brain.journal import WalkJournal
 from synthia.brain.persona import build_system_prompt
+from synthia.brain.squad_events import run_squad_tail
+from synthia.squads.engine import Engine
+from synthia.squads.events import EventTail
 
 logger = logging.getLogger(__name__)
 
@@ -126,12 +131,17 @@ class Brain:
         runner: Runner | None = None,
         today: Callable[[], date] = date.today,
         fleet: FleetContext | None = None,
+        squads: Engine | None = None,
     ) -> None:
         self.config = config
         self.confirm = confirm
         self._factory: ClientFactory = client_factory or (lambda o: ClaudeSDKClient(options=o))
         self._today = today
         self.fleet = fleet or FleetContext()
+        self.squads = squads or Engine()
+        # Set by `serve` to follow squad done signals; None means no tail (tests, REPL).
+        self.squad_tail: EventTail | None = None
+        self._squad_task: asyncio.Task[None] | None = None
         self.session_id: str | None = None
         self._session_date: str | None = None
         self._client: ClientLike | None = None
@@ -196,7 +206,10 @@ class Brain:
             system_prompt=build_system_prompt(handover),
             skills="all",
             include_partial_messages=True,
-            mcp_servers={"jobs": build_jobs_server(self.jobs, self.journal.job_dispatched)},
+            mcp_servers={
+                "jobs": build_jobs_server(self.jobs, self.journal.job_dispatched),
+                "herdr": build_herdr_server(self.squads),
+            },
             allowed_tools=list(self.config.allowed_tools),
             permission_mode="default",
             can_use_tool=make_can_use_tool(self.confirm),
@@ -228,8 +241,15 @@ class Brain:
             logger.warning("Could not prune old job records: %s", exc)
         for rec in self.jobs.store.undelivered():
             self._job_events.put_nowait(JobFinished(rec))
+        if self.squad_tail is not None and self._squad_task is None:
+            self._squad_task = asyncio.create_task(run_squad_tail(self.squad_tail, self.requeue))
 
     async def stop(self) -> None:
+        if self._squad_task is not None:
+            self._squad_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._squad_task
+            self._squad_task = None
         await self.jobs.shutdown()
         if self._client is not None:
             await self._client.disconnect()
