@@ -135,6 +135,7 @@ class TestDefaultConfig:
             "tts_speed",
             "assistant_backend",
             "brain_desk_port",
+            "stt_source",
             "assistant_model",
             "conversation_memory",
             "assistant_personality",

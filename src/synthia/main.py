@@ -32,9 +32,10 @@ from synthia.config import (
 )
 from synthia.desk_voice import DeskVoice
 from synthia.display import get_display_server, is_wayland
-from synthia.hotkeys import create_hotkey_listener
+from synthia.hotkeys import DISABLED_HOTKEY, create_hotkey_listener
 from synthia.indicator import Status, TrayIndicator
 from synthia.llm_polish import TranscriptionPolisher
+from synthia.murmur_listener import UNAVAILABLE_LINE, MurmurListener
 from synthia.notifications import notify_assistant, notify_dictation, notify_error, notify_ready
 from synthia.output import type_text
 from synthia.sounds import SoundEffects
@@ -49,6 +50,18 @@ _DESK_TRAY_STATUS = {
     "speaking": Status.ASSISTANT,
     "ready": Status.READY,
 }
+
+
+def use_murmur_stt(config: dict[str, Any]) -> bool:
+    """Murmur hears the desk assistant key (only meaningful with the brain backend)."""
+    return config.get("assistant_backend") == "brain" and config.get("stt_source") == "murmur"
+
+
+def needs_local_stt(config: dict[str, Any]) -> bool:
+    """Whether Synthia must record and transcribe itself (so Whisper is worth loading)."""
+    if not use_murmur_stt(config):
+        return True
+    return bool(config.get("dictation_key", "none") != "none")
 
 
 class Synthia:
@@ -74,22 +87,31 @@ class Synthia:
         # self.tray.start()
         # print("✅ System tray indicator started")
 
-        # Initialize audio recorder
-        self.recorder = AudioRecorder(target_sample_rate=self.config["sample_rate"])
-        logger.info("Audio recorder initialized")
+        # Murmur hears the desk assistant key; with no dictation either, Synthia never
+        # records or transcribes, so the microphone and Whisper stay untouched.
+        self.murmur_mode = use_murmur_stt(self.config)
+        self.recorder: Optional[AudioRecorder] = None
+        self.transcriber: Optional[Transcriber] = None
+        if needs_local_stt(self.config):
+            # Initialize audio recorder
+            self.recorder = AudioRecorder(target_sample_rate=self.config["sample_rate"])
+            logger.info("Audio recorder initialized")
 
-        # Initialize transcriber (local Whisper or Google Cloud)
-        use_local_stt = self.config.get("use_local_stt", False)
-        self.transcriber = Transcriber(
-            credentials_path=credentials_path if not use_local_stt else None,
-            language=self.config["language"],
-            sample_rate=self.config["sample_rate"],
-            use_local=use_local_stt,
-            local_model=self.config.get("local_stt_model", "small"),
-        )
-        logger.info(
-            "Transcriber initialized (%s)", "local Whisper" if use_local_stt else "Google Cloud"
-        )
+            # Initialize transcriber (local Whisper or Google Cloud)
+            use_local_stt = self.config.get("use_local_stt", False)
+            self.transcriber = Transcriber(
+                credentials_path=credentials_path if not use_local_stt else None,
+                language=self.config["language"],
+                sample_rate=self.config["sample_rate"],
+                use_local=use_local_stt,
+                local_model=self.config.get("local_stt_model", "small"),
+            )
+            logger.info(
+                "Transcriber initialized (%s)",
+                "local Whisper" if use_local_stt else "Google Cloud",
+            )
+        else:
+            logger.info("Speech-to-text: Murmur (no local recorder or Whisper)")
 
         # Initialize TTS (local Piper or Google Cloud)
         use_local_tts = self.config.get("use_local_tts", False)
@@ -168,6 +190,9 @@ class Synthia:
         self.dictation_active = False
         self.assistant_active = False
         self.running = True
+        # Murmur's assistant key label for the HUD: None = unknown, "" = no key set.
+        self.talk_key: Optional[str] = None
+        self._last_status = "ready"
 
         # State file for GUI overlay communication
         self.state_file = os.path.join(
@@ -183,9 +208,14 @@ class Synthia:
         )
         self._update_state("ready")
 
+        # Murmur owns the assistant key in murmur mode: Synthia registers none of its own.
+        self.assistant_key_string = (
+            DISABLED_HOTKEY if self.murmur_mode else self.config["assistant_key"]
+        )
+
         # Parse hotkeys from config (for X11/pynput)
         self.dictation_key = self._parse_key(self.config["dictation_key"])
-        self.assistant_key = self._parse_key(self.config["assistant_key"])
+        self.assistant_key = self._parse_key(self.assistant_key_string)
 
         # Create hotkey listener (auto-detects Wayland vs X11)
         self.hotkey_listener = create_hotkey_listener(
@@ -196,8 +226,18 @@ class Synthia:
             dictation_key=self.dictation_key,
             assistant_key=self.assistant_key,
             dictation_key_string=self.config["dictation_key"],
-            assistant_key_string=self.config["assistant_key"],
+            assistant_key_string=self.assistant_key_string,
         )
+
+        self.murmur: Optional[MurmurListener] = None
+        if self.murmur_mode and self.desk_voice is not None:
+            self.murmur = MurmurListener(
+                on_started=self._on_murmur_started,
+                on_transcribed=self._on_murmur_transcribed,
+                on_cancelled=self._on_murmur_cancelled,
+                on_unavailable=self._on_murmur_unavailable,
+                on_hotkey=self._on_murmur_hotkey,
+            )
 
         # Display friendly key names
         dictation_display = (
@@ -206,7 +246,9 @@ class Synthia:
             else "off"
         )
         assistant_display = (
-            self.config["assistant_key"].replace("Key.", "").replace("_", " ").title()
+            "Murmur"
+            if self.murmur_mode
+            else self.config["assistant_key"].replace("Key.", "").replace("_", " ").title()
         )
 
         logger.info("Display server: %s", get_display_server())
@@ -230,7 +272,13 @@ class Synthia:
     def _update_state(self, status: str) -> None:
         """Update state file for GUI overlay communication."""
         try:
-            state = {"status": status, "recording": status == "recording"}
+            self._last_status = status
+            state = {
+                "status": status,
+                "recording": status == "recording",
+                "stt_source": "murmur" if self.murmur_mode else "synthia",
+                "talk_key": self.talk_key,
+            }
             with open(self.state_file, "w") as f:
                 json.dump(state, f)
         except Exception as e:
@@ -290,7 +338,9 @@ class Synthia:
                     # Reload config
                     new_config = load_config()
                     new_dictation_key = new_config["dictation_key"]
-                    new_assistant_key = new_config["assistant_key"]
+                    new_assistant_key = (
+                        DISABLED_HOTKEY if self.murmur_mode else new_config["assistant_key"]
+                    )
 
                     # Update the hotkey listener
                     self.hotkey_listener.update_keys(new_dictation_key, new_assistant_key)
@@ -307,6 +357,8 @@ class Synthia:
     def _on_dictation_press(self) -> None:
         """Handle dictation key press (Right Ctrl)."""
         if not self.running or self.dictation_active or self.assistant_active:
+            return
+        if self.recorder is None:
             return
 
         try:
@@ -332,9 +384,9 @@ class Synthia:
             if self.tray:
                 self.tray.set_status(Status.THINKING)
 
-            audio_data = self.recorder.stop_recording()
+            audio_data = self.recorder.stop_recording() if self.recorder else None
 
-            if audio_data:
+            if audio_data and self.transcriber:
                 text = self.transcriber.transcribe(audio_data)
                 if text:
                     # LLM polish for improved accuracy (optional)
@@ -363,6 +415,8 @@ class Synthia:
     def _on_assistant_press(self) -> None:
         """Handle assistant key press (Right Alt)."""
         if not self.running or self.assistant_active or self.dictation_active:
+            return
+        if self.recorder is None:
             return
 
         # A new press while she is talking cuts her off, then records the next question.
@@ -395,9 +449,9 @@ class Synthia:
             if self.tray:
                 self.tray.set_status(Status.THINKING)
 
-            audio_data = self.recorder.stop_recording()
+            audio_data = self.recorder.stop_recording() if self.recorder else None
 
-            if audio_data:
+            if audio_data and self.transcriber:
                 # Transcribe the command
                 text = self.transcriber.transcribe(audio_data)
 
@@ -453,6 +507,57 @@ class Synthia:
                 if self.tray:
                     self.tray.set_status(Status.READY)
 
+    # -- Murmur (stt_source: murmur) ------------------------------------------------
+
+    def _on_murmur_started(self) -> None:
+        """Murmur began recording the assistant key: same as pressing it."""
+        if not self.running or self.desk_voice is None:
+            return
+        # She stops talking so Mark can speak (a pending yes/no is kept alive).
+        self.desk_voice.begin_utterance()
+        self.assistant_active = True
+        self._update_state("recording")
+        if self.tray:
+            self.tray.set_status(Status.RECORDING)
+        # No start sound: Murmur plays its own.
+
+    def _on_murmur_transcribed(self, text: str, received_at: float) -> None:
+        """Murmur finished: same as releasing the key with a transcript (or nothing heard)."""
+        if not self.running or self.desk_voice is None:
+            return
+        self.assistant_active = False
+        text = (text or "").strip()
+        if not text:
+            self.desk_voice.end_utterance()
+            return
+        logger.info("Command: %s", text)
+        self.desk_voice.ask(text, released_at=received_at)
+        self._save_to_history(text, "assistant")
+
+    def _on_murmur_cancelled(self) -> None:
+        """Murmur dropped the recording (tap too short, error, paused): nothing to answer."""
+        self.assistant_active = False
+        if self.desk_voice is not None:
+            self.desk_voice.end_utterance()
+
+    def _on_murmur_unavailable(self) -> None:
+        """Murmur is not on the bus: say so once (the listener keeps retrying)."""
+        self.assistant_active = False
+        if self.desk_voice is not None:
+            self.desk_voice.end_utterance()
+        threading.Thread(
+            target=lambda: self.tts.speak(UNAVAILABLE_LINE, ignore_mute=True),
+            name="murmur-notice",
+            daemon=True,
+        ).start()
+
+    def _on_murmur_hotkey(self, label: Optional[str]) -> None:
+        """Remember Murmur's assistant key so the HUD can name it."""
+        if label == self.talk_key:
+            return
+        self.talk_key = label
+        self._update_state(self._last_status)
+
     def run(self) -> None:
         """Run the main keyboard listener loop."""
         logger.info("Use Ctrl+C to exit")
@@ -474,11 +579,16 @@ class Synthia:
             self.clipboard_monitor.start()
             logger.info("Clipboard monitor started")
 
+        if self.murmur:
+            self.murmur.start()
+
         # Start the hotkey listener (auto-detects Wayland vs X11)
         self.hotkey_listener.start()
         self.hotkey_listener.join()
 
         # Cleanup
+        if self.murmur:
+            self.murmur.stop()
         if self.clipboard_monitor:
             self.clipboard_monitor.stop()
         if self.tray:

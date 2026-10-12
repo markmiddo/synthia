@@ -36,6 +36,7 @@ dependencies = [
     "sounddevice>=0.4.6",
     "PyYAML>=6.0",
     "websockets>=13.0",
+    "jeepney>=0.8",
 ]
 
 [project.optional-dependencies]

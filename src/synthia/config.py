@@ -31,6 +31,9 @@ DEFAULT_CONFIG: ConfigDict = {
     # transcript to the synthia-brain desk websocket and speaks its streamed reply.
     "assistant_backend": "local",
     "brain_desk_port": 8766,
+    # Who hears the desk assistant key: "synthia" records and transcribes it here;
+    # "murmur" listens to Murmur's D-Bus signals (needs assistant_backend: brain).
+    "stt_source": "synthia",
     "assistant_personality": "You are a helpful Linux assistant. Keep responses brief and friendly.",
     # Credentials
     "google_credentials": "~/.config/synthia/google-creds.json",
@@ -82,6 +85,7 @@ VALID_HOTKEYS = {
 }
 VALID_SAMPLE_RATES = {8000, 16000, 22050, 44100, 48000}
 VALID_ASSISTANT_BACKENDS = {"local", "brain"}
+VALID_STT_SOURCES = {"synthia", "murmur"}
 VALID_STT_MODELS = {"tiny", "base", "small", "medium", "large"}
 
 # Keys that must be boolean
@@ -137,6 +141,14 @@ def validate_config(config: ConfigDict) -> list[str]:
             f"assistant_backend={backend!r} is not valid (using local). "
             f"Valid: {', '.join(sorted(VALID_ASSISTANT_BACKENDS))}"
         )
+    stt_source = config.get("stt_source")
+    if stt_source is not None and stt_source not in VALID_STT_SOURCES:
+        warnings.append(
+            f"stt_source={stt_source!r} is not valid (using synthia). "
+            f"Valid: {', '.join(sorted(VALID_STT_SOURCES))}"
+        )
+    elif stt_source == "murmur" and backend != "brain":
+        warnings.append("stt_source=murmur only works with assistant_backend: brain (ignored)")
     port = config.get("brain_desk_port")
     if port is not None and (not isinstance(port, int) or not 1 <= port <= 65535):
         warnings.append(f"brain_desk_port={port!r} must be a port number (1-65535)")
