@@ -189,8 +189,11 @@ def build_message(item: dict[str, Any], to: str = ALLOWED_RECIPIENT) -> EmailMes
     msg = EmailMessage()
     msg["To"] = ALLOWED_RECIPIENT
     msg["Subject"] = f"{item.get('title') or 'Synthia'} — for review"
-    plain = re.sub(r"<[^>]+>", "", re.sub(r"</(p|h\d|li|div|dd|dt)>", "\n", rendered.html))
-    msg.set_content(html.unescape(re.sub(r"<style.*?</style>", "", plain, flags=re.S)).strip())
+    # Drop the <head> (and its CSS) before stripping tags, or the CSS leads the plain-text
+    # part and becomes the preview line in Gmail.
+    body = re.sub(r"<head>.*?</head>", "", rendered.html, flags=re.S)
+    plain = re.sub(r"<[^>]+>", "", re.sub(r"</(p|h\d|li|div|dd|dt)>", "\n", body))
+    msg.set_content(re.sub(r"\n{3,}", "\n\n", html.unescape(plain)).strip())
     msg.add_alternative(rendered.html, subtype="html")
     html_part = msg.get_payload()[1]  # type: ignore[index]
     for cid, raw, mime, name in rendered.images:

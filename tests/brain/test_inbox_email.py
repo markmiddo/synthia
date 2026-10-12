@@ -210,3 +210,13 @@ async def test_email_tool_latest(item, monkeypatch):
     assert seen == [item["id"]] and out["content"][0]["text"] == "Emailed it."
     listed = await tools["list_inbox"].handler({})
     assert item["id"] in listed["content"][0]["text"]
+
+
+def test_plain_text_part_has_no_css():
+    from synthia.brain.inbox_email import build_message
+
+    item = {"title": "Growth: covers", "summary_md": "# Two posts\nReady.", "deliverables": []}
+    msg = build_message(item)
+    plain = msg.get_body(preferencelist=("plain",)).get_content()
+    assert "font:" not in plain and "{" not in plain
+    assert "Two posts" in plain
