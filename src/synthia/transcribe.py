@@ -6,8 +6,12 @@ import logging
 import os
 import sys
 import tempfile
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from google.cloud import speech
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +41,7 @@ class Transcriber:
         self.use_local = use_local
         self.local_model = local_model
         self.whisper_model = None
-        self.client = None
+        self.client: speech.SpeechClient | None = None
 
         # Post-process to remove filler words
         self.filler_words = {"uh", "um", "ah", "er", "hmm", "uh,", "um,", "ah,", "er,"}

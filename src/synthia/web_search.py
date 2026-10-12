@@ -20,9 +20,10 @@ class WebSearch:
         """Initialize Tavily client.
 
         Args:
-            api_key: Tavily API key. If not provided, loads from config.
+            api_key: Tavily API key. If None, loads from config. An explicit empty
+                string is treated as "no key" and raises rather than falling back.
         """
-        if not api_key:
+        if api_key is None:
             config = load_config()
             api_key = config.get("tavily_api_key", "")
 

@@ -10,6 +10,10 @@ import os
 import subprocess
 import tempfile
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from google.cloud import texttospeech
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +91,7 @@ class TextToSpeech:
         self.speed = speed
         self.voice_name = voice_name
         self.local_voice = os.path.expanduser(local_voice)
-        self.client = None
+        self.client: texttospeech.TextToSpeechClient | None = None
 
         if use_local:
             logger.info("Piper TTS initialized with voice: %s", os.path.basename(self.local_voice))
