@@ -5,7 +5,7 @@ An AI team that keeps the eventflo board tidy and drafts the monthly development
 ## What it does
 
 - **Daily board sweep** (`office-pm`): checks the GitHub boards against the project-management skill. Finds stale issues, wrong or missing Type, status that disagrees with the linked PR, missing labels or assignee, duplicates and issues in the wrong repo. It fixes the safe housekeeping itself (Type, column, labels, board placement) and logs every change. Closing is only ever a proposal. Output: `out/board-report.md` (what changed, what needs Mark, nudges) and `out/nudges.md`.
-- **Team nudges**: a short friendly message per teammate falling behind. **Drafts only** for the first week (until Mark says otherwise). Add the line `nudges: send` to a brief to let the PM send them as Slack DMs.
+- **Team nudges**: a short friendly message per teammate falling behind. **Sent by Eva** (Slack DM via `eva-dm`, never as Mark; Mark approved 13 Oct 2026). Add the line `nudges: send` to a brief to let the PM send them as Slack DMs.
 - **Monthly development update** (`office-dev-release`): the month's shipped work in plain language, labelled headline platform numbers if the sales tool is available, tone matched to earlier updates found in Drive. Output: a private Google Doc draft, `out/dev-update.md`, a list of numbers it was unsure of, and a one-page PDF from the designer.
 
 ## How to start it

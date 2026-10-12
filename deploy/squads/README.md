@@ -35,4 +35,4 @@ systemctl --user list-timers 'synthia-squad-*'
 
 ## Sending nudges
 
-The daily brief says nudges are drafts. To let the PM send Slack DMs, edit the `ExecStart` brief in the service file to add the line `nudges: send`. Do this only after you have read a week of `out/nudges.md`.
+The daily brief has `nudges: send` (Mark approved 13 Oct 2026): the PM sends each nudge as a Slack DM from Eva with `eva-dm`, never as Mark. Change it to `nudges: draft` in the `ExecStart` brief to go back to drafts.

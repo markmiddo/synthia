@@ -3,4 +3,4 @@ Description=Synthia Office squad: daily board sweep
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/synthia-squad start office "Daily board sweep: check the eventflo GitHub boards, fix safe housekeeping, list closures and decisions for Mark, and draft friendly nudges for anyone falling behind. nudges: draft" --slug board-sweep
+ExecStart=%h/.local/bin/synthia-squad start office "Daily board sweep: check the eventflo GitHub boards, fix safe housekeeping, list closures and decisions for Mark, and send friendly nudges from Eva to anyone falling behind. nudges: send" --slug board-sweep
