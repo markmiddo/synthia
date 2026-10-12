@@ -57,6 +57,7 @@ brain = [
     "google-cloud-speech>=2.0",
     "google-cloud-texttospeech>=2.0",
     "pyyaml>=6.0",
+    "websockets>=13.0",
 ]
 all = ["synthia[local,cloud,remote,search,tui,brain]"]
 dev = [

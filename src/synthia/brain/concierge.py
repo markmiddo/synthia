@@ -44,6 +44,9 @@ DRAIN_TIMEOUT_S = 15
 # How long to wait before retrying a job event whose delivery turn failed.
 EVENT_RETRY_DELAY_S = 30
 
+# Turns from the desk are tagged so the persona knows Mark can see the HUD.
+DESK_TAG = "[desk] "
+
 
 class ClientLike(Protocol):
     async def connect(self) -> None: ...
@@ -98,6 +101,9 @@ class Brain:
         # A send() generator body is currently the one consuming the stream.
         self._reader_active: bool = False
         self._job_events: asyncio.Queue[JobFinished] = asyncio.Queue()
+        # Which transport started the turn holding the lock ("telegram", "desk"), or
+        # None for a job-event or housekeeping turn. Read by confirmation routing.
+        self.turn_origin: str | None = None
         config.state_dir.mkdir(parents=True, exist_ok=True)
         self.journal = WalkJournal(config.journal_dir)
         self.jobs = JobManager(
@@ -262,8 +268,11 @@ class Brain:
         self._session_date = self._session_date or self._today().isoformat()
         self._save_session()
 
-    async def send(self, text: str) -> AsyncIterator[str]:
+    async def send(self, text: str, origin: str | None = None) -> AsyncIterator[str]:
         """Stream a reply to `text` as raw text deltas.
+
+        `origin` names the transport that started the turn; permission prompts raised
+        during it go back to that transport. Desk turns are tagged for the persona.
 
         Callers must fully consume this generator, or close it explicitly (e.g. via
         `contextlib.aclosing`), so the turn's ResultMessage gets drained and the
@@ -273,7 +282,9 @@ class Brain:
             await self._rollover_if_new_day()
             client = self._require_client()
             await self._drain_leftover()  # in case a previous turn was abandoned
-            await client.query(text)
+            self.turn_origin = origin
+            prompt = DESK_TAG + text if origin == "desk" else text
+            await client.query(prompt)
             self._in_flight = True
             self._reader_active = True
             streamed = False
@@ -294,8 +305,11 @@ class Brain:
                         self.journal.turn(text, "".join(spoken))
             finally:
                 self._reader_active = False
-                if self._in_flight:  # consumer abandoned us mid-turn
-                    await self._drain_leftover()
+                try:
+                    if self._in_flight:  # consumer abandoned us mid-turn
+                        await self._drain_leftover()
+                finally:
+                    self.turn_origin = None
 
     async def interrupt(self) -> None:
         if not self._in_flight:

@@ -92,3 +92,19 @@ then `systemctl --user enable --now brain-sync.timer`.
 The inbox script and its JSON are synced both ways by `brain-sync.timer`, and the SessionStart hook pulls
 `inbox.json` and lists open notes, so a reminder set by voice shows up in the next desktop session and
 can be ticked off from either side.
+
+## The desk transport
+
+`synthia-brain serve` runs Telegram and a localhost websocket (`desk.port` in `brain.yaml`, default
+8766) on one concierge, so the walk and the desk share one session, journal and memory. Without
+`BRAIN_TELEGRAM_TOKEN` it serves the desk only and never polls Telegram.
+
+- Auth: a fresh random token is written to `<state_dir>/desk.token` (mode 600) at every start. The
+  first frame a client sends must be `{"type":"auth","token":...}`; anything else is closed (4401).
+- Client to brain: `say`, `interrupt`, `confirm_reply` (`id`, `yes`).
+- Brain to every client: `state` (`idle|thinking|speaking`), `delta`, `reply_done`, `event` (job
+  results), `confirm` (`id`, `question`), `error`.
+- A permission question goes to the transport that started the turn. Job events go to the desk
+  while a client is connected, otherwise to Telegram.
+- Desktop unit: `deploy/brain/desktop/synthia-brain.service` (`serve`, `Restart=always`). Moving
+  the brain off middo247 is a runbook step: only one process may poll the Telegram token.

@@ -454,3 +454,17 @@ async def test_send_and_job_event_are_journaled(tmp_path):
     assert "**Synthia:** hello there" in text
     assert "**Job done:** morning — Briefing done." in text
     await brain.stop()
+
+
+async def test_desk_turn_is_tagged_and_origin_is_scoped_to_the_turn(tmp_path):
+    brain = Brain(_cfg(tmp_path), _yes, client_factory=FakeClient, runner=None)
+    await brain.start()
+    seen = []
+    async for _ in brain.send("what is going on", origin="desk"):
+        seen.append(brain.turn_origin)
+    assert set(seen) == {"desk"}
+    assert FakeClient.instances[-1].queries[-1] == "[desk] what is going on"
+    assert brain.turn_origin is None
+    await _collect(brain.send("hello", origin="telegram"))
+    assert FakeClient.instances[-1].queries[-1] == "hello"
+    await brain.stop()

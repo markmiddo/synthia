@@ -1,4 +1,4 @@
-"""synthia-brain entry point: text REPL for desktop testing, Telegram transport for the walk."""
+"""synthia-brain entry point: text REPL, Telegram (the walk), and `serve` (Telegram + desk)."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ async def _run_repl(cfg: BrainConfig) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="synthia-brain")
-    parser.add_argument("command", choices=["repl", "telegram"])
+    parser.add_argument("command", choices=["repl", "telegram", "serve"])
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("-v", "--verbose", action="store_true")
     try:
@@ -104,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "repl":
         asyncio.run(_run_repl(cfg))
         return 0
+    if args.command == "serve":
+        from synthia.brain.serve import run_serve
+
+        return run_serve(cfg)
+
     from synthia.brain.transports.telegram import run_telegram
 
     return run_telegram(cfg)

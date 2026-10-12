@@ -12,6 +12,7 @@ from synthia.brain.transports.telegram import TelegramTransport, is_yes
 class FakeBrain:
     def __init__(self):
         self.sent = []
+        self.origins = []
         self.interrupts = 0
         self.new_sessions = 0
         self._events: asyncio.Queue = asyncio.Queue()
@@ -28,8 +29,9 @@ class FakeBrain:
     def requeue(self, rec):
         self.requeued.append(rec)
 
-    async def send(self, text):
+    async def send(self, text, origin=None):
         self.sent.append(text)
+        self.origins.append(origin)
         yield "reply to "
         yield text
 
@@ -131,6 +133,7 @@ async def test_voice_roundtrip(parts):
     brain, speech, bot, tr, ctx = parts
     await tr.on_voice(_update(voice=True, bot=bot), ctx)
     assert brain.sent == ["run the morning ritual"]
+    assert brain.origins == ["telegram"]
     assert speech.spoken == ["reply to run the morning ritual"]
     assert bot.voices[-1][1] == "reply to run the morning ritual"
     assert bot.actions  # typing/recording chat actions were sent
@@ -288,3 +291,23 @@ async def test_confirmation_is_journaled(parts, tmp_path):
     assert await task is False
     text = brain.journal.today_path().read_text()
     assert "**Confirmation denied:** run git push origin main" in text
+
+
+async def test_pump_events_go_to_desk_when_a_client_is_connected(parts):
+    brain, speech, bot, tr, ctx = parts
+    from synthia.brain.concierge import SpokenEvent
+
+    pushed = []
+
+    async def push_event(text):
+        pushed.append(text)
+
+    tr.desk = SimpleNamespace(has_clients=True, push_event=push_event)
+    rec = JobRecord(id="a", name="morning", prompt="/morning", started="t", status="done")
+    pump = asyncio.create_task(tr.pump_events(bot))
+    await brain._events.put(SpokenEvent(rec, "Briefing is done."))
+    await asyncio.sleep(0.05)
+    pump.cancel()
+    assert pushed == ["Briefing is done."]
+    assert bot.voices == []
+    assert brain.acked == [rec]

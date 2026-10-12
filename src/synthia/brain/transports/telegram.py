@@ -61,8 +61,12 @@ class TelegramTransport:
         chat_id: int | None,
         confirm_timeout_s: int,
         work_dir: Path,
+        desk: Any = None,
     ) -> None:
         self.brain = brain
+        # When serving both transports: job events go to the desk while a client is
+        # connected, and the desk server's life is tied to this application's.
+        self.desk = desk
         self.speech = speech
         self.allowed_users = set(allowed_users)
         self.chat_id = chat_id
@@ -112,7 +116,7 @@ class TelegramTransport:
             return
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
         t0 = time.monotonic()
-        chunks = [c async for c in self.brain.send(text)]
+        chunks = [c async for c in self.brain.send(text, origin="telegram")]
         reply = "".join(chunks).strip()
         logger.info(
             "turn: in=%d chars out=%d chars %.1fs", len(text), len(reply), time.monotonic() - t0
@@ -215,6 +219,10 @@ class TelegramTransport:
             try:
                 async for ev in self.brain.events():
                     try:
+                        if self.desk is not None and self.desk.has_clients:
+                            await self.desk.push_event(ev.text or f"{ev.job.name} finished.")
+                            self.brain.ack(ev.job)
+                            continue
                         if self.chat_id is None:
                             # No chat yet (Mark has not messaged since boot); keep it.
                             logger.warning("job event with no chat id; requeuing %s", ev.job.id)
@@ -256,6 +264,8 @@ class TelegramTransport:
     async def _post_init(self, app: TelegramApp) -> None:
         self.bot = app.bot
         await self.brain.start()
+        if self.desk is not None:
+            await self.desk.start()
         # post_init runs before the application is "running", so use a plain
         # asyncio task and keep the reference; cancelled in _post_shutdown.
         self._pump_task = asyncio.create_task(self.pump_events(app.bot))
@@ -267,6 +277,8 @@ class TelegramTransport:
                 await self._pump_task
             except asyncio.CancelledError:
                 pass
+        if self.desk is not None:
+            await self.desk.stop()
         await self.brain.stop()
 
 
