@@ -102,3 +102,12 @@ def test_desk_port_from_nested_section_and_range_check(tmp_path, caplog):
     assert cfg.desk_port == 8766
     assert "desk.bogus" in caplog.text
     assert cfg.desk_token_file == cfg.state_dir / "desk.token"
+
+
+def test_worker_model_is_separate_from_the_talking_model(tmp_path):
+    p = tmp_path / "brain.yaml"
+    p.write_text("model: claude-sonnet-5-5\nworker_model: claude-opus-5-5\n")
+    cfg = load_brain_config(p)
+    assert cfg.model == "claude-sonnet-5-5"
+    assert cfg.worker_model == "claude-opus-5-5"
+    assert load_brain_config(tmp_path / "missing.yaml").worker_model is None

@@ -62,7 +62,10 @@ class BrainConfig:
     repos: list[Path] = field(default_factory=list)
     state_dir: Path = field(default_factory=lambda: DEFAULT_STATE_DIR)
     journal_dir: Path = field(default_factory=lambda: DEFAULT_JOURNAL_DIR)
+    # The talking brain (concierge). Kept fast; heavy work goes to workers.
     model: str | None = None
+    # Dispatched job workers; None means the Claude Code default from settings.
+    worker_model: str | None = None
     allowed_tools: list[str] = field(default_factory=lambda: list(DEFAULT_ALLOWED_TOOLS))
     worker_allowed_tools: list[str] = field(
         default_factory=lambda: list(DEFAULT_WORKER_ALLOWED_TOOLS)
